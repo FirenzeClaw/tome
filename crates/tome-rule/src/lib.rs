@@ -49,6 +49,7 @@ pub mod jsonpath;
 pub mod jsonpath_fn;
 pub mod jsonpath_shim;
 pub mod mainjs;
+pub mod markup_host;
 pub mod pipeline;
 pub mod regex;
 pub mod replace;

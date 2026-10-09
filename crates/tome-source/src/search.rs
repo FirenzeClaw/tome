@@ -475,8 +475,34 @@ impl SearchHit {
 /// `bookUrl` 是 `@css:.name>a@href`——这些选择器**以书为单位**书写，
 /// 在整页上求会命中所有书的字段混在一起。故必须先按 `bookList` 切出子树。
 pub fn parse_search_result(source: &Source, html: &str) -> Result<Vec<SearchHit>, SourceError> {
+    parse_search_result_with_js(source, html, None)
+}
+
+/// [`parse_search_result`] 的**带 JS 版本**（P4 遗留的收口：字段规则里的 `@js:`）。
+///
+/// # 为什么需要它
+///
+/// `ruleSearch` 的字段规则里可以直接写 `@js:`（公开文档：`@js:` 可以在任意
+/// 规则位置使用）。此前这条路径只支持 CSS 与替换链，`@js:` 会报
+/// `unsupported("js")`——而书源里"用 JS 拼书名"是真实用法。
+///
+/// # `js` 参数的含义
+///
+/// `Some` 时字段规则里的 `@js:` 能求值；`None` 时报结构化能力错误
+/// （FR-006），而不是静默给空。这与 [`search_one_source`] /
+/// [`search_one_source_with_js`] 的分工一致。
+pub fn parse_search_result_with_js(
+    source: &Source,
+    html: &str,
+    js: Option<&crate::js::SourceJsEngine>,
+) -> Result<Vec<SearchHit>, SourceError> {
     let rules = search_rules(source)?;
     let document = tome_rule::dom::Document::parse_html(html);
+    // 规则求值器：带 JS 时五类规则全可用，不带时 JS 类报能力错误
+    let engine = match js {
+        Some(engine) => tome_rule::css_post::RuleEngine::new(&document).with_js(engine.runtime()),
+        None => tome_rule::css_post::RuleEngine::new(&document),
+    };
 
     let book_list_rule = rules
         .get(search_rule_keys::BOOK_LIST)
@@ -489,15 +515,16 @@ pub fn parse_search_result(source: &Source, html: &str) -> Result<Vec<SearchHit>
 
     let mut hits = Vec::with_capacity(book_nodes.len());
     for node in &book_nodes {
-        let name = evaluate_field_in(node, &rules, search_rule_keys::NAME)?.unwrap_or_default();
+        let name =
+            evaluate_field_in(&engine, node, &rules, search_rule_keys::NAME)?.unwrap_or_default();
         // 书名为空的结果无法呈现，跳过——它是"选择器没命中"的典型表现，
         // 留在结果里会让用户看到一堆空条目。
         if name.trim().is_empty() {
             continue;
         }
 
-        let book_url =
-            evaluate_field_in(node, &rules, search_rule_keys::BOOK_URL)?.unwrap_or_default();
+        let book_url = evaluate_field_in(&engine, node, &rules, search_rule_keys::BOOK_URL)?
+            .unwrap_or_default();
         if book_url.trim().is_empty() {
             // 没有详情页地址的结果无法进入后续动作（详情/目录/正文全都
             // 以 `bookUrl` 为入口），故跳过并在调用方可见的层面体现为
@@ -507,20 +534,38 @@ pub fn parse_search_result(source: &Source, html: &str) -> Result<Vec<SearchHit>
 
         hits.push(SearchHit {
             name: name.trim().to_string(),
-            author: non_empty(evaluate_field_in(node, &rules, search_rule_keys::AUTHOR)?),
+            author: non_empty(evaluate_field_in(
+                &engine,
+                node,
+                &rules,
+                search_rule_keys::AUTHOR,
+            )?),
             cover_url: non_empty(evaluate_field_in(
+                &engine,
                 node,
                 &rules,
                 search_rule_keys::COVER_URL,
             )?),
-            intro: non_empty(evaluate_field_in(node, &rules, search_rule_keys::INTRO)?),
-            kind: non_empty(evaluate_field_in(node, &rules, search_rule_keys::KIND)?),
+            intro: non_empty(evaluate_field_in(
+                &engine,
+                node,
+                &rules,
+                search_rule_keys::INTRO,
+            )?),
+            kind: non_empty(evaluate_field_in(
+                &engine,
+                node,
+                &rules,
+                search_rule_keys::KIND,
+            )?),
             word_count: non_empty(evaluate_field_in(
+                &engine,
                 node,
                 &rules,
                 search_rule_keys::WORD_COUNT,
             )?),
             last_chapter: non_empty(evaluate_field_in(
+                &engine,
                 node,
                 &rules,
                 search_rule_keys::LAST_CHAPTER,
@@ -537,6 +582,7 @@ pub fn parse_search_result(source: &Source, html: &str) -> Result<Vec<SearchHit>
 /// 字段规则缺失时返回 `None`（而非空串）：调用方据此区分"规则没写"
 /// 与"规则写了但没命中"，前者是书源作者的省略，后者是选择器问题。
 fn evaluate_field_in(
+    engine: &tome_rule::css_post::RuleEngine<'_>,
     node: &tome_rule::dom::NodeRef,
     rules: &BTreeMap<String, String>,
     key: &str,
@@ -546,7 +592,8 @@ fn evaluate_field_in(
         // 让调用方区分"没写规则"与"写了但没命中"。
         return Ok(None);
     };
-    let values = tome_rule::css_post::evaluate_rule_in(node, rule)
+    let values = engine
+        .evaluate_in(node, rule)
         .map_err(|error| SourceError::rule_eval(&error, &format!("字段 `{key}`")))?;
     // 多值时取第一个：搜索结果的每个字段是单值（`@textNodes` 那种多值后缀
     // 在搜索规则里罕见，真出现时取首个与"每本书一个书名"的语义一致）。
@@ -621,7 +668,7 @@ pub fn search_one_source_with_js(
 
     // 第三步：解码 + 规则求值（不发请求）
     let decoded = decode_search_body(&response);
-    parse_search_result(&parsed.source, &decoded)
+    parse_search_result_with_js(&parsed.source, &decoded, js)
 }
 
 /// 把响应体解成文本（复用 charset 层的容错解码，FR-009）。
@@ -1099,6 +1146,102 @@ mod tests {
     }
 
     // ---------- 结果解析（不发请求） ----------
+
+    /// 一个**字段规则含 `@js:`** 的源（P4 遗留的验收用例）。
+    fn js_field_source() -> ParsedSource {
+        // 字段规则里直接写 `@js:`——书源里"用 JS 加工字段"的真实写法。
+        // 本用例用**纯计算**的 JS（不依赖宿主 API），把焦点保持在
+        // "字段里的 `@js:` 会不会经沙箱求值"这一条链路上。
+        let text = r#"{
+          "bookSourceName": "含 JS 字段的源",
+          "bookSourceUrl": "https://example.com",
+          "ruleSearch": "{\"bookList\":\"@css:li.item\",\"name\":\"@js:'书名-' + '一'\",\"bookUrl\":\"@css:.name>a@href\"}"
+        }"#;
+        parse_sources(text)
+            .expect("应解析成功")
+            .sources
+            .into_iter()
+            .next()
+            .expect("应有一条源")
+    }
+
+    #[test]
+    fn 字段规则里的_js_无引擎时报能力错误() {
+        // FR-006：没注入 JS 引擎时必须是**结构化能力错误**，不是空结果。
+        // 书源的 try/catch 靠它区分"本产品做不到"与"我写错了"。
+        let parsed = js_field_source();
+        let error = parse_search_result(&parsed.source, sample_html())
+            .expect_err("字段用了 @js: 而无引擎，应报错");
+        let rendered = format!("{error}");
+        assert!(
+            rendered.contains("js"),
+            "错误应指明是 JS 能力缺失：{rendered}"
+        );
+    }
+
+    #[test]
+    fn 字段规则里的_js_有引擎时可用() {
+        // P4 遗留的第一项的端到端验收：**字段规则**里的 `@js:` 真的跑起来。
+        let parsed = js_field_source();
+        let engine =
+            crate::js::SourceJsEngine::for_source(&parsed.source.id, &parsed.source, None, None)
+                .expect("应能建引擎");
+        // 只注册 JS 引擎内置的全局（不注册 java.*）——本测试验证的是
+        // "字段里的 `@js:` 会经沙箱求值"这条链路，而不是某个宿主 API。
+        let hits = parse_search_result_with_js(&parsed.source, sample_html(), Some(&engine))
+            .expect("应解析成功");
+        assert_eq!(hits.len(), 2);
+        assert_eq!(
+            hits[0].name, "书名-一",
+            "字段值应来自 `@js:` 的求值结果，而不是页面上选择器的结果"
+        );
+        assert_eq!(hits[1].name, "书名-一");
+    }
+
+    #[test]
+    fn 字段规则里的_js_能调宿主_api_经_markup_host() {
+        // P4 遗留的第二项的端到端验收：`java.getElement` 落到 tome-rule 的
+        // DOM 上（MarkupHost 的真实实现）。
+        // 字段规则里用 `java.getElement(标记, 规则)` —— 它落到 tome-rule 的
+        // DOM 上（MarkupHost 的真实实现）。标记用**单引号**书写以避免
+        // 与外层 JSON 的双引号嵌套。
+        let text = r#"{
+          "bookSourceName": "用 java.getElement 的源",
+          "bookSourceUrl": "https://example.com",
+          "ruleSearch": "{\"bookList\":\"@css:li.item\",\"name\":\"@js:java.getElement('<b>固定名</b>', '@css:b@text')\",\"bookUrl\":\"@css:.name>a@href\"}"
+        }"#;
+        let parsed = parse_sources(text)
+            .expect("应解析成功")
+            .sources
+            .into_iter()
+            .next()
+            .expect("应有一条源");
+        let engine =
+            crate::js::SourceJsEngine::for_source(&parsed.source.id, &parsed.source, None, None)
+                .expect("应能建引擎");
+        let markup: std::sync::Arc<dyn tome_js::api::data::MarkupHost> =
+            std::sync::Arc::new(tome_rule::markup_host::RuleMarkupHost::new());
+        engine
+            .with_context(move |ctx| {
+                let java = tome_js::Object::new(ctx.clone()).map_err(|error| format!("{error}"))?;
+                tome_js::api::data::register(&ctx, &java, Some(markup))
+                    .map_err(|error| format!("{error}"))?;
+                ctx.globals()
+                    .set("java", java)
+                    .map_err(|error| format!("{error}"))?;
+                Ok(())
+            })
+            .expect("应完成装配");
+
+        let hits = parse_search_result_with_js(&parsed.source, sample_html(), Some(&engine))
+            .expect("应解析成功");
+        assert_eq!(hits.len(), 2);
+        assert_eq!(
+            hits[0].name, "固定名",
+            "`java.getElement` 应真的解析标记并跑规则选择"
+        );
+        assert_eq!(hits[1].name, "固定名");
+    }
 
     #[test]
     fn 解析搜索结果() {

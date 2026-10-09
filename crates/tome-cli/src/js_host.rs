@@ -90,7 +90,7 @@ pub fn build_source_engine(
 /// | 宿主状态 | [`tome_js::api::state`] | T041 |
 /// | 不支持的能力 | [`tome_js::api::unsupported`] | T042 |
 ///
-/// # 两处需要显式传入的宿主
+/// # 三处需要显式传入的宿主
 ///
 /// `net` 与 `data` 的注册接受一个"能力句柄"：
 ///
@@ -100,10 +100,9 @@ pub fn build_source_engine(
 /// 本函数从**宿主桥**里取出它们，而不是再要一遍参数——那样组合根就
 /// 只需在一处（`HostBridge`）配置能力，避免"两处配置不一致"。
 ///
-/// `MarkupHost` 在本切片**尚未接线**（它需要 `tome-rule` 的 DOM 实现，
-/// 而那是 T039 定义的 trait）。故这里传 `None`——书源调用网页选择类
-/// 入口时会得到结构化能力错误（`capability = "markup"`），
-/// 而不是"未定义的方法"。那比静默失败好（FR-006 的目的）。
+/// `MarkupHost` 由 [`tome_rule::markup_host::RuleMarkupHost`] 提供
+/// （P4 遗留的收口）：`java.getElement` / `java.getElements` 因此真的落到
+/// 规则引擎的 DOM 上，而不是抛能力错误。
 pub fn register_host_api(ctx: &Ctx<'_>) -> Result<(), String> {
     let java =
         tome_js::Object::new(ctx.clone()).map_err(|error| format!("建 java 对象失败：{error}"))?;
@@ -129,8 +128,8 @@ pub fn register_host_api(ctx: &Ctx<'_>) -> Result<(), String> {
     // 摘要与加密（T038）
     registered += tome_js::api::crypto::register(ctx, &java)
         .map_err(|error| format!("注册加密类 API 失败：{error}"))?;
-    // 结构化数据（T039）——MarkupHost 尚未接线，见本函数的文档
-    registered += tome_js::api::data::register(ctx, &java, None)
+    // 结构化数据（T039）——MarkupHost 由 tome-rule 实现（P4 遗留收口）
+    registered += tome_js::api::data::register(ctx, &java, Some(markup_host()))
         .map_err(|error| format!("注册数据类 API 失败：{error}"))?;
     // 正则/时间/杂项（T040）
     registered += tome_js::api::util::register(ctx, &java)
@@ -157,6 +156,18 @@ pub fn register_host_api(ctx: &Ctx<'_>) -> Result<(), String> {
         "宿主 API 的注册数量异常（{registered}），检查各模块的 register 是否都被调用"
     );
     Ok(())
+}
+
+/// 网页标记解析能力的实现（`RuleMarkupHost` 的无状态共享实例）。
+///
+/// # 为什么是"每次新建"而不是全局单例
+///
+/// `RuleMarkupHost` 是零状态类型（`Copy`），构造它没有任何开销——
+/// 不需要一个 `OnceLock` 来"省下"这次构造。而全局单例会让
+/// "本进程用了哪个 MarkupHost"变成隐式事实，与 A3（禁止全局 CONFIG
+/// 单例）的取向相反。
+fn markup_host() -> Arc<dyn tome_js::api::data::MarkupHost> {
+    Arc::new(tome_rule::markup_host::RuleMarkupHost::new())
 }
 
 /// 为一个纯脚本源建执行器（T044）。

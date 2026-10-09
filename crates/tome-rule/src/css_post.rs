@@ -721,6 +721,174 @@ fn matching_open_bracket(text: &str) -> Option<usize> {
     None
 }
 
+/// 规则求值的统一入口：**五类语法**都能求值（含可选的 JS 引擎）。
+///
+/// # 为什么需要一个"引擎"对象而不是自由函数
+///
+/// 五类规则里有两类需要**外部能力**：
+///
+/// | 类型 | 需要什么 | 为什么不能自带 |
+/// |---|---|---|
+/// | `@js:` | JS 沙箱（[`crate::js_bridge::JobRuntime`]） | 建 runtime 有实打实的开销，不该每次求值都建 |
+/// | `@json:` | 无（纯计算） | —— |
+/// | `@XPath:` | 无（跑同一棵 DOM） | —— |
+///
+/// 把 JS 运行时挂在对象上（而不是每次调用传参），让调用方的签名保持干净；
+/// 而"没注入 JS 时怎么办"有明确定义：报 `unsupported("js")` 结构化错误
+/// （FR-006），不是静默失败。
+///
+/// # 这个类型解决了什么（P4 遗留）
+///
+/// tasks.md 的「Phase 4 遗留」原文：
+///
+/// > **字段规则里的 `@js:` 尚未接 JS**：`@js:` 在 `searchUrl` 插值里已可用，
+/// > 但五类规则字段（`ruleSearch` 等）里的 `@js:` 仍由 `css_post` 求值、
+/// > 报 `unsupported("js")`。接线需要给 `css_post` 一个可选的 JS 引擎参数。
+///
+/// 本类型就是那个参数。做法与 `parse_search_spec_with_js` 同源：
+/// 引擎是 `Option`，`None` 时 JS 类规则报能力错误。
+pub struct RuleEngine<'a> {
+    /// 文档（CSS 与 XPath 跑在它上面）
+    document: &'a Document,
+    /// 可选的 JS 运行时（`None` 时 `@js:` 报能力错误）
+    js: Option<&'a crate::js_bridge::JobRuntime>,
+}
+
+impl<'a> RuleEngine<'a> {
+    /// 建一个没有 JS 能力的求值器（纯 CSS/XPath/JSONPath/正则/Default）。
+    pub fn new(document: &'a Document) -> Self {
+        Self { document, js: None }
+    }
+
+    /// 挂上 JS 运行时（`@js:` 类规则因此可用）。
+    pub fn with_js(mut self, js: &'a crate::js_bridge::JobRuntime) -> Self {
+        self.js = Some(js);
+        self
+    }
+
+    /// 是否具备 JS 求值能力。
+    pub fn has_js(&self) -> bool {
+        self.js.is_some()
+    }
+
+    /// 求值一条规则（不限定求值起点：文档根）。
+    ///
+    /// [DONE] 五类规则的统一入口。
+    pub fn evaluate(&self, rule: &str) -> Result<Vec<String>, crate::error::RuleError> {
+        let (subject, chain) = split_chain(rule);
+        let values = self.evaluate_subject(None, &subject)?;
+        Ok(apply_chain(values, &chain))
+    }
+
+    /// 在**子树内**求值（搜索结果的字段规则用）。
+    pub fn evaluate_in(
+        &self,
+        root: &crate::dom::NodeRef,
+        rule: &str,
+    ) -> Result<Vec<String>, crate::error::RuleError> {
+        let (subject, chain) = split_chain(rule);
+        let values = self.evaluate_subject(Some(root), &subject)?;
+        Ok(apply_chain(values, &chain))
+    }
+
+    /// 求值规则的**主体部分**（不看替换链）。
+    ///
+    /// `root` 为 `None` 表示从文档根起（等价于 `evaluate_rule_subject`）。
+    fn evaluate_subject(
+        &self,
+        root: Option<&crate::dom::NodeRef>,
+        rule: &str,
+    ) -> Result<Vec<String>, crate::error::RuleError> {
+        use crate::dispatch::{dispatch_prefix, RuleKind};
+
+        // `@webjs:` 必须先判（理由见 `evaluate_rule_subject` 的同款说明）
+        if crate::js_bridge::is_webjs_prefix(rule) {
+            return Err(crate::js_bridge::webjs_unsupported_error("rule"));
+        }
+
+        let dispatched = dispatch_prefix(rule);
+        match dispatched.kind {
+            RuleKind::Css | RuleKind::Default | RuleKind::ExplicitDefault => {
+                let body = if dispatched.reversed {
+                    format!("-{}", dispatched.body)
+                } else {
+                    dispatched.body.clone()
+                };
+                match root {
+                    Some(root) => evaluate_css_body_in(root, &body),
+                    None => evaluate_css_body(self.document, &body),
+                }
+            }
+            RuleKind::JsonPath => self.evaluate_json_path(&dispatched.body),
+            RuleKind::XPath => self.evaluate_xpath(root, &dispatched.body),
+            RuleKind::JavaScript => self.evaluate_javascript(&dispatched.body),
+            RuleKind::RegexAllInOne => {
+                // 正则 AllInOne 的输入是**上一段的结果**，规则本身不含输入。
+                // 单独一条 `:regex` 规则没有可作用的文本，故在此要求调用方
+                // 用替换链形态（`主体##regex##替换`）或 `@js:` 组合。
+                Err(crate::error::RuleError::syntax(
+                    "正则 AllInOne（`:` 开头）不能单独求值——它需要一段被匹配的文本。\
+                     请用替换链形态（`主体##正则##替换`）或 `@js:` 组合"
+                        .to_string(),
+                ))
+            }
+        }
+    }
+
+    /// `@json:` —— 在文档的**文本**上跑 JSONPath。
+    ///
+    /// # 为什么取"文档文本"而不是"文档元素文本"
+    ///
+    /// JSON 规则作用的对象是**接口返回的 JSON 文本**，而书源的 JSON 源
+    /// 常把整个响应体塞进一个隐藏元素或直接交给 `@js:`。本层的入口是
+    /// `&Document`（HTML 语义），故此处取文档的整体文本——那正是
+    /// "响应体被当作 HTML 解析后剩下的文本"。
+    ///
+    /// ## 真正的 JSON 源走别的路
+    ///
+    /// 接口型书源的响应体**不是 HTML**，调用方应当用
+    /// [`crate::jsonpath::evaluate`] 直接喂 JSON 文本，而不是经本方法
+    /// （经 HTML 解析会破坏 JSON 里的 `<` 之类字符）。本方法只服务
+    /// "JSON 片段嵌在 HTML 里"的少见形态。
+    fn evaluate_json_path(&self, expression: &str) -> Result<Vec<String>, crate::error::RuleError> {
+        let text = self.document.root().text();
+        crate::jsonpath::evaluate(&text, expression)
+    }
+
+    /// `@XPath:` —— 跑在与 CSS 同一棵 DOM 上（research R2 的核心决策）。
+    fn evaluate_xpath(
+        &self,
+        root: Option<&crate::dom::NodeRef>,
+        expression: &str,
+    ) -> Result<Vec<String>, crate::error::RuleError> {
+        match root {
+            Some(root) => crate::xpath::evaluate_in(root, expression),
+            None => crate::xpath::evaluate(self.document, expression),
+        }
+    }
+
+    /// `@js:` —— 交给 JS 运行时求值。
+    ///
+    /// # 未注入 JS 时的行为（FR-006）
+    ///
+    /// 报**结构化能力错误**（`capability = "js"`），不是"未定义"或空结果。
+    /// 书源的 `try/catch` 降级逻辑依赖这个标识——它据此知道"这条路走不通
+    /// 是因为本产品没有 JS 能力，而不是我的规则写错了"。
+    fn evaluate_javascript(&self, fragment: &str) -> Result<Vec<String>, crate::error::RuleError> {
+        let Some(runtime) = self.js else {
+            return Err(crate::error::RuleError::unsupported(
+                "js",
+                "规则中的 @js:（本次求值未注入 JS 引擎）",
+            ));
+        };
+        let script = crate::js_bridge::wrap_inline_script(fragment);
+        match runtime.eval(&script) {
+            Ok(value) => Ok(vec![value.text]),
+            Err(error) => Err(crate::js_bridge::SandboxErrorExt::into_rule_error(error)),
+        }
+    }
+}
+
 /// 便捷：把一条规则应用到一组节点上，产出字符串列表。
 ///
 /// 接受完整的书源规则形态（都要支持）：
@@ -736,6 +904,9 @@ fn matching_open_bracket(text: &str) -> Option<usize> {
 /// **只接受 CSS 与 Default 两类**——其余类型（JSONPath/XPath/JS）在此产出
 /// 结构化「不支持能力」错误（FR-006），而不是把 `$.a` 当 CSS 选择器去解析后
 /// 报一个无关的语法错。
+///
+/// 需要五类全支持（含 `@json:` / `@XPath:` / `@js:`）的调用方用
+/// [`RuleEngine`]——它带可选的 JS 运行时，且能跑 JSONPath 与 XPath。
 pub fn evaluate_rule(
     document: &Document,
     rule: &str,
@@ -1498,6 +1669,173 @@ mod tests {
         assert_eq!(
             evaluate_rule(&document, "p@attr(nope)").expect("应求值成功"),
             Vec::<String>::new()
+        );
+    }
+
+    // ---------- RuleEngine：五类规则的统一入口（P4 遗留的收口） ----------
+
+    #[test]
+    fn 引擎支持css与default() {
+        let document = Document::parse_html(r#"<div class="n"><a href="/1">一</a></div>"#);
+        let engine = RuleEngine::new(&document);
+        assert_eq!(
+            engine.evaluate("@css:.n>a@href").expect("应求值成功"),
+            vec!["/1"]
+        );
+        assert_eq!(engine.evaluate("a@text").expect("应求值成功"), vec!["一"]);
+    }
+
+    #[test]
+    fn 引擎支持xpath() {
+        // research R2 的核心决策：XPath 跑在与 CSS 同一棵 DOM 上
+        let document = Document::parse_html(r#"<ul><li>一</li><li>二</li></ul>"#);
+        let engine = RuleEngine::new(&document);
+        assert_eq!(
+            engine.evaluate("@XPath://li").expect("应求值成功"),
+            vec!["一", "二"]
+        );
+        // 隐式前缀（`//` 开头）
+        assert_eq!(engine.evaluate("//li[2]").expect("应求值成功"), vec!["二"]);
+        // CSS 与 XPath 在同一个文档上给出一致的结果
+        assert_eq!(
+            engine.evaluate("@css:li").expect("应求值成功"),
+            engine.evaluate("@XPath://li").expect("应求值成功"),
+            "两个引擎不该系统性分叉"
+        );
+    }
+
+    #[test]
+    fn 引擎支持jsonpath() {
+        // JSON 片段嵌在 HTML 文本里（本方法的服务对象，见其文档）
+        let document = Document::parse_html(r#"{"list":[{"n":"a"},{"n":"b"}]}"#);
+        let engine = RuleEngine::new(&document);
+        let values = engine.evaluate("@json:$.list[*].n").expect("应求值成功");
+        assert_eq!(values, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn 未注入js时_js规则报能力错误() {
+        // FR-006：未注入 JS 引擎时必须是**结构化能力错误**，
+        // 而不是空结果——书源的 try/catch 靠这个标识选降级路径。
+        let document = Document::parse_html("<p>x</p>");
+        let engine = RuleEngine::new(&document);
+        assert!(!engine.has_js());
+
+        let error = engine.evaluate("@js:1+1").expect_err("应报能力错误");
+        match error.to_error_kind() {
+            tome_core::ErrorKind::UnsupportedCapability { capability } => {
+                assert_eq!(capability.capability_id(), "js");
+            }
+            other => panic!("应产出 UnsupportedCapability，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn 注入js后字段规则里的_js_可用() {
+        // 这是 P4 遗留的第一项：**字段规则**里的 `@js:` 要能跑。
+        // 此前只有 `searchUrl` 插值里的 `@js:` 可用。
+        let document = Document::parse_html(r#"<div class="n"><a href="/b/1">一</a></div>"#);
+        let runtime =
+            crate::js_bridge::JobRuntime::new(tome_js::Limits::default()).expect("应能建沙箱");
+        let engine = RuleEngine::new(&document).with_js(&runtime);
+        assert!(engine.has_js());
+
+        // 纯计算
+        assert_eq!(engine.evaluate("@js:1+1").expect("应求值成功"), vec!["2"]);
+        // 表达式形态
+        assert_eq!(
+            engine.evaluate("@js:'a'+'b'").expect("应求值成功"),
+            vec!["ab"]
+        );
+        // 语句块形态
+        assert_eq!(
+            engine.evaluate("@js:var x = 3; x * 2").expect("应求值成功"),
+            vec!["6"]
+        );
+    }
+
+    #[test]
+    fn 字段规则里的_js_能参与加工链() {
+        // 端到端：字段规则是 `@js:` + 替换链的形态（书源里常见）
+        let document = Document::parse_html("<p>x</p>");
+        let runtime =
+            crate::js_bridge::JobRuntime::new(tome_js::Limits::default()).expect("应能建沙箱");
+        let engine = RuleEngine::new(&document).with_js(&runtime);
+        assert_eq!(
+            engine
+                .evaluate(r"@js:'/book/1'##^##https://x.com")
+                .expect("应求值成功"),
+            vec!["https://x.com/book/1"]
+        );
+    }
+
+    #[test]
+    fn js错误映射为规则错误() {
+        let document = Document::parse_html("<p>x</p>");
+        let runtime =
+            crate::js_bridge::JobRuntime::new(tome_js::Limits::default()).expect("应能建沙箱");
+        let engine = RuleEngine::new(&document).with_js(&runtime);
+        let error = engine
+            .evaluate("@js:throw new Error('boom')")
+            .expect_err("应报错");
+        assert!(
+            format!("{error}").contains("boom"),
+            "应保留脚本的原始信息：{error}"
+        );
+    }
+
+    #[test]
+    fn 引擎在子树内求值五类规则() {
+        let document = Document::parse_html(
+            r#"<ul><li class="i"><a href="/1">一</a></li><li class="i"><a href="/2">二</a></li></ul>"#,
+        );
+        let engine = RuleEngine::new(&document);
+        let first = crate::css::select_in_document(
+            &document,
+            &crate::css::compile("li.i").expect("应编译"),
+        )
+        .into_iter()
+        .next()
+        .expect("应有 li");
+
+        assert_eq!(
+            engine.evaluate_in(&first, "a@href").expect("应求值成功"),
+            vec!["/1"],
+            "子树内的 CSS"
+        );
+        assert_eq!(
+            engine
+                .evaluate_in(&first, "@XPath:.//a")
+                .expect("应求值成功"),
+            vec!["一"],
+            "子树内的 XPath（相对路径）"
+        );
+    }
+
+    #[test]
+    fn webjs在引擎里仍报能力错误() {
+        let document = Document::parse_html("<p>x</p>");
+        let runtime =
+            crate::js_bridge::JobRuntime::new(tome_js::Limits::default()).expect("应能建沙箱");
+        let engine = RuleEngine::new(&document).with_js(&runtime);
+        let error = engine.evaluate("@webjs:1+1").expect_err("应报能力错误");
+        match error.to_error_kind() {
+            tome_core::ErrorKind::UnsupportedCapability { capability } => {
+                assert_eq!(capability.capability_id(), "webView");
+            }
+            other => panic!("应产出 webView 能力错误，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn 正则allinone单独求值报语法错() {
+        // 它需要"被匹配的文本"，单独一条没有输入——报错比静默返回空好
+        let document = Document::parse_html("<p>x</p>");
+        let engine = RuleEngine::new(&document);
+        let error = engine.evaluate(":href=\"(/x)\"").expect_err("应报错");
+        assert!(
+            format!("{error}").contains("正则 AllInOne"),
+            "错误应说明原因：{error}"
         );
     }
 }

@@ -1,4 +1,4 @@
-//! tome-net 的错误类型与接缝映射（tasks.md T013 基础件）
+//! [DONE] tome-net 的错误类型与接缝映射（tasks.md T013 基础件）
 //!
 //! # 为什么本 crate 自带错误类型
 //!

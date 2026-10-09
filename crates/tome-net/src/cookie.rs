@@ -1,4 +1,4 @@
-//! Cookie jar：按源隔离、可持久化序列化（tasks.md T016 / FR-008）
+//! [DONE] Cookie jar：按源隔离、可持久化序列化（tasks.md T016 / FR-008）
 //!
 //! FR-008 把 Cookie 列为书源可声明的请求定制项；spec 的修订项进一步要求
 //! **按源持久化落盘，重启后保留登录态**（FR-026 修订）。本模块实现两件事：
@@ -161,7 +161,7 @@ struct ParsedSetCookie {
 }
 
 impl CookieJar {
-    /// 空 jar。
+    /// [DONE] 空 jar。
     pub fn new() -> Self {
         Self::default()
     }

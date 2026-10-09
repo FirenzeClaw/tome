@@ -1,4 +1,4 @@
-//! 回放 adapter：录制请求→响应并在完全离线状态下重放（tasks.md T019）
+//! [DONE] 回放 adapter：录制请求→响应并在完全离线状态下重放（tasks.md T019）
 //!
 //! 这是**差分测试确定性的来源**（宪法 III 的一致性验证 / `contracts/seams.md`
 //! 「契约与差分测试的关系」）：把一次真实抓取的 `RequestSpec → Response` 映射

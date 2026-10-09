@@ -1,4 +1,4 @@
-//! 按源限速（tasks.md T018 / FR-008）
+//! [DONE] 按源限速（tasks.md T018 / FR-008）
 //!
 //! FR-008 要求书源能声明"请求间隔"，宪法原则 V 与 AGENTS.md 安全红线进一步要求
 //! "遵守书源声明的请求间隔，**不得绕过限速**"。本模块是这条要求的唯一执行点。
@@ -103,7 +103,7 @@ impl Default for RateLimiter {
 }
 
 impl RateLimiter {
-    /// 新建调度器，全部 key 使用 [`DEFAULT_REQUEST_INTERVAL`]。
+    /// [DONE] 新建调度器，全部 key 用默认间隔（零 = 不限速）。
     pub fn new() -> Self {
         Self::with_default_interval(DEFAULT_REQUEST_INTERVAL)
     }

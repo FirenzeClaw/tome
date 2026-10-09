@@ -1,4 +1,4 @@
-//! `RequestSpec` 执行器：本 crate 对外的唯一入口（tasks.md T014）
+//! [DONE] `RequestSpec` 执行器：本 crate 对外的唯一入口（tasks.md T014）
 //!
 //! 实现 `tome_core::NetHost`——**全系统唯一的发请求出口**（架构决策 A2：
 //! 规则引擎产出 `RequestSpec`，不亲自发请求；管线是唯一执行处）。
@@ -145,7 +145,9 @@ impl Default for ExecutionPolicy {
 }
 
 impl RequestExecutor {
-    /// 以默认配置新建（真实联网、不录制、所有源共享一个 cookie jar 与限速器）。
+    /// [DONE] 以默认配置新建执行器（真实联网、不录制）。
+    ///
+    /// 所有源共享一个 cookie jar 与限速器。
     pub fn new() -> Result<Self, NetError> {
         Self::builder().build()
     }

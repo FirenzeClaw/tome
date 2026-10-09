@@ -647,6 +647,112 @@ fn 无全局配置_配置经参数注入() {
 }
 
 // ---------------------------------------------------------------------------
+// 契约流程：import 之后按 id 搜索（`contracts/cli.md`）
+// ---------------------------------------------------------------------------
+
+/// `contracts/cli.md` 定义的规范流程是 `source import` 之后 `search <source-id>`。
+/// 本测试跑完整的那条流程（含注册表落盘与按 id 载入），而不是退化成
+/// `--source-file`——后者是便利路径，不是契约本身。
+#[test]
+fn 按_id_搜索的契约流程() {
+    let server = MiniServer::start(SEARCH_HTML);
+    let (_guard, source_path) = localized_source(&server);
+    let data_dir = tempfile::tempdir().expect("应能建数据目录");
+
+    let options = GlobalOptions {
+        format: OutputFormat::Json,
+        data_dir: Some(data_dir.path().to_path_buf()),
+        ..GlobalOptions::default()
+    };
+    let executor = executor_for(&options);
+
+    // ① 导入：应写入注册表
+    let imported = run_cli(
+        &options,
+        &["source", "import", source_path.to_str().unwrap()],
+        &executor,
+    );
+    assert_eq!(imported.exit_code, 0, "{}", imported.stderr);
+    let report: serde_json::Value = serde_json::from_str(&imported.stdout).expect("应是 JSON");
+    assert_eq!(report["registry_added"], 1, "应写进注册表");
+    assert_eq!(report["registry_total"], 1);
+
+    // 注册表文件应真的存在且可读
+    let registry_file = data_dir.path().join("sources.json");
+    assert!(registry_file.exists(), "注册表文件应被写出");
+
+    // ② 按 id 搜索（契约形态：位置参数就是 source-id）
+    let source_id = server.base_url();
+    let searched = run_cli(&options, &["search", &source_id, "斗破"], &executor);
+    assert_eq!(searched.exit_code, 0, "{}", searched.stderr);
+    let books: serde_json::Value = serde_json::from_str(&searched.stdout).expect("应是 JSON");
+    assert_eq!(books.as_array().expect("应是数组").len(), 2);
+    assert_eq!(books[0]["name"], "斗破苍穹");
+}
+
+#[test]
+fn 按_id_搜索时未导入的_id_报错() {
+    let data_dir = tempfile::tempdir().expect("应能建数据目录");
+    let options = GlobalOptions {
+        format: OutputFormat::Json,
+        data_dir: Some(data_dir.path().to_path_buf()),
+        ..GlobalOptions::default()
+    };
+    let executor = executor_for(&options);
+
+    let outcome = run_cli(
+        &options,
+        &["search", "https://never-imported.com", "k"],
+        &executor,
+    );
+    assert_eq!(outcome.exit_code, 1, "源不存在是业务错误");
+    assert!(
+        outcome.stderr.contains("error.rule.source.missing"),
+        "应给出源缺失的分类标识：{}",
+        outcome.stderr
+    );
+    assert!(
+        outcome.stderr.contains("source import"),
+        "应提示正确的下一步（先导入）：{}",
+        outcome.stderr
+    );
+}
+
+#[test]
+fn 重复导入同一_id_计为更新且不重复条目() {
+    // spec 边缘情况：「导入重复书源（同 id）按"更新"处理」
+    let server = MiniServer::start(SEARCH_HTML);
+    let (_guard, source_path) = localized_source(&server);
+    let data_dir = tempfile::tempdir().expect("应能建数据目录");
+    let options = GlobalOptions {
+        format: OutputFormat::Json,
+        data_dir: Some(data_dir.path().to_path_buf()),
+        ..GlobalOptions::default()
+    };
+    let executor = executor_for(&options);
+
+    let first = run_cli(
+        &options,
+        &["source", "import", source_path.to_str().unwrap()],
+        &executor,
+    );
+    assert_eq!(first.exit_code, 0);
+    let report: serde_json::Value = serde_json::from_str(&first.stdout).expect("应是 JSON");
+    assert_eq!(report["registry_added"], 1);
+
+    let second = run_cli(
+        &options,
+        &["source", "import", source_path.to_str().unwrap()],
+        &executor,
+    );
+    assert_eq!(second.exit_code, 0);
+    let report: serde_json::Value = serde_json::from_str(&second.stdout).expect("应是 JSON");
+    assert_eq!(report["registry_added"], 0, "同 id 不该重复新增");
+    assert_eq!(report["registry_updated"], 1, "应计为更新");
+    assert_eq!(report["registry_total"], 1, "总条数不该增长");
+}
+
+// ---------------------------------------------------------------------------
 // SC-001：从触发到首个来源结果 ≤ 30 秒
 // ---------------------------------------------------------------------------
 

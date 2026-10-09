@@ -27,6 +27,7 @@ use std::io::Read;
 use std::path::Path;
 
 use tome_core::{ErrorKind, NetHost};
+use tome_source::registry::SourceRegistry;
 use tome_source::source::{load_from_channel, LoadOutcome, ParsedSource};
 use tome_source::{search, SourceError};
 
@@ -147,10 +148,32 @@ fn run_import(
 
     match load_from_channel(&channel, host) {
         Ok(outcome) => {
-            let report = render_import_report(options.format, &outcome);
+            // 落盘到注册表：`search <source-id>` 依赖它（`contracts/cli.md`
+            // 定义的流程是"先 import 再 search <id>"）。
+            let registry_path = registry_path(options);
+            let mut registry = match SourceRegistry::load(&registry_path) {
+                Ok(registry) => registry,
+                Err(error) => {
+                    return CommandOutcome::failure(&error.to_error_kind(), &format!("{error}"));
+                }
+            };
+            let update = registry.merge(&outcome);
+            if let Err(error) = registry.save(&registry_path) {
+                return CommandOutcome::failure(&error.to_error_kind(), &format!("{error}"));
+            }
+
+            let report = render_import_report(options.format, &outcome, &update, &registry_path);
             CommandOutcome::with_stdout(report)
         }
         Err(error) => CommandOutcome::failure(&error.to_error_kind(), &format!("{error}")),
+    }
+}
+
+/// 解析注册表路径：`--data-dir` 优先，否则用"可移植模式"的默认位置。
+fn registry_path(options: &GlobalOptions) -> std::path::PathBuf {
+    match &options.data_dir {
+        Some(dir) => dir.join(tome_source::registry::REGISTRY_FILE_NAME),
+        None => tome_source::registry::default_registry_path(),
     }
 }
 
@@ -163,7 +186,7 @@ fn run_search(
     host: &dyn NetHost,
 ) -> CommandOutcome {
     // 载入书源：S1-1 阶段从文件读（存储落地在后续切片，见模块文档）。
-    let sources = match load_sources_for_search(source_id, source_file, host) {
+    let sources = match load_sources_for_search(options, source_id, source_file, host) {
         Ok(sources) => sources,
         Err(outcome) => return outcome,
     };
@@ -206,7 +229,13 @@ fn run_search(
 }
 
 /// 为搜索载入书源。
+///
+/// 两条路径：
+/// - `--source-file <f>`：从**任意**书源文件读（不走注册表，供"临时试一个源"）
+/// - `<source-id>`：从**注册表**读（`contracts/cli.md` 的规范流程：
+///   `source import` 之后 `search <id>`）
 fn load_sources_for_search(
+    options: &GlobalOptions,
     source_id: Option<&str>,
     source_file: Option<&Path>,
     host: &dyn NetHost,
@@ -229,18 +258,30 @@ fn load_sources_for_search(
         return Ok(outcome.sources);
     }
 
-    match source_id {
-        Some(id) => Err(CommandOutcome::failure(
-            &ErrorKind::Rule,
-            &format!(
-                "error.rule.source.missing id={id} \
-                 （S1-1 阶段书源尚未落库，请用 --source-file 指定书源文件）"
-            ),
-        )),
-        None => Err(CommandOutcome::failure(
+    let Some(id) = source_id else {
+        return Err(CommandOutcome::failure(
             &ErrorKind::Configuration,
             "error.configuration.usage 需要 <source-id> 或 --source-file",
-        )),
+        ));
+    };
+
+    let path = registry_path(options);
+    let registry = SourceRegistry::load(&path)
+        .map_err(|error| CommandOutcome::failure(&error.to_error_kind(), &format!("{error}")))?;
+    match registry.get(id) {
+        Some(parsed) => Ok(vec![parsed.clone()]),
+        None => {
+            let hint = format!(
+                "error.rule.source.missing id={id} registry={}",
+                path.display()
+            );
+            Err(CommandOutcome::failure(
+                &ErrorKind::Rule,
+                &format!(
+                    "{hint}（注册表里没有这个 id；先跑 `tome source import <file>`，                     或用 --source-file 直接指定书源文件）"
+                ),
+            ))
+        }
     }
 }
 
@@ -252,7 +293,12 @@ fn load_sources_for_search(
 ///
 /// JSON 字段顺序由结构体定义固定（`serde` 的字段序），这是
 /// "输出逐字节一致"的基础之一。
-fn render_import_report(format: OutputFormat, outcome: &LoadOutcome) -> String {
+fn render_import_report(
+    format: OutputFormat,
+    outcome: &LoadOutcome,
+    update: &tome_source::registry::RegistryUpdate,
+    registry_path: &Path,
+) -> String {
     match format {
         OutputFormat::Json => {
             let report = ImportReportJson {
@@ -274,6 +320,9 @@ fn render_import_report(format: OutputFormat, outcome: &LoadOutcome) -> String {
                         error: failure.error.message_id().to_string(),
                     })
                     .collect(),
+                registry_added: update.added,
+                registry_updated: update.updated,
+                registry_total: registry_len_at(registry_path),
             };
             let mut text =
                 serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".to_string());
@@ -282,13 +331,21 @@ fn render_import_report(format: OutputFormat, outcome: &LoadOutcome) -> String {
             text
         }
         OutputFormat::Human => {
-            let mut lines = vec![format!(
-                "导入完成：新增 {}，更新 {}，跳过 {}（共 {} 条解析成功）",
-                outcome.report.added,
-                outcome.report.updated,
-                outcome.report.skipped,
-                outcome.sources.len()
-            )];
+            let mut lines = vec![
+                format!(
+                    "注册表：新增 {}，更新 {}（路径 {}）",
+                    update.added,
+                    update.updated,
+                    registry_path.display()
+                ),
+                format!(
+                    "导入完成：新增 {}，更新 {}，跳过 {}（共 {} 条解析成功）",
+                    outcome.report.added,
+                    outcome.report.updated,
+                    outcome.report.skipped,
+                    outcome.sources.len()
+                ),
+            ];
             for parsed in &outcome.sources {
                 lines.push(format!("  {} —— {}", parsed.source.id, parsed.source.name));
             }
@@ -302,6 +359,13 @@ fn render_import_report(format: OutputFormat, outcome: &LoadOutcome) -> String {
             lines.join("\n") + "\n"
         }
     }
+}
+
+/// 读注册表的当前总条数（失败时返回 0——它是诊断信息，不该让导入失败）。
+fn registry_len_at(path: &Path) -> usize {
+    SourceRegistry::load(path)
+        .map(|registry| registry.len())
+        .unwrap_or(0)
 }
 
 /// 渲染搜索成功结果。
@@ -415,6 +479,12 @@ struct ImportReportJson {
     total: usize,
     /// 解析出的书源 id（排序后，保证输出确定）
     source_ids: Vec<String>,
+    /// 注册表里新增的条数
+    registry_added: usize,
+    /// 注册表里更新的条数（同 id 覆盖）
+    registry_updated: usize,
+    /// 注册表当前总条数
+    registry_total: usize,
     /// 逐条失败
     failures: Vec<ImportFailureJson>,
 }
@@ -763,13 +833,35 @@ mod tests {
     }
 
     #[test]
-    fn 搜索按_id_时提示需用文件() {
+    fn 搜索未导入的_id_报源缺失() {
+        // 按 id 搜索走**注册表**（契约流程）。这里用一个指向空数据目录的
+        // 选项，故注册表为空 → 应报"源不存在"并提示先导入。
         let host = FakeHost::new(vec![]);
-        let outcome = run_args(&["search", "https://example.com", "k"], &host, "");
-        assert_eq!(outcome.exit_code, 1);
+        let dir = tempfile::tempdir().expect("应能建临时目录");
+        let options = GlobalOptions {
+            data_dir: Some(dir.path().to_path_buf()),
+            ..GlobalOptions::default()
+        };
+        let parsed = parse(&[
+            "search".to_string(),
+            "https://example.com".to_string(),
+            "k".to_string(),
+        ]);
+        let ParseOutcome::Run { command, .. } = parsed else {
+            panic!("参数应解析成功");
+        };
+        let mut reader = std::io::Cursor::new(Vec::new());
+        let outcome = run(&options, &command, &host, &mut reader);
+
+        assert_eq!(outcome.exit_code, 1, "源不存在是业务错误");
         assert!(
-            outcome.stderr.contains("--source-file"),
-            "应提示 S1-1 阶段的替代路径：{}",
+            outcome.stderr.contains("error.rule.source.missing"),
+            "应给出源缺失分类：{}",
+            outcome.stderr
+        );
+        assert!(
+            outcome.stderr.contains("source import"),
+            "应提示正确的下一步（先导入）：{}",
             outcome.stderr
         );
     }

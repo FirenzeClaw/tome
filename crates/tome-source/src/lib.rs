@@ -30,6 +30,7 @@
 //!
 //! - [`source`] `[DONE]` 书源加载与三渠道导入（T026）
 //! - [`search`] `[DONE]` 搜索管线（T027）
+//! - [`registry`] `[WIP]` 书源注册表（S1-1 的过渡形态，`tome-store` 落地后应改为薄适配）
 //! - [`error`] `[DONE]` 错误类型
 //!
 //! [WIP] **未实现**：发现/详情/目录/正文四类动作、换源（FR-010）与源检查
@@ -38,6 +39,7 @@
 #![forbid(unsafe_code)]
 
 pub mod error;
+pub mod registry;
 
 pub use error::SourceError;
 pub mod search;

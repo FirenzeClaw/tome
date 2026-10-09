@@ -351,3 +351,67 @@ fn 领域类型经_crate_根可见() {
     let _via_root: tome_core::ReadProgress = progress.clone();
     let _via_module: tome_core::model::ReadProgress = progress;
 }
+
+// ---------------------------------------------------------------------------
+// 补齐 data-model.md 18 实体中其余三个（不直接参与书源语义，但同属清单）
+// ---------------------------------------------------------------------------
+
+/// `chapter_cache` 是**索引**：只记录内容在 Pack 容器中的位置（FR-029）。
+///
+/// 崩溃安全（FR-030）的顺序约束在此处体现为字段的可表达性：
+/// `cached_at` 与位置信息齐备，实现方才能保证"内容落盘先于索引提交"。
+#[test]
+fn 章节缓存条目记录容器内位置与淘汰时间() {
+    use tome_core::model::ChapterCacheEntry;
+
+    let entry = ChapterCacheEntry {
+        chapter_id: 42,
+        book_id: 7,
+        pack_id: 3,
+        offset: 65536,
+        length: 4096,
+        cached_at: 1_700_000_000,
+    };
+
+    assert_eq!(entry.chapter_id, 42);
+    assert_eq!(entry.offset + entry.length, 69632, "位置与长度应能定位区间");
+    assert!(entry.cached_at > 0, "淘汰按 cached_at 做 LRU（FR-031）");
+}
+
+/// `http_log` 的字段名带 `_redacted` 后缀——脱敏是写入前的强制步骤（FR-017）。
+#[test]
+fn 请求日志字段明示已脱敏() {
+    use tome_core::model::HttpLogEntry;
+
+    let entry = HttpLogEntry {
+        id: 1,
+        source_id: Some("source-a".to_owned()),
+        url: "https://example.com/x".to_owned(),
+        method: "GET".to_owned(),
+        request_headers_redacted: Some(r#"{"User-Agent":"tome"}"#.to_owned()),
+        response_code: Some(200),
+        response_body_redacted: None,
+        duration_ms: Some(123),
+        created_at: 1_700_000_000,
+    };
+
+    assert_eq!(entry.response_code, Some(200));
+    // 字段名本身即约束：实现方看见 _redacted 后缀就不该塞原始头进来
+    assert!(entry.request_headers_redacted.is_some());
+}
+
+/// `search_keyword` 支持收藏与复用（FR-018）。
+#[test]
+fn 搜索关键词支持收藏与复用计数() {
+    use tome_core::model::SearchKeyword;
+
+    let keyword = SearchKeyword {
+        id: 1,
+        keyword: "剑来".to_owned(),
+        created_at: 1_700_000_000,
+        use_count: 3,
+    };
+
+    assert_eq!(keyword.keyword, "剑来");
+    assert_eq!(keyword.use_count, 3, "复用次数供排序");
+}

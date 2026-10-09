@@ -24,14 +24,17 @@
 //! | [`rule`] | `ReplaceRule` / `HighlightRule` / `DictRule` / `TxtTocRule` / `RuleScope` / `RuleTier` |
 //! | [`trace`] | `ReadProgress` / `Bookmark` / `Highlight` / `Memo` / `ReadRecord` |
 //! | [`asset`] | `Cookie` / `ImageCacheRef` |
+//! | [`auxiliary`] | `ChapterCacheEntry` / `HttpLogEntry` / `SearchKeyword` |
 
 mod asset;
+mod auxiliary;
 mod book;
 mod rule;
 mod source;
 mod trace;
 
 pub use asset::{Cookie, ImageCacheRef};
+pub use auxiliary::{ChapterCacheEntry, HttpLogEntry, SearchKeyword};
 pub use book::{Book, BookOrigin, Chapter, LibraryRoot};
 pub use rule::{DictRule, HighlightRule, ReplaceRule, RuleScope, RuleTier, TxtTocRule};
 pub use source::{Source, SourceGroup, SourceKind};

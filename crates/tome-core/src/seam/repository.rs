@@ -3,7 +3,7 @@
 use crate::error::ErrorKind;
 use crate::model::{
     Book, Bookmark, Chapter, DictRule, Highlight, LibraryRoot, Memo, ReadProgress, ReadRecord,
-    ReplaceRule, Source, SourceGroup,
+    ReplaceRule, Source, SourceGroup, TxtTocRule,
 };
 
 /// 数据读写接缝。实现方：`tome-store`（SQLite actor 线程 + Pack 文件）。
@@ -90,13 +90,40 @@ pub trait BookRepository {
     fn source_groups(&self) -> Result<Vec<SourceGroup>, ErrorKind>;
 
     // --- 规则 ---
+    //
+    // 契约 §3 写作 `rules (replace/highlight/dict/toc CRUD)`——即四类规则
+    // **都要 CRUD**，而不只是读。三类只读 getter 是不够的：
+    // FR-014/FR-015/FR-016 要求用户能配置净化/高亮/词典规则，
+    // FR-020 要求 TXT 目录识别支持"多条规则回退"（自然也需增删改）。
+    // 故此处补齐四类规则的读、增/改、删。
 
-    /// 替换/净化规则。
+    /// 替换/净化规则（FR-014）。
     fn replace_rules(&self) -> Result<Vec<ReplaceRule>, ErrorKind>;
-    /// 高亮规则。
+    /// 保存替换规则（`id` 为 0 表示新增，否则更新）。
+    fn save_replace_rule(&self, rule: &ReplaceRule) -> Result<i64, ErrorKind>;
+    /// 删除替换规则。
+    fn remove_replace_rule(&self, rule_id: i64) -> Result<(), ErrorKind>;
+
+    /// 高亮规则（FR-015）。
     fn highlight_rules(&self) -> Result<Vec<HighlightRuleRow>, ErrorKind>;
-    /// 词典规则。
+    /// 保存高亮规则（`id` 为 0 表示新增）。
+    fn save_highlight_rule(&self, rule: &HighlightRuleRow) -> Result<i64, ErrorKind>;
+    /// 删除高亮规则。
+    fn remove_highlight_rule(&self, rule_id: i64) -> Result<(), ErrorKind>;
+
+    /// 词典规则（FR-016）。
     fn dict_rules(&self) -> Result<Vec<DictRule>, ErrorKind>;
+    /// 保存词典规则（`id` 为 0 表示新增）。
+    fn save_dict_rule(&self, rule: &DictRule) -> Result<i64, ErrorKind>;
+    /// 删除词典规则。
+    fn remove_dict_rule(&self, rule_id: i64) -> Result<(), ErrorKind>;
+
+    /// TXT 目录识别规则（FR-020，支持多条规则回退）。
+    fn txt_toc_rules(&self) -> Result<Vec<TxtTocRule>, ErrorKind>;
+    /// 保存 TXT 目录识别规则（`id` 为 0 表示新增）。
+    fn save_txt_toc_rule(&self, rule: &TxtTocRule) -> Result<i64, ErrorKind>;
+    /// 删除 TXT 目录识别规则。
+    fn remove_txt_toc_rule(&self, rule_id: i64) -> Result<(), ErrorKind>;
 
     // --- 库根目录 ---
 
@@ -110,10 +137,41 @@ pub trait BookRepository {
     /// 书内全文搜索，**限定已缓存内容，不触发额外抓取**（FR-019b）。
     fn search_in_book(&self, book_id: i64, query: &str) -> Result<Vec<SearchHit>, ErrorKind>;
 
+    // --- 备份（FR-033）---
+
+    /// 导出**全部阅读数据**（FR-033）：书源集合、书架清单、阅读进度、书签、
+    /// 高亮、批注、规则配置（净化/高亮/词典）。
+    ///
+    /// ## 导出与导入必须对称
+    ///
+    /// FR-033 明确"能导出即可完整导回"。故本方法与
+    /// [`Self::import_backup`] 共用 [`BackupJson`] 这一类型——
+    /// 对称性由类型保证，而不是靠两处各自维护的字段列表。
+    fn export_all(&self) -> Result<BackupJson, ErrorKind>;
+
+    /// 导入备份（FR-033）。与 [`Self::export_all`] 对称。
+    fn import_backup(&self, json: &BackupJson) -> Result<ImportReport, ErrorKind>;
+
     // --- 缓存清理（FR-031 / SC-017）---
 
     /// 清理缓存。**MUST NOT 影响个人阅读数据**（FR-031 / SC-015）。
     fn clear_cache(&self, kind: CacheKind) -> Result<(), ErrorKind>;
+}
+
+/// 全部阅读数据的可读 JSON 表示（FR-033）。
+///
+/// ## 为什么是 JSON 文本而不是结构化字段
+///
+/// FR-032/FR-033 要求格式**可读、可手工编辑、可随程序搬移**。用文本承载让
+/// 这一要求直接成立；同时它让"对称性"只需维护**一个**类型（导出与导入共用），
+/// 而不是在两个结构体之间做字段映射——后者正是漂移的温床。
+///
+/// 字段的具体 schema 由 tome-store 定义并随实现发布（迁移器负责向前兼容），
+/// core 只承载"这里有一份完整的备份"这一契约。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupJson {
+    /// JSON 文本
+    pub json: String,
 }
 
 /// 规则行的别名。

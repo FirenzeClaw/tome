@@ -47,6 +47,44 @@ pub trait SourceEngine {
 
     /// 单源可用性检查（FR-011），给出可判定结论。
     fn check_source(&self, source_id: &str) -> Result<CheckReport, ErrorKind>;
+
+    /// 批量源检查（FR-011），**流式**返回。
+    ///
+    /// `filter` 为空表示检查全部启用的源。
+    ///
+    /// ## 为什么是流而不是 `Vec<CheckReport>`
+    ///
+    /// 与 [`SourceEngine::search`] 同理（A6）：批量检查可能涉及上百个源，
+    /// 每个源都要发请求。用 `Vec` 会把"检查进度"完全藏起来，用户面对一个
+    /// 长时间无反馈的界面。流式返回让界面能逐源展示进度与结果。
+    ///
+    /// 单源检查失败是**流内的一个条目**（`CheckReport` 的 verdict 为
+    /// [`CheckVerdict::Unavailable`]），不终止整个流。
+    fn check_sources(&self, filter: &SourceCheckFilter) -> Box<dyn CheckStream>;
+}
+
+/// 批量源检查的过滤条件（[`SourceEngine::check_sources`] 的输入）。
+///
+/// 用结构体而非 `Option<&[String]>`：日后要加"按分组检查""只查未验证过的源"
+/// 等条件时，不必改动 trait 签名（那会波及所有实现与调用方）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SourceCheckFilter {
+    /// 限定书源 id；为空表示全部启用的源
+    pub source_ids: Vec<String>,
+    /// 限定分组；为空表示不限分组
+    pub group_id: Option<i64>,
+}
+
+/// 批量源检查的结果流（FR-011）。
+///
+/// 契约与 [`crate::seam::SearchStream`] 一致：逐源产出、可取消、
+/// 单源失败不终止流。故同样必须对象安全（界面持 `Box<dyn CheckStream>`）。
+pub trait CheckStream: Send {
+    /// 取下一个源的检查结果；`None` 表示全部完成。
+    fn next_report(&mut self) -> Option<CheckReport>;
+
+    /// 本流的取消令牌。
+    fn cancel_token(&self) -> &crate::seam::CancelToken;
 }
 
 /// 发现页的一页结果（FR-013 分页）。

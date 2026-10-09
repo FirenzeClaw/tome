@@ -27,10 +27,12 @@ mod repository;
 mod source;
 mod stream;
 
-pub use repository::{BookRepository, CacheKind, ImportReport, SearchHit};
+pub use repository::{
+    BackupJson, BookRepository, CacheKind, HighlightRuleRow, ImportReport, SearchHit,
+};
 pub use source::{
-    AnchorQuery, ChangeSourceOutcome, ChapterContent, CheckReport, CheckVerdict, ContentProvider,
-    ExplorePage, ProgressMapping, SourceEngine,
+    AnchorQuery, ChangeSourceOutcome, ChapterContent, CheckReport, CheckStream, CheckVerdict,
+    ContentProvider, ExplorePage, ProgressMapping, SourceCheckFilter, SourceEngine,
 };
 pub use stream::{CancelToken, SearchResultItem, SearchStream};
 

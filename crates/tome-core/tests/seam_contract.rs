@@ -16,8 +16,10 @@ use tome_core::seam::host::{
     HeaderMap, HttpMethod, ProxyOverride, RequestSpec, Response, RetryPolicy,
 };
 use tome_core::seam::{
-    AnchorQuery, CancelToken, ChangeSourceOutcome, ChapterContent, CheckReport, CheckVerdict,
-    ContentProvider, ExplorePage, ProgressMapping, SearchResultItem, SearchStream, SourceEngine,
+    AnchorQuery, BackupJson, BookRepository, CacheKind, CancelToken, ChangeSourceOutcome,
+    ChapterContent, CheckReport, CheckStream, CheckVerdict, ContentProvider, ExplorePage,
+    HighlightRuleRow, ImportReport, ProgressMapping, SearchHit, SearchResultItem, SearchStream,
+    SourceCheckFilter, SourceEngine,
 };
 
 /// 极简 `SearchStream` 实现——只为证明该 trait **可被外部 crate 实现**
@@ -243,6 +245,13 @@ impl SourceEngine for FakeSourceEngine {
         Ok(CheckReport {
             source: sample_source(),
             verdict: CheckVerdict::Available,
+        })
+    }
+
+    fn check_sources(&self, _filter: &SourceCheckFilter) -> Box<dyn CheckStream> {
+        Box::new(FakeCheckStream {
+            token: CancelToken::new(),
+            pending: std::collections::VecDeque::new(),
         })
     }
 }
@@ -522,5 +531,347 @@ fn sample_source() -> tome_core::model::Source {
         comment: None,
         last_update_time: None,
         created_at: 1_700_000_000,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 契约 §1/§3 的其余方法（批量源检查、备份、规则 CRUD）
+// ---------------------------------------------------------------------------
+
+/// 极简 `CheckStream` 实现——证明批量源检查的流同样可被外部 crate 实现。
+///
+/// 用 `VecDeque` 从队首取（FIFO）：真实流是"按源顺序产出"的，
+/// 用 `Vec::pop`（LIFO）会让夹具的语义与断言顺序相反，制造无谓的困惑。
+struct FakeCheckStream {
+    token: CancelToken,
+    pending: std::collections::VecDeque<CheckReport>,
+}
+
+impl CheckStream for FakeCheckStream {
+    fn next_report(&mut self) -> Option<CheckReport> {
+        if self.token.is_cancelled() {
+            return None;
+        }
+        self.pending.pop_front()
+    }
+
+    fn cancel_token(&self) -> &CancelToken {
+        &self.token
+    }
+}
+
+/// FR-011：批量源检查是**流式**的，且可取消（契约 §1 的 `check_sources`）。
+///
+/// 为什么必须是流：批量检查可能涉及上百个源、每个都要发请求。用 `Vec`
+/// 会把检查进度完全藏起来，界面只能长时间无反馈。
+#[test]
+fn 批量源检查返回可取消的流() {
+    let token = CancelToken::new();
+    let mut stream: Box<dyn CheckStream> = Box::new(FakeCheckStream {
+        token: token.clone(),
+        pending: std::collections::VecDeque::from(vec![
+            CheckReport {
+                source: sample_source(),
+                verdict: CheckVerdict::Available,
+            },
+            CheckReport {
+                source: sample_source(),
+                verdict: CheckVerdict::Unavailable {
+                    reason: ErrorKind::Network,
+                },
+            },
+        ]),
+    });
+
+    // 逐源产出（不是攒齐再给）
+    let first = stream.next_report().expect("应有检查结果");
+    assert_eq!(first.verdict, CheckVerdict::Available);
+
+    // 单源不可用**不终止**流：第二个结果仍可达
+    let second = stream.next_report().expect("失败源不应终止流");
+    assert!(matches!(
+        second.verdict,
+        CheckVerdict::Unavailable {
+            reason: ErrorKind::Network
+        }
+    ));
+
+    // 取完后结束
+    assert!(stream.next_report().is_none());
+
+    // 取消令牌可用
+    stream.cancel_token().cancel();
+    assert!(token.is_cancelled());
+}
+
+/// `SourceCheckFilter` 的默认值是"检查全部启用的源"（空过滤即全量）。
+#[test]
+fn 源检查过滤条件默认全量() {
+    let filter = SourceCheckFilter::default();
+    assert!(filter.source_ids.is_empty());
+    assert_eq!(filter.group_id, None);
+
+    let scoped = SourceCheckFilter {
+        source_ids: vec!["source-a".to_owned()],
+        group_id: Some(2),
+    };
+    assert_ne!(scoped, filter);
+}
+
+/// 极简 `BookRepository` 实现——证明该 trait 的方法集是可实现的，
+/// 且覆盖契约 §3 声明的全部方法组。
+struct FakeRepository;
+
+impl BookRepository for FakeRepository {
+    fn bookshelf(&self) -> Result<Vec<Book>, ErrorKind> {
+        Ok(vec![sample_book()])
+    }
+    fn add_book(&self, _book: &Book) -> Result<i64, ErrorKind> {
+        Ok(1)
+    }
+    fn remove_book(&self, _book_id: i64) -> Result<(), ErrorKind> {
+        Ok(())
+    }
+    fn update_book(&self, _book: &Book) -> Result<(), ErrorKind> {
+        Ok(())
+    }
+
+    fn chapters(&self, _book_id: i64) -> Result<Vec<Chapter>, ErrorKind> {
+        Ok(vec![sample_chapter()])
+    }
+    fn save_chapters(&self, _book_id: i64, _chapters: &[Chapter]) -> Result<(), ErrorKind> {
+        Ok(())
+    }
+
+    fn get_progress(
+        &self,
+        _book_id: i64,
+    ) -> Result<Option<tome_core::model::ReadProgress>, ErrorKind> {
+        Ok(None)
+    }
+    fn save_progress(&self, _progress: &tome_core::model::ReadProgress) -> Result<(), ErrorKind> {
+        Ok(())
+    }
+    fn add_read_record(&self, _record: &tome_core::model::ReadRecord) -> Result<(), ErrorKind> {
+        Ok(())
+    }
+    fn read_records(
+        &self,
+        _b: i64,
+        _from: &str,
+        _to: &str,
+    ) -> Result<Vec<tome_core::model::ReadRecord>, ErrorKind> {
+        Ok(Vec::new())
+    }
+
+    fn bookmarks(&self, _book_id: i64) -> Result<Vec<tome_core::model::Bookmark>, ErrorKind> {
+        Ok(Vec::new())
+    }
+    fn add_bookmark(&self, _bookmark: &tome_core::model::Bookmark) -> Result<i64, ErrorKind> {
+        Ok(1)
+    }
+    fn remove_bookmark(&self, _id: i64) -> Result<(), ErrorKind> {
+        Ok(())
+    }
+
+    fn highlights(&self, _book_id: i64) -> Result<Vec<tome_core::model::Highlight>, ErrorKind> {
+        Ok(Vec::new())
+    }
+    fn add_highlight(&self, _highlight: &tome_core::model::Highlight) -> Result<i64, ErrorKind> {
+        Ok(1)
+    }
+    fn remove_highlight(&self, _id: i64) -> Result<(), ErrorKind> {
+        Ok(())
+    }
+
+    fn memos(&self, _book_id: i64) -> Result<Vec<tome_core::model::Memo>, ErrorKind> {
+        Ok(Vec::new())
+    }
+    fn add_memo(&self, _memo: &tome_core::model::Memo) -> Result<i64, ErrorKind> {
+        Ok(1)
+    }
+    fn remove_memo(&self, _id: i64) -> Result<(), ErrorKind> {
+        Ok(())
+    }
+
+    fn sources(&self) -> Result<Vec<tome_core::model::Source>, ErrorKind> {
+        Ok(vec![sample_source()])
+    }
+    fn source_by_id(&self, _id: &str) -> Result<Option<tome_core::model::Source>, ErrorKind> {
+        Ok(None)
+    }
+    fn import_sources(
+        &self,
+        _sources: &[tome_core::model::Source],
+    ) -> Result<ImportReport, ErrorKind> {
+        Ok(ImportReport::default())
+    }
+    fn source_groups(&self) -> Result<Vec<tome_core::model::SourceGroup>, ErrorKind> {
+        Ok(Vec::new())
+    }
+
+    fn replace_rules(&self) -> Result<Vec<tome_core::model::ReplaceRule>, ErrorKind> {
+        Ok(Vec::new())
+    }
+    fn save_replace_rule(&self, _rule: &tome_core::model::ReplaceRule) -> Result<i64, ErrorKind> {
+        Ok(1)
+    }
+    fn remove_replace_rule(&self, _id: i64) -> Result<(), ErrorKind> {
+        Ok(())
+    }
+
+    fn highlight_rules(&self) -> Result<Vec<HighlightRuleRow>, ErrorKind> {
+        Ok(Vec::new())
+    }
+    fn save_highlight_rule(&self, _rule: &HighlightRuleRow) -> Result<i64, ErrorKind> {
+        Ok(1)
+    }
+    fn remove_highlight_rule(&self, _id: i64) -> Result<(), ErrorKind> {
+        Ok(())
+    }
+
+    fn dict_rules(&self) -> Result<Vec<tome_core::model::DictRule>, ErrorKind> {
+        Ok(Vec::new())
+    }
+    fn save_dict_rule(&self, _rule: &tome_core::model::DictRule) -> Result<i64, ErrorKind> {
+        Ok(1)
+    }
+    fn remove_dict_rule(&self, _id: i64) -> Result<(), ErrorKind> {
+        Ok(())
+    }
+
+    fn txt_toc_rules(&self) -> Result<Vec<tome_core::model::TxtTocRule>, ErrorKind> {
+        Ok(Vec::new())
+    }
+    fn save_txt_toc_rule(&self, _rule: &tome_core::model::TxtTocRule) -> Result<i64, ErrorKind> {
+        Ok(1)
+    }
+    fn remove_txt_toc_rule(&self, _id: i64) -> Result<(), ErrorKind> {
+        Ok(())
+    }
+
+    fn library_roots(&self) -> Result<Vec<tome_core::model::LibraryRoot>, ErrorKind> {
+        Ok(Vec::new())
+    }
+    fn add_library_root(&self, _path: &str) -> Result<i64, ErrorKind> {
+        Ok(1)
+    }
+
+    fn search_in_book(&self, _book_id: i64, _query: &str) -> Result<Vec<SearchHit>, ErrorKind> {
+        Ok(Vec::new())
+    }
+
+    fn export_all(&self) -> Result<BackupJson, ErrorKind> {
+        Ok(BackupJson {
+            json: "{}".to_owned(),
+        })
+    }
+    fn import_backup(&self, _json: &BackupJson) -> Result<ImportReport, ErrorKind> {
+        Ok(ImportReport::default())
+    }
+
+    fn clear_cache(&self, _kind: CacheKind) -> Result<(), ErrorKind> {
+        Ok(())
+    }
+}
+
+/// 契约 §3 的 `export_all` / `import_backup`（FR-033）。
+///
+/// 两者共用 `BackupJson`，故"导出与导入对称"由**类型**保证——
+/// 而不是靠两处各自维护的字段列表（那是漂移的温床）。
+#[test]
+fn 备份导出与导入共用类型保证对称() {
+    let repository: Box<dyn BookRepository> = Box::new(FakeRepository);
+
+    let backup = repository.export_all().expect("导出应可用");
+    assert!(!backup.json.is_empty());
+
+    // 导出的结果可直接喂回导入——类型相同，无需字段映射
+    let report = repository.import_backup(&backup).expect("导入应可用");
+    assert_eq!(report, ImportReport::default());
+}
+
+/// 契约 §3 要求四类规则**都要 CRUD**，而不只是读。
+///
+/// FR-014/015/016 要求用户能配置净化/高亮/词典规则；FR-020 要求 TXT 目录
+/// 识别支持"多条规则回退"（自然也需增删改）。只有只读 getter 是不够的。
+#[test]
+fn 四类规则均可增删改() {
+    let repository = FakeRepository;
+
+    // 替换规则
+    assert!(repository.replace_rules().is_ok());
+    assert!(repository.save_replace_rule(&sample_replace_rule()).is_ok());
+    assert!(repository.remove_replace_rule(1).is_ok());
+
+    // 高亮规则
+    assert!(repository.highlight_rules().is_ok());
+    assert!(repository
+        .save_highlight_rule(&sample_highlight_rule())
+        .is_ok());
+    assert!(repository.remove_highlight_rule(1).is_ok());
+
+    // 词典规则
+    assert!(repository.dict_rules().is_ok());
+    assert!(repository.save_dict_rule(&sample_dict_rule()).is_ok());
+    assert!(repository.remove_dict_rule(1).is_ok());
+
+    // TXT 目录识别规则（FR-020）
+    assert!(repository.txt_toc_rules().is_ok());
+    assert!(repository.save_txt_toc_rule(&sample_txt_toc_rule()).is_ok());
+    assert!(repository.remove_txt_toc_rule(1).is_ok());
+}
+
+/// 书内全文搜索限定已缓存内容（FR-019b）——签名里没有任何"抓取"参数，
+/// 实现方无从发起额外请求。
+#[test]
+fn 书内搜索限定缓存内容() {
+    let repository = FakeRepository;
+    let hits = repository.search_in_book(1, "关键词").expect("搜索应可用");
+    assert!(hits.is_empty());
+}
+
+fn sample_replace_rule() -> tome_core::model::ReplaceRule {
+    tome_core::model::ReplaceRule {
+        id: 1,
+        name: "去广告".to_owned(),
+        pattern: "广告".to_owned(),
+        replacement: String::new(),
+        scope: tome_core::model::RuleScope::Content,
+        is_regex: false,
+        enabled: true,
+        sort_order: 0,
+    }
+}
+
+fn sample_highlight_rule() -> HighlightRuleRow {
+    HighlightRuleRow {
+        id: 1,
+        name: "高亮".to_owned(),
+        pattern: "关键词".to_owned(),
+        style: "red".to_owned(),
+        enabled: true,
+        sort_order: 0,
+    }
+}
+
+fn sample_dict_rule() -> tome_core::model::DictRule {
+    tome_core::model::DictRule {
+        id: 1,
+        name: "词典".to_owned(),
+        url_rule: "https://dict.example.com/{}".to_owned(),
+        content_rule: "@css:.content".to_owned(),
+        enabled: true,
+    }
+}
+
+fn sample_txt_toc_rule() -> tome_core::model::TxtTocRule {
+    tome_core::model::TxtTocRule {
+        id: 1,
+        name: "章节正则".to_owned(),
+        rule: "^第.+章".to_owned(),
+        example: Some("第一章".to_owned()),
+        enabled: true,
+        sort_order: 0,
     }
 }

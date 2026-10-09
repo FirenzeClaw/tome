@@ -63,7 +63,9 @@ fn main() -> ExitCode {
             Ok(())
         }
         "" => window::open(),
-        unknown => Err(anyhow_lite(&format!("未知子命令：{unknown}（用 --help 查看用法）"))),
+        unknown => Err(anyhow_lite(&format!(
+            "未知子命令：{unknown}（用 --help 查看用法）"
+        ))),
     };
 
     match outcome {

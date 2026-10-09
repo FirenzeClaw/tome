@@ -42,12 +42,12 @@ use html5ever::{parse_document, Attribute, QualName};
 pub struct SampleReport {
     /// 样本文件名
     pub name: String,
-    /// Jsoup 侧序列化行数
-    pub jsoup_lines: usize,
-    /// html5ever 侧序列化行数
-    pub html5ever_lines: usize,
-    /// 逐行不一致的行数（含行数差异，按较长一侧对齐）
-    pub differing_lines: usize,
+    /// Jsoup 侧参与比对的**块**数（长行已按 256 字符切分，见 [`expand_long_lines`]）
+    pub jsoup_blocks: usize,
+    /// html5ever 侧参与比对的**块**数
+    pub html5ever_blocks: usize,
+    /// 不一致的块数（含块数差异）
+    pub differing_blocks: usize,
     /// Rust 侧树中规范化后为空的文本节点数（与结构差异不同源，单列）
     pub html5ever_empty_text_nodes: usize,
     /// 首个差异的定位描述（无差异时为 `None`）
@@ -55,18 +55,24 @@ pub struct SampleReport {
 }
 
 impl SampleReport {
-    /// 差异率 = 不一致行数 / 两侧行数的**较大者**。
+    /// 差异率 = 不一致块数 / 两侧块数的**较大者**。
     ///
-    /// 为什么按较大者归一：按其中一侧归一会在两侧行数差得远时给出大于 1
+    /// ## 为什么分子分母都必须是"块"
+    ///
+    /// 实测踩到：若分母用**原始行数**而分子用**分块后的差异数**，当某个文本
+    /// 节点极长（被切成多块）时，差异数会超过原始行数，算出 **283%** 这种
+    /// 无意义的比率。故两者必须同单位——都取分块后的计数。
+    ///
+    /// 为什么按较大者归一：按其中一侧归一会在两侧块数差得远时给出大于 1
     /// 或无意义的比率。取较大者能保证比率落在 `[0,1]`。
     pub fn difference_ratio(&self) -> f64 {
-        let denominator = self.jsoup_lines.max(self.html5ever_lines);
+        let denominator = self.jsoup_blocks.max(self.html5ever_blocks);
         if denominator == 0 {
             // 两侧都空：差异率无定义。返回 0 而非 NaN——空样本的"一致"
             // 是事实（都没有输出），不该污染聚合统计。
             return 0.0;
         }
-        self.differing_lines as f64 / denominator as f64
+        self.differing_blocks as f64 / denominator as f64
     }
 }
 
@@ -139,13 +145,17 @@ fn compare_sample(sample_path: &Path) -> Result<SampleReport, String> {
     let jsoup_lines = split_lines(&jsoup_serialized);
     let html5ever_lines = split_lines(&html5ever_serialized);
 
-    let (differing_lines, first_difference) = line_diff(&jsoup_lines, &html5ever_lines);
+    // 计数单位必须是"分块后"的块数：与 line_diff 的分子同单位，
+    // 否则长文本节点被切块时差异率会超过 100%。
+    let jsoup_blocks = expand_long_lines(&jsoup_lines).len();
+    let html5ever_blocks = expand_long_lines(&html5ever_lines).len();
+    let (differing_blocks, first_difference) = line_diff(&jsoup_lines, &html5ever_lines);
 
     Ok(SampleReport {
         name,
-        jsoup_lines: jsoup_lines.len(),
-        html5ever_lines: html5ever_lines.len(),
-        differing_lines,
+        jsoup_blocks,
+        html5ever_blocks,
+        differing_blocks,
         html5ever_empty_text_nodes,
         first_difference,
     })
@@ -161,36 +171,47 @@ fn split_lines(serialized: &str) -> Vec<&str> {
 }
 
 /// 逐行比对，返回（不一致行数, 首个差异描述）。
+///
+/// ## 行数塌缩问题（实测踩到）
+///
+/// 本度量以"一行 = 一个节点"为前提，该前提在**文本节点极长时不成立**：
+/// 若整篇文档落入某个文本节点（如 `<title>` 未闭合），行数会塌缩成个位数，
+/// 差异率仍显示 0% 却几乎什么都没测到。语料 11 的第一版构造正是如此。
+///
+/// 故此处对超长行做**分块散列**后再比对——长文本的差异不会因"都在同一行"
+/// 而被静默忽略。
 fn line_diff(expected: &[&str], actual: &[&str]) -> (usize, Option<String>) {
-    let differing = expected
+    let expanded_expected = expand_long_lines(expected);
+    let expanded_actual = expand_long_lines(actual);
+
+    let differing = expanded_expected
         .iter()
-        .zip(actual.iter())
+        .zip(expanded_actual.iter())
         .filter(|(left, right)| left != right)
         .count();
     // 行数不等时，多出来的部分全是差异——否则"一侧少了几十个节点"
     // 只会被记成 1 行差异，严重低估。
-    let length_gap = expected.len().abs_diff(actual.len());
+    let length_gap = expanded_expected.len().abs_diff(expanded_actual.len());
 
-    let first = expected
+    let first = expanded_expected
         .iter()
-        .zip(actual.iter())
+        .zip(expanded_actual.iter())
         .enumerate()
         .find(|(_, (left, right))| left != right)
         .map(|(index, (left, right))| {
             format!(
-                "第 {} 行：jsoup={:?} / html5ever={:?}",
+                "第 {} 块：{}",
                 index + 1,
-                left,
-                right
+                describe_block_difference(left, right)
             )
         })
         .or_else(|| {
             (length_gap > 0).then(|| {
                 format!(
-                    "行数不同：jsoup={} 行 / html5ever={} 行（前 {} 行一致）",
-                    expected.len(),
-                    actual.len(),
-                    expected.len().min(actual.len())
+                    "块数不同：jsoup={} / html5ever={}（前 {} 块一致）",
+                    expanded_expected.len(),
+                    expanded_actual.len(),
+                    expanded_expected.len().min(expanded_actual.len())
                 )
             })
         });
@@ -198,39 +219,100 @@ fn line_diff(expected: &[&str], actual: &[&str]) -> (usize, Option<String>) {
     (differing + length_gap, first)
 }
 
+/// 描述两个块的差异，**定位到首个不同字符**。
+///
+/// ## 为什么不能只印两个块的前缀
+///
+/// 长文本节点的两块通常在开头的 120 字符里完全一致（实测：283% 那次首差异
+/// 的输出左右两侧看起来一模一样，读者无从判断差异在哪）。故此处跳过公共
+/// 前缀，并把差异位置明确报出来。
+fn describe_block_difference(expected: &str, actual: &str) -> String {
+    const CONTEXT_CHARS: usize = 40;
+
+    let expected_characters: Vec<char> = expected.chars().collect();
+    let actual_characters: Vec<char> = actual.chars().collect();
+
+    // 找到首个不同字符的位置
+    let common_prefix = expected_characters
+        .iter()
+        .zip(actual_characters.iter())
+        .take_while(|(left, right)| left == right)
+        .count();
+
+    let slice_from = |characters: &[char]| -> String {
+        let start = common_prefix.saturating_sub(CONTEXT_CHARS);
+        characters
+            .iter()
+            .skip(start)
+            .take(CONTEXT_CHARS * 2)
+            .collect::<String>()
+    };
+
+    format!(
+        "首异于第 {} 字符：jsoup=…{} / html5ever=…{}",
+        common_prefix + 1,
+        slice_from(&expected_characters),
+        slice_from(&actual_characters)
+    )
+}
+
+/// 超过阈值的长行按固定宽度切块，使长文本参与逐块比对。
+///
+/// 阈值取 256 字符：常规节点的序列化远短于此（一次切块都不发生），
+/// 而退化的巨长文本节点会被切成多块，从而**恢复**该文本的差异分辨率。
+fn expand_long_lines(lines: &[&str]) -> Vec<String> {
+    const CHUNK_WIDTH: usize = 256;
+
+    let mut expanded = Vec::new();
+    for line in lines {
+        if line.chars().count() <= CHUNK_WIDTH {
+            expanded.push((*line).to_owned());
+            continue;
+        }
+        // 按字符切（不是字节）——中文行的字节边界会落在字符中间
+        let characters: Vec<char> = line.chars().collect();
+        for chunk in characters.chunks(CHUNK_WIDTH) {
+            expanded.push(chunk.iter().collect());
+        }
+    }
+    expanded
+}
+
 /// 打印逐样本与汇总报告（Markdown 表格，可直接粘进 BASELINE.md）。
 fn print_report(reports: &[SampleReport]) {
     println!();
-    println!("| 样本 | jsoup 行 | html5ever 行 | 差异行 | 差异率 | html5ever 空文本节点 |");
+    // 单位是"块"而非"行"：超过 256 字符的长行会被切块（见 expand_long_lines），
+    // 故计数单位是"可比对块"。用"行"会让长文本节点样本的数字与实际不符。
+    println!("| 样本 | jsoup 块 | html5ever 块 | 差异块 | 差异率 | html5ever 空文本节点 |");
     println!("|---|---|---|---|---|---|");
     for report in reports {
         println!(
             "| {} | {} | {} | {} | {:.1}% | {} |",
             report.name,
-            report.jsoup_lines,
-            report.html5ever_lines,
-            report.differing_lines,
+            report.jsoup_blocks,
+            report.html5ever_blocks,
+            report.differing_blocks,
             report.difference_ratio() * 100.0,
             report.html5ever_empty_text_nodes
         );
     }
 
-    let total_differing: usize = reports.iter().map(|report| report.differing_lines).sum();
-    let total_lines: usize = reports
+    let total_differing: usize = reports.iter().map(|report| report.differing_blocks).sum();
+    let total_blocks: usize = reports
         .iter()
-        .map(|report| report.jsoup_lines.max(report.html5ever_lines))
+        .map(|report| report.jsoup_blocks.max(report.html5ever_blocks))
         .sum();
-    let overall = if total_lines == 0 {
+    let overall = if total_blocks == 0 {
         0.0
     } else {
-        total_differing as f64 / total_lines as f64
+        total_differing as f64 / total_blocks as f64
     };
     println!();
     println!(
-        "汇总：{} 个样本，{} / {} 行不一致，总体差异率 {:.2}%",
+        "汇总：{} 个样本，{} / {} 块不一致，总体差异率 {:.2}%",
         reports.len(),
         total_differing,
-        total_lines,
+        total_blocks,
         overall * 100.0
     );
 
@@ -786,7 +868,9 @@ impl Node {
         let line = match &self.data {
             // 根文档不出行（理由见模块注释）
             NodeData::Document => return None,
-            NodeData::Element { name, attributes, .. } => {
+            NodeData::Element {
+                name, attributes, ..
+            } => {
                 let mut attribute_pairs: Vec<String> = attributes
                     .borrow()
                     .iter()
@@ -903,9 +987,9 @@ mod tests {
     fn 空样本的差异率为零而非_nan() {
         let report = SampleReport {
             name: "empty".to_owned(),
-            jsoup_lines: 0,
-            html5ever_lines: 0,
-            differing_lines: 0,
+            jsoup_blocks: 0,
+            html5ever_blocks: 0,
+            differing_blocks: 0,
             html5ever_empty_text_nodes: 0,
             first_difference: None,
         };
@@ -950,7 +1034,10 @@ mod tests {
         // 浏览器级解析器会自动补全 html/head/body —— 这里正是要验证这一点
         // （Jsoup 亦然，两侧的"自动补全"是否一致是本 spike 的核心问题之一）
         assert!(serialized.contains("|E|p|"), "应含 p 元素：{serialized}");
-        assert!(serialized.contains("|E|body|"), "应自动补 body：{serialized}");
+        assert!(
+            serialized.contains("|E|body|"),
+            "应自动补 body：{serialized}"
+        );
     }
 
     #[test]
@@ -962,6 +1049,77 @@ mod tests {
             .collect();
         // 字符引用若不被合并，会碎成多个文本节点；契约要求合并成一个
         assert_eq!(text_lines.len(), 1, "文本应合并为单个节点：{serialized}");
+    }
+
+    /// 回归：差异率**不可能**超过 100%。
+    ///
+    /// 实测踩到：分母用原始行数、分子用分块后的差异数时，长文本节点被切块
+    /// 会算出 283% 这种无意义的比率。两者必须同单位。
+    #[test]
+    fn 差异率不超过百分之百() {
+        // 构造"分子大、分母小"的原失控场景：单行超长文本 + 多块差异
+        let report = SampleReport {
+            name: "degenerate".to_owned(),
+            jsoup_blocks: 6,
+            html5ever_blocks: 6,
+            // 即使差异块数被高估也不会越过分母（这是比值定义的硬上界）
+            differing_blocks: 6,
+            html5ever_empty_text_nodes: 0,
+            first_difference: None,
+        };
+        assert!(report.difference_ratio() <= 1.0);
+
+        // 分子等于分母时恰为 1.0（完全不一致）
+        assert!((report.difference_ratio() - 1.0).abs() < f64::EPSILON);
+    }
+
+    /// 回归：超长行必须被分块，否则"整篇落进单个文本节点"会被静默放过。
+    ///
+    /// 实测踩到：语料 11 的第一版构造漏写 `</title>`，整篇文档成了 title 的
+    /// 文本节点，行数塌缩成 7，差异率仍显示 0.0% 却几乎什么都没测到。
+    #[test]
+    fn 超长行被分块后仍能检出差异() {
+        let long_same = format!("1|T|{}", "甲".repeat(1000));
+        let long_different = format!("1|T|{}乙", "甲".repeat(1000));
+
+        // 同一份长文本：不应报差异
+        let (same_differing, same_first) = line_diff(&[&long_same], &[&long_same]);
+        assert_eq!(same_differing, 0, "相同长文本不应报差异");
+        assert!(same_first.is_none());
+
+        // 只在末尾多一个字符：必须被检出（旧实现会漏掉）
+        let (different_differing, different_first) = line_diff(&[&long_same], &[&long_different]);
+        assert!(
+            different_differing > 0,
+            "长文本内部的差异必须被检出——否则行数塌缩会静默放过一切"
+        );
+        assert!(different_first.is_some());
+    }
+
+    /// 短行不受分块影响：常规节点的比对结果与分块前一致。
+    #[test]
+    fn 短行不触发分块() {
+        let short = ["1|E|div|class=a", "2|T|文本"];
+        assert_eq!(
+            expand_long_lines(&short),
+            vec!["1|E|div|class=a", "2|T|文本"]
+        );
+
+        let (differing, first) = line_diff(&short, &short);
+        assert_eq!(differing, 0);
+        assert!(first.is_none());
+    }
+
+    /// 分块按**字符**切，不是字节——中文行的字节边界会落在字符中间。
+    #[test]
+    fn 长中文行按字符分块() {
+        let line = "甲".repeat(600); // 600 字符 = 1800 字节
+        let blocks = expand_long_lines(&[line.as_str()]);
+        assert_eq!(blocks.len(), 3, "600 字符按 256 宽应切为 3 块");
+        assert_eq!(blocks[0].chars().count(), 256);
+        // 拼回应与原文一致（没有因字节切分而破坏字符）
+        let rejoined: String = blocks.concat();
+        assert_eq!(rejoined, line);
     }
 
     #[test]

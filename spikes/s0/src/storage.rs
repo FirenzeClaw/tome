@@ -23,8 +23,8 @@ pub fn verify_once() -> Result<String, String> {
     let connection = Connection::open(&database_path)
         .map_err(|error| format!("打开 {database_path:?} 失败：{error}"))?;
 
-    let round_trip = write_and_read(&connection)
-        .map_err(|error| format!("SQLite 读写失败：{error}"))?;
+    let round_trip =
+        write_and_read(&connection).map_err(|error| format!("SQLite 读写失败：{error}"))?;
 
     let sqlite_version = rusqlite::version().to_owned();
     Ok(format!(

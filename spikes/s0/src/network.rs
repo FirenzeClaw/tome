@@ -34,10 +34,7 @@ pub fn fetch_once(url: &str) -> Result<String, String> {
     }
 
     // 只回摘要，不回内容：spike 不需要正文，打印完整 HTML 只会淹没日志。
-    Ok(format!(
-        "GET {url} → {status}，{} 字节",
-        body_bytes.len()
-    ))
+    Ok(format!("GET {url} → {status}，{} 字节", body_bytes.len()))
 }
 
 /// spike 的 HTTP 超时：30 秒。

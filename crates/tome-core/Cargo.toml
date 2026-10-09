@@ -1,0 +1,15 @@
+[package]
+name = "tome-core"
+description = "tome 接缝中枢：宿主能力 trait、共享值对象与 ErrorKind 错误分类"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+# 接缝中枢刻意零依赖：core 被所有实现 crate 依赖，任何依赖都会扩散到全员，
+# 且必须能在无图形环境下独立编译（宪法原则 IV）。
+# 内部 crate 依赖在此登记（当前为空，Phase 2 起塔实）。
+
+[lints]
+workspace = true

@@ -1,0 +1,15 @@
+[package]
+name = "tome-rule"
+description = "tome 规则引擎：分派、切分、CSS、JSONPath、XPath、正则与替换链"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+tome-core = { workspace = true }
+# tome-rule 依赖 tome-js 以执行规则内嵌脚本片段；求值只产出 RequestSpec 不亲自发请求（A2）
+tome-js = { workspace = true }
+
+[lints]
+workspace = true

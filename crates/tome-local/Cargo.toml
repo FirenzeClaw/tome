@@ -1,0 +1,16 @@
+[package]
+name = "tome-local"
+description = "tome 本地书：TXT/EPUB/MOBI 解析、库根扫描与 TOC 识别"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+tome-core = { workspace = true }
+tome-store = { workspace = true }
+# TOC 识别复用规则引擎的既有语义，避免同一套切分逻辑实现两遍（宪法原则 IV DRY）
+tome-rule = { workspace = true }
+
+[lints]
+workspace = true

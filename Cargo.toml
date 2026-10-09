@@ -1,0 +1,53 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/tome-core",
+    "crates/tome-net",
+    "crates/tome-store",
+    "crates/tome-js",
+    "crates/tome-rule",
+    "crates/tome-source",
+    "crates/tome-local",
+    "crates/tome-cli",
+]
+
+[workspace.package]
+# 版本与许可证为 workspace 级单一来源，各 crate 经 version.workspace / license.workspace 继承
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.98"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+# 内部 crate 统一在此登记，成员 crate 用 `tome-core = { workspace = true }` 引用。
+# 这样依赖方向在 workspace 清单里一眼可读，且版本号只维护一处。
+# 注意：此处登记 ≠ 添加第三方依赖。真实第三方依赖在 Phase 2 起按需引入。
+tome-core = { path = "crates/tome-core" }
+tome-net = { path = "crates/tome-net" }
+tome-store = { path = "crates/tome-store" }
+tome-js = { path = "crates/tome-js" }
+tome-rule = { path = "crates/tome-rule" }
+tome-source = { path = "crates/tome-source" }
+tome-local = { path = "crates/tome-local" }
+tome-cli = { path = "crates/tome-cli" }
+
+[profile.release]
+# 体积纪律（宪法「附加约束 · 体积纪律」）：<20MB 是目标基线，故 release 按体积最优配置。
+# fat LTO + codegen-units=1 以编译时长换体积与运行速度；strip 去掉符号表；
+# panic=abort 去掉 unwind 表（代价：无法 catch_unwind，见下方说明）。
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[workspace.lints.rust]
+# 生产级护栏：unsafe 代码必须显式标注理由（配合各文件的 SAFETY 注释约定）
+unsafe_code = "warn"
+
+[workspace.lints.clippy]
+# 与 AGENTS.md「禁止生产路径上的 unwrap()/expect()/panic!()」对齐。
+# 取 warn 而非 deny：Phase 2 起测试代码允许使用 unwrap，deny 会让测试无法编写；
+# CI 侧统一用 `cargo clippy -- -D warnings` 把 warn 升级为错误，效果等价且更灵活。
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"

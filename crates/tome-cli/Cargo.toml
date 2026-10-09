@@ -1,0 +1,20 @@
+[package]
+name = "tome-cli"
+description = "tome 验证器：CLI 子命令与差分测试入口"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+# 组合根：CLI 是唯一允许依赖全部实现 crate 的位置（见 plan.md 依赖图）
+tome-core = { workspace = true }
+tome-net = { workspace = true }
+tome-store = { workspace = true }
+tome-js = { workspace = true }
+tome-rule = { workspace = true }
+tome-source = { workspace = true }
+tome-local = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "tome-net"
+description = "tome 网络层：HTTP、Cookie、代理、限速、字符集与 RequestSpec 回放"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+tome-core = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "tome-store"
+description = "tome 存储层：SQLite actor、迁移器、DAO、Pack 容器与图片缓存"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+tome-core = { workspace = true }
+
+[lints]
+workspace = true

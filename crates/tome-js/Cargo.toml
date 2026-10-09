@@ -1,0 +1,13 @@
+[package]
+name = "tome-js"
+description = "tome JS 沙箱：QuickJS 运行时、宿主能力注入接线与兼容前导脚本"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+tome-core = { workspace = true }
+
+[lints]
+workspace = true

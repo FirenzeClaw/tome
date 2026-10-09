@@ -1061,12 +1061,23 @@ impl Element for NodeRef {
             JsoupPseudoClass::Gt(index) => sibling_index_matches(self, *index, |a, b| a > b),
             JsoupPseudoClass::Lang(language) => {
                 // `:lang()` 按 CSS 规则向上找最近的 lang 属性。
+                //
+                // ## 匹配规则
+                //
+                // CSS Selectors 规范对 `:lang(l)` 的定义是"元素的 lang 等于 l，
+                // **或以 l 加 `-` 起头**"（`en` 匹配 `en`、`en-US`、`en-GB`）。
+                // 大小写不敏感（BCP 47 的 language tag 大小写不敏感）。
+                //
+                // 顺带去掉一处原来的 `format!` 分配：旧写法在每次匹配时构造
+                // `"en-"` 字符串，而 `:lang` 会在遍历中反复求值。
                 let _ = context;
                 element_language(self).is_some_and(|actual| {
-                    actual.eq_ignore_ascii_case(language)
-                        || actual
-                            .to_ascii_lowercase()
-                            .starts_with(&format!("{}-", language.to_ascii_lowercase()))
+                    let actual_lower = actual.to_ascii_lowercase();
+                    let wanted = language.to_ascii_lowercase();
+                    actual_lower == wanted
+                        || actual_lower
+                            .strip_prefix(&wanted)
+                            .is_some_and(|rest| rest.starts_with('-'))
                 })
             }
             // 方言 1 的匹配落点：从 extra_data 取**已编译**的正则（见 AttrRegexCache）。
@@ -1677,6 +1688,20 @@ Line2)"
         let html = r#"<div lang="en"><p>x</p></div>"#;
         assert_eq!(query(html, "p:lang(en)").len(), 1);
         assert_eq!(query(html, "p:lang(zh)").len(), 0);
+
+        // CSS Selectors 规范：`:lang(en)` 也要匹配 `en-US` / `en-GB`。
+        let html =
+            r#"<div lang="en-US"><p id="a">x</p></div><div lang="english"><p id="b">y</p></div>"#;
+        let document = Document::parse_html(html);
+        let matched: Vec<String> = select_in_document(&document, &parsed("p:lang(en)"))
+            .into_iter()
+            .map(|node| node.attr("id").unwrap_or_default())
+            .collect();
+        assert_eq!(
+            matched,
+            vec!["a"],
+            "`en` 应匹配 `en-US`，但不该匹配 `english`（必须有 `-` 分隔）"
+        );
     }
 
     #[test]

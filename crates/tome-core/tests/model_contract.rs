@@ -162,6 +162,8 @@ fn 书源承载五类动作规则与请求定制() {
         enabled: true,
         book_source_type: Some(0),
         book_url_pattern: Some("https://example\\.com/book/\\d+".to_owned()),
+        search_url: Some("/search?q={{key}}&page={{page}}".to_owned()),
+        explore_url: Some("/explore/{{page}}".to_owned()),
         rule_search: Some("{}".to_owned()),
         rule_explore: Some("{}".to_owned()),
         rule_book_info: Some("{}".to_owned()),
@@ -187,6 +189,19 @@ fn 书源承载五类动作规则与请求定制() {
         source.rate_limit_ms,
         Some(1000),
         "请求间隔供限速器使用（FR-008）"
+    );
+    // 搜索地址与发现地址是公开书源格式的**顶层**字段（R4，PM 仲裁 2026-10-10）：
+    // 它们与 `rule_search` / `rule_explore` 是并列的顶层键，不是规则 JSON 的子键。
+    // 放在 DTO 里是为了让消费方（搜索管线、P6 的发现管线）无需再包一层解析结果。
+    assert_eq!(
+        source.search_url.as_deref(),
+        Some("/search?q={{key}}&page={{page}}"),
+        "搜索地址必须是可承载 `{{}}` 占位符的模板串"
+    );
+    assert_eq!(
+        source.explore_url.as_deref(),
+        Some("/explore/{{page}}"),
+        "发现地址同样是顶层字段（公开格式的 `exploreUrl`）"
     );
     // 五类动作规则齐全（FR-002）
     for (label, rule) in [

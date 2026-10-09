@@ -209,8 +209,8 @@ impl RegisteredSource {
             url: source.id.clone(),
             kind: Some(source.kind.as_storage_code()),
             enabled: source.enabled,
-            search_url: parsed.search_url.clone(),
-            explore_url: parsed.explore_url.clone(),
+            search_url: source.search_url.clone(),
+            explore_url: source.explore_url.clone(),
             book_url_pattern: source.book_url_pattern.clone(),
             rule_search: source.rule_search.clone(),
             rule_explore: source.rule_explore.clone(),
@@ -307,11 +307,12 @@ mod tests {
             loaded.get("https://b.com").expect("应有源B").source.name,
             "源B"
         );
-        // 关键字段在往返后不丢
+        // 关键字段在往返后不丢（R4：search_url 现在是 `Source` 自己的字段）
         assert_eq!(
             loaded
                 .get("https://a.com")
                 .expect("应有源A")
+                .source
                 .search_url
                 .as_deref(),
             Some("/s?q={{key}}")

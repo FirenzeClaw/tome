@@ -81,6 +81,28 @@ pub struct Source {
     pub book_source_type: Option<i32>,
     /// 书籍详情页 URL 匹配模式（用于识别"这个链接属于哪个源"）
     pub book_url_pattern: Option<String>,
+    /// 搜索地址模板（公开书源格式的顶层 `searchUrl`）。
+    ///
+    /// ## 为什么在 core 而不在解析器里包一层（R4，PM 仲裁 2026-10-10）
+    ///
+    /// `searchUrl` 是**顶层键**，与 `ruleSearch` 并列；它承载 `{{key}}` /
+    /// `{{page}}` 占位符，是"搜索要请求哪个地址"的唯一来源。此前的做法是在
+    /// `tome-source` 里用 `ParsedSource` 包一层单独存放它，代价是**任何消费方
+    /// 都必须同时持有 `Source` 与那个包装类型**——包括不依赖 `tome-source`
+    /// 的上层。放回 DTO 后，`Source` 自身就是完整的可落库实体。
+    ///
+    /// 与 [`Self::rule_search`] 的关系：前者是"请求哪个地址"，后者是"从响应里
+    /// 怎么取字段"，两者都是搜索动作的必需输入，缺一不可。
+    pub search_url: Option<String>,
+    /// 发现地址模板（公开书源格式的顶层 `exploreUrl`，可含 `::` 分隔的多条）。
+    ///
+    /// R4 与 [`Self::search_url`] 一同下沉。本期只解析 + 存储；**消费方是 P6 的
+    /// 发现管线**，本切片不实现 `discover` 动作。
+    ///
+    /// 与 [`Self::explore_screen`] 的区别：后者是发现页的**界面配置** JSON
+    ///（分类导航的呈现），前者是实际的**请求地址**规则。两者在书源格式里
+    /// 是 `exploreUrl` 与 `exploreScreen` 两个不同的键。
+    pub explore_url: Option<String>,
     /// 搜索规则（JSON）
     pub rule_search: Option<String>,
     /// 发现规则（JSON）
@@ -104,6 +126,11 @@ pub struct Source {
     /// 声明的字符集（FR-009：声明与实际不符时须容错）
     pub charset: Option<String>,
     /// 请求间隔，毫秒（FR-008：限速依据）
+    ///
+    /// 来源是公开书源格式的顶层 `concurrentRate`（R5，PM 仲裁 2026-10-10）：
+    /// 社区真实书源把它写成**字符串毫秒值**（如 `"1000"` / `"2000"` / `"3000"`）。
+    /// 解析规则见 `tome_source::source::parse_concurrent_rate`——非数字/负数/零
+    /// 一律视为"未声明"（`None`）而非拒绝整条源。
     pub rate_limit_ms: Option<i64>,
     /// 排序权重
     pub weight: Option<i32>,

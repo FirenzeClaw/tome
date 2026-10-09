@@ -13,20 +13,20 @@
 //!
 //! # 与 `tome-core::Source` 的关系
 //!
-//! [`ParsedSource`] 包一层 core 的 [`Source`] 并补上 `search_url`。
-//! ## 为什么要包一层（不是重复定义）
+//! [`ParsedSource`] 是对 core 的 [`Source`] 的**薄包装**（R4，PM 仲裁
+//! 2026-10-10 之后已无额外字段）。
 //!
-//! data-model.md 的 `source` 表**没有** `search_url` 列，但书源格式里
-//! `searchUrl` 是搜索动作的必需字段（公开的《书源规则说明》把"搜索地址(url)"
-//! 列为搜索规则的组成部分）。两者不一致的原因应是：data-model 把
-//! `searchUrl` 归入了 `rule_search` 的 JSON（该列注释写着"搜索规则（JSON：
-//! 列表/书名/作者/封面/简介/详情URL 等字段）"，而 `searchUrl` 是同一质性的
-//! 规则文本）。
+//! ## `searchUrl` / `exploreUrl` 的归属（R4 的结论）
 //!
-//! 为不擅自改 core，本 crate 在解析时把 `searchUrl` 从规则 JSON 里提出来
-//! 放在 [`ParsedSource::search_url`]，落库时仍写回 `rule_search` 的 JSON——
-//! 存储层看到的数据形状不变。**该归属差异已上报 PM 裁决**
-//! （见 `review` 汇报的遗留问题清单）。
+//! 本模块初版把 `searchUrl` 从规则 JSON 里提出来放在
+//! [`ParsedSource::search_url`]，理由是 data-model.md 的 `source` 表没有该列。
+//! PM 仲裁（R4）判定：`searchUrl` 与 `exploreUrl` 是公开书源格式的**顶层键**，
+//! 与 `ruleSearch` 并列，因此**下沉为 `Source` 的字段**才是正确归属。
+//! 该结论已由 PM 补录进 data-model.md。
+//!
+//! 故现在：解析时两个键都写进 `Source`；`ruleSearch` 里若内嵌 `searchUrl`，
+//! 仍然提取出来（信息只存一处），但**不再切掉**——保留在规则 JSON 里是为了
+//! 让"作者把 searchUrl 写在规则里"这条路径在落库后仍可追溯。
 //!
 //! [DONE] 关键入口：[`parse_sources`]（文本 → 书源列表）、[`load_from_channel`]。
 
@@ -40,16 +40,20 @@ use crate::error::SourceError;
 
 /// 解析后的书源：core 的 [`Source`] + 本 crate 需要的补充字段。
 ///
-/// `source` 是**可落库的完整实体**；其余字段是解析期的中间产物，
-/// 落库时被并入 `source` 的对应字段（见模块文档）。
+/// ## R4 之后它为什么只是 [`Source`] 的别名式包装（PM 仲裁 2026-10-10）
+///
+/// `searchUrl` / `exploreUrl` 已下沉到 [`Source`] 本身（见 core 的
+/// `Source::search_url` 文档），故本结构**不再单独承载形式字段**。
+/// 保留这一层是因为它在 Cargo.lock 上已与 `tome-cli` / `tome-source` 的公共
+/// 签名绑定，且将来可能承载"解析期中间产物"（如 `group_name` → `group_id`
+/// 的待决映射）。**若后续确实没有新增字段，应在某个切片里把它降为
+/// `type ParsedSource = Source;` 或直接删除。** 标 `[UNCERTAIN]`：
+/// 现在删会让本期改动面扩大（CLI、注册表、搜索管线三处签名），
+/// 而它并不造成行为差异。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedSource {
-    /// 可落库的实体
+    /// 可落库的实体（`search_url` / `explore_url` 已在其内）
     pub source: Source,
-    /// 搜索地址模板（含 `{{key}}` / `{{page}}` 占位符）
-    pub search_url: Option<String>,
-    /// 发现地址规则（含 `::` 分隔的多条）
-    pub explore_url: Option<String>,
 }
 
 /// 导入的最终结果：解析出的书源 + 报告。
@@ -276,11 +280,16 @@ fn convert_entry(entry: &serde_json::Value, index: usize) -> Result<ParsedSource
     let kind = classify_kind(&view);
     let now = now_unix_seconds();
 
-    // `rule_search` 的 JSON 里若含 `searchUrl`，把它提到外层（见模块文档）。
-    // 同时把外层的 `searchUrl` 写回 rule_search，保证落库后信息不丢。
+    // `rule_search` 的 JSON 里若含 `searchUrl`，把它提到 `Source::search_url`
+    // （R4：该字段现在是 core DTO 的一部分）。**保留**规则里的原文：
+    // "作者把 searchUrl 写在规则 JSON 里"这条路径落库后仍可追溯。
     let rule_search_text = view.rule_search.and_then(RuleField::into_text);
     let (rule_search, extracted_search_url) = normalize_rule_search(&rule_search_text);
-    let search_url = view.search_url.clone().or(extracted_search_url);
+    let search_url = view
+        .search_url
+        .clone()
+        .or(extracted_search_url)
+        .filter(|text| !text.trim().is_empty());
 
     // `custom_order` 当前不落库（见其字段文档），显式消费以免 dead_code
     let _custom_order = view.custom_order;
@@ -296,6 +305,10 @@ fn convert_entry(entry: &serde_json::Value, index: usize) -> Result<ParsedSource
         enabled: view.enabled.unwrap_or(true),
         book_source_type: view.book_source_type.map(|value| value as i32),
         book_url_pattern: view.book_url_pattern.filter(|text| !text.is_empty()),
+        search_url,
+        // 发现地址与 `explore_screen` 是书源格式里两个不同的顶层键：
+        // 前者是请求地址规则（P6 的发现管线消费），后者是发现页呈现配置。
+        explore_url: view.explore_url.clone().filter(|text| !text.is_empty()),
         rule_search,
         rule_explore: view.rule_explore.and_then(RuleField::into_text),
         rule_book_info: view.rule_book_info.and_then(RuleField::into_text),
@@ -330,11 +343,7 @@ fn convert_entry(entry: &serde_json::Value, index: usize) -> Result<ParsedSource
         created_at: now,
     };
 
-    Ok(ParsedSource {
-        source,
-        search_url,
-        explore_url: view.explore_url.clone().filter(|text| !text.is_empty()),
-    })
+    Ok(ParsedSource { source })
 }
 
 /// 取必需字段，缺失时给出可读的失败原因。
@@ -394,7 +403,15 @@ fn classify_kind(view: &SourceJson) -> SourceKind {
     }
 }
 
-/// 归一化 `rule_search`：把内嵌的 `searchUrl` 提出来，并保证落库时信息完整。
+/// 归一化 `rule_search`：把内嵌的 `searchUrl` 提出来供 `Source::search_url` 使用。
+///
+/// ## 为什么不从规则 JSON 里删掉它（R4 修订）
+///
+/// 初版把它删掉，理由是"避免两处存储同一信息"。PM 仲裁 R4 之后该理由不再成立：
+/// `Source::search_url` 现在是一个**语义明确的顶层字段**，而规则 JSON 里的
+/// `searchUrl` 是作者的原文。两者共存不构成矛盾——前者是归一化结果，后者是
+/// 原始输入，正如 `Source::rule_search` 与规则 JSON 原文的关系。
+/// 删掉反而会让"作者的规则里到底写了什么"在落库后丢失。
 ///
 /// 返回 `(归一化后的 rule_search, 提取到的 searchUrl)`。
 fn normalize_rule_search(rule_search: &Option<String>) -> (Option<String>, Option<String>) {
@@ -408,7 +425,7 @@ fn normalize_rule_search(rule_search: &Option<String>) -> (Option<String>, Optio
 
     // 规则本身是 JSON 文本；解析失败时原样保留——规则语法错误应在**求值**时
     // 报出（那里能给出更准确的位置），而不是让整条源在导入时消失。
-    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
         return (Some(trimmed.to_string()), None);
     };
 
@@ -416,12 +433,6 @@ fn normalize_rule_search(rule_search: &Option<String>) -> (Option<String>, Optio
         .get("searchUrl")
         .and_then(|inner| inner.as_str())
         .map(|inner| inner.to_string());
-
-    if let Some(object) = value.as_object_mut() {
-        // `searchUrl` 提到外层后从 rule_search 里移除，避免两处存储同一信息
-        // （落库时 `Source.rule_search` 不含它，`ParsedSource::search_url` 含）。
-        object.remove("searchUrl");
-    }
 
     (Some(value.to_string()), extracted)
 }
@@ -610,9 +621,9 @@ mod tests {
         assert!(parsed.source.enabled);
         assert_eq!(parsed.source.charset.as_deref(), Some("gbk"));
         assert_eq!(parsed.source.weight, Some(3));
-        // searchUrl 被提到外层
+        // searchUrl 落在 `Source` 自己的字段里（R4）
         assert_eq!(
-            parsed.search_url.as_deref(),
+            parsed.source.search_url.as_deref(),
             Some("/search?q={{key}}&page={{page}}")
         );
     }
@@ -767,7 +778,7 @@ mod tests {
     }
 
     #[test]
-    fn 内嵌_searchurl_被提到外层并从规则里移除() {
+    fn 内嵌_searchurl_被提到_source_字段() {
         let text = r#"{
           "bookSourceName": "内嵌源",
           "bookSourceUrl": "https://inline.com",
@@ -775,15 +786,73 @@ mod tests {
         }"#;
         let outcome = parse_sources(text).expect("应解析成功");
         let parsed = &outcome.sources[0];
-        assert_eq!(parsed.search_url.as_deref(), Some("/s?q={{key}}"));
-
-        // 规则里不该再有 searchUrl（信息只存一处）
-        let rule = parsed.source.rule_search.as_deref().expect("应保留规则");
-        assert!(
-            !rule.contains("searchUrl"),
-            "searchUrl 应已从规则里移除：{rule}"
+        assert_eq!(
+            parsed.source.search_url.as_deref(),
+            Some("/s?q={{key}}"),
+            "内嵌的 searchUrl 应被提取到 Source::search_url"
         );
-        assert!(rule.contains("bookList"), "其余规则应保留：{rule}");
+
+        // R4（PM 仲裁 2026-10-10）之后**保留**规则里的原文：
+        // `Source::search_url` 是归一化结果，规则 JSON 是作者原文，两者共存
+        // 不矛盾——删掉会让"作者到底写了什么"在落库后丢失。
+        let rule = parsed.source.rule_search.as_deref().expect("应保留规则");
+        assert!(rule.contains("bookList"), "其余规则必须保留：{rule}");
+        assert!(
+            rule.contains("searchUrl"),
+            "规则原文应原样保留（R4）：{rule}"
+        );
+    }
+
+    #[test]
+    fn 顶层_searchurl_与_exploreurl_落进_source() {
+        // R4 的核心验收：公开书源格式的两个顶层键直接成为 `Source` 的字段，
+        // 消费方无需再包一层解析结果。
+        let text = r#"{
+          "bookSourceName": "顶层地址源",
+          "bookSourceUrl": "https://top.com",
+          "searchUrl": "/s?q={{key}}",
+          "exploreUrl": "/explore/{{page}}",
+          "ruleSearch": "{\"bookList\":\"@css:li\"}"
+        }"#;
+        let outcome = parse_sources(text).expect("应解析成功");
+        let source = &outcome.sources[0].source;
+        assert_eq!(source.search_url.as_deref(), Some("/s?q={{key}}"));
+        assert_eq!(source.explore_url.as_deref(), Some("/explore/{{page}}"));
+    }
+
+    #[test]
+    fn 顶层_searchurl_优先于规则内嵌的() {
+        // 两个位置都写了时以**顶层**为准：它是书源格式里该字段的规范位置，
+        // 规则内嵌只作为兼容路径存在。
+        let text = r#"{
+          "bookSourceName": "双写源",
+          "bookSourceUrl": "https://both.com",
+          "searchUrl": "/top?q={{key}}",
+          "ruleSearch": "{\"searchUrl\":\"/inner?q={{key}}\",\"bookList\":\"@css:li\"}"
+        }"#;
+        let outcome = parse_sources(text).expect("应解析成功");
+        assert_eq!(
+            outcome.sources[0].source.search_url.as_deref(),
+            Some("/top?q={{key}}")
+        );
+    }
+
+    #[test]
+    fn 空的_searchurl_归一为_none() {
+        // 空串与缺失等价（见 `空字符串字段被归一为_none` 的同款约定）：
+        // `Source::search_url = Some("")` 会让消费方以为"声明了但为空"，
+        // 而实际语义是"没声明"。
+        let text = r#"{
+          "bookSourceName": "空地址源",
+          "bookSourceUrl": "https://emptyurl.com",
+          "searchUrl": "   ",
+          "exploreUrl": "",
+          "ruleSearch": "{\"bookList\":\"@css:li\"}"
+        }"#;
+        let outcome = parse_sources(text).expect("应解析成功");
+        let source = &outcome.sources[0].source;
+        assert_eq!(source.search_url, None);
+        assert_eq!(source.explore_url, None);
     }
 
     #[test]

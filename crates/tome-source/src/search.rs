@@ -157,6 +157,7 @@ pub fn parse_search_spec(
 ) -> Result<SearchRequestPlan, SourceError> {
     let id = &parsed.source.id;
     let template = parsed
+        .source
         .search_url
         .as_deref()
         .ok_or_else(|| SourceError::incomplete(id.clone(), "缺少 searchUrl（搜索地址）"))?;

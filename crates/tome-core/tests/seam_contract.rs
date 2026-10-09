@@ -520,6 +520,8 @@ fn sample_source() -> tome_core::model::Source {
         enabled: true,
         book_source_type: None,
         book_url_pattern: None,
+        search_url: None,
+        explore_url: None,
         rule_search: None,
         rule_explore: None,
         rule_book_info: None,

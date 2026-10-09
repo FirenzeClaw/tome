@@ -44,5 +44,6 @@ pub mod dispatch;
 pub mod dom;
 pub mod error;
 pub mod js_bridge;
+pub mod mainjs;
 pub mod regex;
 pub mod replace;

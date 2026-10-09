@@ -2223,6 +2223,7 @@ dependencies = [
  "precomputed-hash",
  "regex",
  "selectors",
+ "serde_json",
  "thiserror",
  "tome-core",
  "tome-js",

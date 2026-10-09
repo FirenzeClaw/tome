@@ -1,0 +1,43 @@
+# 工具链钉版：Windows 用 stable-x86_64-pc-windows-gnu
+#
+# ## 为什么写完整的三元组，而不是只写 channel = "stable"
+#
+# rustup 的 "host" 是**安装 rustup 时**的宿主机三元组，与本机 default
+# toolchain 是两件事。本机 rustup 的默认 host 是 `x86_64-pc-windows-msvc`，
+# 而项目要求的是 gnu（见下）。若此处只写 `channel = "stable"`，rustup 会按
+# 默认 host 解析成 stable-msvc，与项目要求不符。
+#
+# 同理，**不可**写 `channel = "stable"` + `targets = ["x86_64-pc-windows-gnu"]`：
+# 那会被解析为"msvc 宿主的工具链 + 交叉编译到 gnu"，实测会让 rustup
+# 下载并激活 msvc 工具链——方向正好相反。正确写法是把 gnu 直接写进 channel。
+#
+# ## 为什么 CI 三平台不会因此失败
+#
+# 本文件只在**仓库检出目录内**生效，CI 的 macos-latest / ubuntu-latest
+# runner 上不存在 `stable-x86_64-pc-windows-gnu` 这个 Linux/macOS 宿主
+# 工具链。故 CI 的构建步骤统一用 `RUSTUP_TOOLCHAIN` 或 `--toolchain`
+# 显式指定该平台的原生工具链来绕开本文件（见 .github/workflows/ci.yml），
+# 本文件因此只承担"钉住开发者本机（Windows）ABI 选择"的职责。
+#
+# ## 为什么 Windows 必须是 gnu 而非 msvc
+#
+# 1. rquickjs 官方将 Windows-msvc 标为 experimental，Windows-gnu 为 tested
+#    （research.md R1 缓解 3）。
+# 2. msvc 依赖 VS Build Tools（7-10GB，且只能装 C 盘），与项目"工具链一律
+#    装 D 盘"的部署约定冲突；gnu 链可全 D 盘（AGENTS.md 开发工具链规范）。
+#
+# ## 为什么没有 targets 字段
+#
+# 钉 targets 会在**每次** rustup 调用时触发 channel 同步检查（实测耗时
+# 1-2 分钟且可能失败于网络），而本项目只做本机原生构建、不做交叉编译，
+# 无需额外 target。需要交叉编译时应在 CI 步骤里显式 `rustup target add`。
+#
+# ## 为什么没有 wasm32 target
+#
+# rquickjs 的 wasm 构建期会 curl 下载 wasi-sdk，与项目"除用户明确触发的
+# 抓取外不得产生任何网络外发"的承诺冲突，也让构建依赖外部网络可用性。
+
+[toolchain]
+channel = "stable-x86_64-pc-windows-gnu"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

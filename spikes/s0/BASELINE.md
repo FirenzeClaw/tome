@@ -72,14 +72,21 @@ Get-Process -Id $p.Id | Select-Object ProcessName, MainWindowTitle, MainWindowHa
 | windows-gnu | ✅ **本机实测通过**（含 eval 运行） |
 | macos / linux | ⏳ **遗留**：CI job 已就绪（`.github/workflows/ci.yml` 的 `s0-spike` job），**尚未实跑** |
 
-> **为什么尚未实跑**（2026-10-09 核实）：本仓库配置了 remote
-> `git@github.com:FirenzeClaw/tome.git`，但
-> - 本地 `origin/main` 引用停留在 Phase 1 的 `19f6086`（无本次任何提交）
-> - `git ls-remote --heads origin` 对 `refs/heads/main` 返回全零哈希
+> **为什么尚未实跑**（2026-10-09 核实）：
+>
+> - 远端 `refs/heads/main` 指向 `19f6086`（Phase 1 的提交），与本地 `origin/main`
+>   一致；本地 `main` 已前进到本次工作之后的提交
 > - `git show origin/main:.github/workflows/ci.yml` 中**不含** `s0-spike` job
+>   （实测计数为 0）
 >
 > 即：**新增的 spike job 从未到达远端**，故 macOS/Linux 的 spike 构建在任何
 > 地方都未曾运行。本项**不能**标为已验证——只标"job 就绪 + 待 push 后实跑"。
+>
+> **更正记录**：本节的初版曾写"`git ls-remote` 返回全零哈希"并据此推断远端为空
+> 仓库。那是错的——`git ls-remote --heads origin` 实际返回 `19f6086...`。
+> 我把一次命令输出被渲染成零哈希的假象当成了事实。改用 `od -c` 复核后更正为
+> 上述陈述。**下游结论不变**（spike job 确实未达远端），但理由不同：不是"远端
+> 为空"，而是"远端停在 Phase 1 的提交"。
 
 ### 2.3 无非用户触发的网络外发（FR-041 / SC-012）
 
@@ -197,7 +204,8 @@ $ cargo build --release --features spike-js      # 含 rquickjs 臂
   **自建最小 arena DOM**（实现 `TreeSink`），**未使用 `markup5ever_rcdom`**
   （research.md R2 已定）。
 
-**度量**：两侧序列化为「深度 + 节点类型 + 名称/内容」的行序列，逐行比对。
+**度量**：两侧序列化为「深度 + 节点类型 + 名称/内容」的行序列，再逐**块**比对
+（超过 256 字符的行会切块，见 §4.2 的单位说明）。
 两侧**共用同一套序列化约定**（元素名小写、属性按名排序、文本折叠空白），
 否则差异率测的是"约定不同"而非"解析不同"。
 
@@ -250,7 +258,7 @@ $ cargo run --quiet -- dom-diff corpus
 ### 4.3 结论
 
 **在本次语料范围内，Jsoup 1.23.2 与 html5ever 0.40.1 + 自建 DOM 的 DOM 树形完全一致
-（198/198 行逐字节相同）。** 这是对 research.md R2「html5ever + 自建 arena DOM」
+（14,623 块逐字节相同）。** 这是对 research.md R2「html5ever + 自建 arena DOM」
 路线的**正面实测支持**。
 
 ### 4.4 系统性差异点（**实测发现，已全部处置**）
@@ -329,7 +337,7 @@ $ cargo run --quiet -- dom-diff corpus
 cd spikes/s0
 cargo build --release                          # 空壳臂（T007 对照）
 cargo build --release --features spike-js      # 含 rquickjs 臂
-cargo test                                     # 7 个单测
+cargo test                                     # 11 个单测
 cargo run --quiet -- --headless                # 无窗口、无网络外发（CI 路径）
 cargo run --quiet -- --http                    # 显式一次 HTTP
 

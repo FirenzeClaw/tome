@@ -85,7 +85,27 @@ pub trait BookRepository {
     /// 单个书源。
     fn source_by_id(&self, source_id: &str) -> Result<Option<Source>, ErrorKind>;
     /// 导入书源。**同 id 按"更新"处理**（spec 边缘情况）。
-    fn import_sources(&self, sources: &[Source]) -> Result<ImportReport, ErrorKind>;
+    ///
+    /// 覆盖 FR-001 要求的**三种渠道**（本地文件 / URL / 粘贴文本），由
+    /// [`SourceImportChannel`] 表达。契约 §3 的 `import_sources(file | url | text)`
+    /// 即指此签名。
+    ///
+    /// ## 为什么渠道必须是参数而不是"由上层解析好再传 Source"
+    ///
+    /// FR-001 明确要求三种渠道**都可导入**，且 URL 渠道含"粘贴链接后拉取并解析"
+    /// ——这一步需要发网络请求。若签名只收 `&[Source]`，则：
+    /// 1. "URL 渠道"在接缝上**无法表达**，该能力会退化成上层各自的实现
+    ///    （于是网络策略、重试、限速三处各写一遍，绕过 A2 的"唯一发请求处"）；
+    /// 2. 导入格式的解析（含对既有社区流通格式的容错）也会散落到各调用方。
+    ///
+    /// 故渠道进签名，实现方（tome-store 经组合根拿到 NetHost）负责拉取与解析。
+    fn import_sources(&self, channel: &SourceImportChannel) -> Result<ImportReport, ErrorKind>;
+    /// 导入**已解析好**的书源（供批量导入场景直接落库，省去重复解析）。
+    ///
+    /// 与 [`Self::import_sources`] 的关系：前者覆盖 FR-001 的三渠道（含拉取与
+    /// 解析），后者是"手里已有 `Source` 列表"时的快路径。两者共用同一套
+    /// "同 id 即更新"的落库语义。
+    fn import_parsed_sources(&self, sources: &[Source]) -> Result<ImportReport, ErrorKind>;
     /// 书源分组。
     fn source_groups(&self) -> Result<Vec<SourceGroup>, ErrorKind>;
 
@@ -188,6 +208,24 @@ pub enum CacheKind {
     Chapter,
     /// 图片缓存（FR-019）
     Image,
+}
+
+/// 书源导入渠道（FR-001 要求至少覆盖三种）。
+///
+/// 用枚举把三个渠道变成**类型层面可穷举**的集合：实现方 match 时必须处理全部
+/// 三种，新增渠道时编译器会指出所有遗漏处。若改用 `Option<String>` 之类的
+/// 松散结构，"URL 渠道没实现"这种缺失不会在编译期暴露。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SourceImportChannel {
+    /// 本地文件（选择或拖入）。内容为文件文本。
+    FileText(String),
+    /// URL（粘贴链接后拉取并解析）。
+    ///
+    /// 仅承载 URL 本身——**拉取由实现方进行**（走 `NetHost`，从而遵守限速、
+    /// 代理、重试与"唯一发请求处"的约束，A2）。
+    Url(String),
+    /// 直接粘贴的书源 JSON 文本。
+    PastedText(String),
 }
 
 /// 书源导入结果。

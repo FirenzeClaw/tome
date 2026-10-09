@@ -33,6 +33,12 @@ pub trait SourceEngine {
     fn discover(&self, source_id: &str, kind: &str, page: u32) -> Result<ExplorePage, ErrorKind>;
 
     /// 书籍详情（FR-002 第三类动作）。
+    ///
+    /// **与契约的字面差异**：`contracts/seams.md` §1 写作 `→ Result<BookInfo>`，
+    /// 此处返回 [`Book`]。理由是数据模型里**没有**独立的 BookInfo 实体
+    /// （`data-model.md` 的 `book` 表即承载书名/作者/封面/简介/分类等全部详情字段），
+    /// 故 `BookInfo` 与 `Book` 会是同一份数据的两个名字——多一个类型只会制造
+    /// 无意义的转换。此处取"实体即契约"的解读，并在测试中覆盖字段可用性。
     fn book_info(&self, source_id: &str, book_url: &str) -> Result<Book, ErrorKind>;
 
     /// 目录（FR-002 第四类动作）。性能目标：5 万章 <1s（SC-003）。

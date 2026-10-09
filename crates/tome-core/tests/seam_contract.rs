@@ -18,8 +18,8 @@ use tome_core::seam::host::{
 use tome_core::seam::{
     AnchorQuery, BackupJson, BookRepository, CacheKind, CancelToken, ChangeSourceOutcome,
     ChapterContent, CheckReport, CheckStream, CheckVerdict, ContentProvider, ExplorePage,
-    HighlightRuleRow, ImportReport, ProgressMapping, SearchHit, SearchResultItem, SearchStream,
-    SourceCheckFilter, SourceEngine,
+    HighlightRuleRow, ImportFailure, ImportReport, ProgressMapping, SearchHit, SearchResultItem,
+    SearchStream, SourceCheckFilter, SourceEngine, SourceImportChannel,
 };
 
 /// 极简 `SearchStream` 实现——只为证明该 trait **可被外部 crate 实现**
@@ -700,7 +700,10 @@ impl BookRepository for FakeRepository {
     fn source_by_id(&self, _id: &str) -> Result<Option<tome_core::model::Source>, ErrorKind> {
         Ok(None)
     }
-    fn import_sources(
+    fn import_sources(&self, _channel: &SourceImportChannel) -> Result<ImportReport, ErrorKind> {
+        Ok(ImportReport::default())
+    }
+    fn import_parsed_sources(
         &self,
         _sources: &[tome_core::model::Source],
     ) -> Result<ImportReport, ErrorKind> {
@@ -874,4 +877,64 @@ fn sample_txt_toc_rule() -> tome_core::model::TxtTocRule {
         enabled: true,
         sort_order: 0,
     }
+}
+
+// ---------------------------------------------------------------------------
+// FR-001：书源导入三渠道（契约 §3 的 `import_sources(file | url | text)`）
+// ---------------------------------------------------------------------------
+
+/// FR-001 要求导入渠道**至少覆盖三种**：本地文件、URL、粘贴文本。
+///
+/// 用枚举而非"已解析的 Source 列表"，是为了让三种渠道在**类型层面**可穷举——
+/// 实现方 match 时必须处理全部三种。若只收 `&[Source]`，"URL 拉取"这一渠道
+/// 在接缝上无法表达，会退化成上层各自实现（于是网络策略被复制多处，
+/// 绕过 A2 的"唯一发请求处"）。
+#[test]
+fn 书源导入三渠道均可表达() {
+    let text = r#"[{"name":"源","url":"https://example.com"}]"#;
+
+    let file_channel = SourceImportChannel::FileText(text.to_owned());
+    let url_channel = SourceImportChannel::Url("https://example.com/sources.json".to_owned());
+    let pasted_channel = SourceImportChannel::PastedText(text.to_owned());
+
+    // 三者互异——渠道是不同类型的导入，不是同一个字符串
+    assert_ne!(url_channel, pasted_channel);
+    assert_ne!(file_channel, pasted_channel);
+
+    // URL 渠道**只承载 URL 本身**：拉取由实现方走 NetHost 进行，
+    // 从而遵守限速/代理/重试与"唯一发请求处"（A2）。
+    match &url_channel {
+        SourceImportChannel::Url(url) => assert!(url.starts_with("https://")),
+        other => panic!("应为 URL 渠道，实际 {other:?}"),
+    }
+
+    // 三渠道都可交给仓库
+    let repository = FakeRepository;
+    for channel in [file_channel, url_channel, pasted_channel] {
+        assert!(repository.import_sources(&channel).is_ok());
+    }
+}
+
+/// `ImportReport` 的失败明细类型必须**可从外部命名**。
+///
+/// 否则外部调用方能拿到 report、却无法写出它的失败元素类型
+/// （`report.failures` 的静态类型），导致该公开字段半不可用。
+#[test]
+fn 导入报告的失败明细类型可命名() {
+    let failure = ImportFailure {
+        subject: "source-a".to_owned(),
+        error: ErrorKind::Rule,
+    };
+
+    let report = ImportReport {
+        added: 0,
+        updated: 0,
+        skipped: 1,
+        failures: vec![failure],
+    };
+
+    // 关键：能写出 failures 元素的类型（这正是 ImportFailure 必须导出的理由）
+    let first: &ImportFailure = report.failures.first().expect("应有一条失败明细");
+    assert_eq!(first.subject, "source-a");
+    assert_eq!(first.error.message_id(), "error.rule");
 }

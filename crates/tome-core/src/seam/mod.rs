@@ -28,7 +28,8 @@ mod source;
 mod stream;
 
 pub use repository::{
-    BackupJson, BookRepository, CacheKind, HighlightRuleRow, ImportReport, SearchHit,
+    BackupJson, BookRepository, CacheKind, HighlightRuleRow, ImportFailure, ImportReport,
+    SearchHit, SourceImportChannel,
 };
 pub use source::{
     AnchorQuery, ChangeSourceOutcome, ChapterContent, CheckReport, CheckStream, CheckVerdict,

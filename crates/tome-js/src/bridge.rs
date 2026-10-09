@@ -229,6 +229,25 @@ pub struct JsContext {
     /// 同 `declared_charset`：由组合根在装配时填入，供网络类入口构造
     /// `RequestSpec` 时使用（FR-008）。
     pub request_interval_ms: Option<u32>,
+    /// 书源名（脚本里 `source.bookSourceName`）
+    pub source_name: Option<String>,
+    /// 书源分组（`source.bookSourceGroup`）
+    pub source_group: Option<String>,
+    /// 当前书籍名（`book.name`）
+    pub book_name: Option<String>,
+    /// 当前书籍作者（`book.author`）
+    pub book_author: Option<String>,
+    /// 当前书籍详情页地址（`book.bookUrl`）
+    pub book_url: Option<String>,
+    /// 当前章节标题（`chapter.title`）
+    pub chapter_title: Option<String>,
+    /// 当前章节地址（`chapter.url`）
+    pub chapter_url: Option<String>,
+    /// 当前章节序号（`chapter.index`）
+    ///
+    /// `Option<u32>` 而非 `u32`：0 是合法序号，用 `Option` 区分
+    /// "没有章节上下文"与"第 0 章"。
+    pub chapter_index: Option<u32>,
 }
 
 impl JsContext {
@@ -240,6 +259,14 @@ impl JsContext {
             base_url: None,
             declared_charset: None,
             request_interval_ms: None,
+            source_name: None,
+            source_group: None,
+            book_name: None,
+            book_author: None,
+            book_url: None,
+            chapter_title: None,
+            chapter_url: None,
+            chapter_index: None,
         }
     }
 

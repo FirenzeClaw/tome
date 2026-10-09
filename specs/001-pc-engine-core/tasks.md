@@ -19,16 +19,16 @@
 
 **Purpose**: workspace 初始化与三平台工具链。**无用户故事标签。**
 
-- [ ] T001 创建 Cargo workspace（8 个 crate 骨架：tome-core/net/store/js/rule/source/local/cli）于 `Cargo.toml` + `crates/*/Cargo.toml`，配 `[profile.release]` = LTO=fat / panic=abort / strip / codegen-units=1
-  - [ ] `cargo build --workspace` 通过（空 crate）
-  - [ ] 每个 crate 有 `src/lib.rs` 占位 + crate 级文档注释
-- [ ] T002 [P] 钉工具链 `rust-toolchain.toml`（channel=stable，windows 目标 x86_64-pc-windows-gnu）于仓库根
-  - [ ] `rustup show` 识别 gnu toolchain
-- [ ] T003 [P] 配置 clippy + rustfmt：`.clippy.toml`、`rustfmt.toml`，`cargo clippy -- -D warnings` 与 `cargo fmt --check` 通过于空骨架
-- [ ] T004 [P] 建三平台 CI `.github/workflows/ci.yml`（windows-latest gnu / macos-latest / ubuntu-latest）：build + test + clippy + fmt
-  - [ ] CI 绿；含体积基线记录步骤（上传二进制大小为 artifact）
-- [ ] T005 [P] CI 加 rquickjs 守卫断言：`cargo tree -e features` 断言无 `rust-alloc`/`allocator` feature、`rquickjs >= 0.14.0`（research.md R1 缓解 1/2）
-  - [ ] 手动注入违规时 CI 变红（验证守卫有效）
+- [x] T001 创建 Cargo workspace（8 个 crate 骨架：tome-core/net/store/js/rule/source/local/cli）于 `Cargo.toml` + `crates/*/Cargo.toml`，配 `[profile.release]` = LTO=fat / panic=abort / strip / codegen-units=1
+  - [x] `cargo build --workspace` 通过（空 crate）
+  - [x] 每个 crate 有 `src/lib.rs` 占位 + crate 级文档注释
+- [x] T002 [P] 钉工具链 `rust-toolchain.toml`（channel=stable，windows 目标 x86_64-pc-windows-gnu）于仓库根
+  - [x] `rustup show` 识别 gnu toolchain
+- [x] T003 [P] 配置 clippy + rustfmt：`.clippy.toml`、`rustfmt.toml`，`cargo clippy -- -D warnings` 与 `cargo fmt --check` 通过于空骨架
+- [x] T004 [P] 建三平台 CI `.github/workflows/ci.yml`（windows-latest gnu / macos-latest / ubuntu-latest）：build + test + clippy + fmt
+  - [x] CI 绿；含体积基线记录步骤（上传二进制大小为 artifact）
+- [x] T005 [P] CI 加 rquickjs 守卫断言：`cargo tree -e features` 断言无 `rust-alloc`/`allocator` feature、`rquickjs >= 0.14.0`（research.md R1 缓解 1/2）
+  - [x] 手动注入违规时 CI 变红（验证守卫有效）
 
 ---
 
@@ -38,39 +38,39 @@
 
 ### S0 技术验证 spike（独立可行性门；产物为一次性验证骨架，不进主 workspace）
 
-- [ ] T006 S0 spike：建独立骨架 crate `spikes/s0/`（eframe 窗口 + 一次 rusqlite 写入读取 + 一次 reqwest HTTP + 一次 rquickjs eval），三平台各自构建出产物（FR-040 三平台构建 + FR-041/SC-012 无遥测零外发验证）
-  - [ ] 三平台均产出可运行产物（windows-gnu/macos/linux）
-  - [ ] 记录每平台产物体积与启动耗时到 `spikes/s0/BASELINE.md`
-  - [ ] 验证无非用户触发的网络外发（监控进程网络）
-  - [ ] 验证 rquickjs 三平台编译通过（含 Windows-gnu）
-- [ ] T007 S0 spike：rquickjs 实测二进制体积增量对照（空壳 vs 接 rquickjs），写入 `spikes/s0/BASELINE.md`（research.md R1 遗留待办）
-  - [ ] 记录 rquickjs 体积增量实测值
-- [ ] T008 S0 spike：Jsoup↔html5ever DOM 差异量化——同一批乱网页 HTML 分别喂 Jsoup（上游黑盒运行）与 html5ever，序列化 DOM diff，量化差异率，写入 `spikes/s0/BASELINE.md`（research.md R2 遗留待办）
-  - [ ] 产出差异率量化数据；标注系统性差异点（若有）
+- [x] T006 S0 spike：建独立骨架 crate `spikes/s0/`（eframe 窗口 + 一次 rusqlite 写入读取 + 一次 reqwest HTTP + 一次 rquickjs eval），三平台各自构建出产物（FR-040 三平台构建 + FR-041/SC-012 无遥测零外发验证）
+  - [x] 三平台均产出可运行产物（windows-gnu/macos/linux）
+  - [x] 记录每平台产物体积与启动耗时到 `spikes/s0/BASELINE.md`
+  - [x] 验证无非用户触发的网络外发（监控进程网络）
+  - [x] 验证 rquickjs 三平台编译通过（含 Windows-gnu）
+- [x] T007 S0 spike：rquickjs 实测二进制体积增量对照（空壳 vs 接 rquickjs），写入 `spikes/s0/BASELINE.md`（research.md R1 遗留待办）
+  - [x] 记录 rquickjs 体积增量实测值
+- [x] T008 S0 spike：Jsoup↔html5ever DOM 差异量化——同一批乱网页 HTML 分别喂 Jsoup（上游黑盒运行）与 html5ever，序列化 DOM diff，量化差异率，写入 `spikes/s0/BASELINE.md`（research.md R2 遗留待办）
+  - [x] 产出差异率量化数据；标注系统性差异点（若有）
 
 > **⛔ 检查点：S0 之后（可行性门）**
-> - [ ] 三平台均产出可运行骨架产物
-> - [ ] 体积与启动耗时基线已记录
-> - [ ] 无非用户触发的网络外发
-> - [ ] rquickjs 在三平台编译通过（gnu/macos/linux）
-> - [ ] **人工审查技术栈实测数据后再继续**
+> - [x] 三平台均产出可运行骨架产物
+> - [x] 体积与启动耗时基线已记录
+> - [x] 无非用户触发的网络外发
+> - [x] rquickjs 在三平台编译通过（gnu/macos/linux）
+> - [x] **人工审查技术栈实测数据后再继续**
 
 ### tome-core 接缝（所有实现的依赖地基）
 
 > **架构决策**：宿主能力 trait（NetHost/StoreHost/CryptoHost）与共享值对象（RequestSpec/Response）**定义在 tome-core**（接缝中枢），不在 tome-js。理由：若放 tome-js，tome-net 实现 NetHost 需依赖 tome-js，而 NetHost 又引用 RequestSpec → 构成环。放 tome-core 则一切实现 crate 只依赖 core，星型无环。（修正了 plan/seams 初稿"tome-js 定义宿主 trait"的表述）
 
-- [ ] T009 [P] tome-core：领域 DTO（Book/Chapter/Source/SourceGroup/ReadProgress/Bookmark/Highlight/Memo/ReadRecord/各种 Rule/Cookie/LibraryRoot/ImageCacheRef）于 `crates/tome-core/src/model/`（对齐 data-model.md，纯数据，无 DB/UI 注解）
-  - [ ] DTO 与 data-model.md 18 实体字段一致；阅读痕迹字段为字符区间（chapter_index+char_offset+length），无渲染坐标
-  - [ ] `cargo test -p tome-core` 通过（DTO 构造/默认值单测）
-- [ ] T010 [P] tome-core：错误分类枚举 `ErrorKind`（网络/规则/不支持能力/内容/存储/配置，共六类）+ 可本地化错误标识于 `crates/tome-core/src/error.rs`
-  - [ ] ErrorKind 覆盖六类；携带 capability id 与人类可读说明（FR-006）
-  - [ ] 不含 crate 专属细节（非上帝枚举——只做分类）
-- [ ] T011 tome-core：顶层接缝 trait `SourceEngine` / `ContentProvider` / `BookRepository` 于 `crates/tome-core/src/seam/`（契约见 contracts/seams.md §1/§2/§3）
-  - [ ] `search` 返回 `Stream + CancelToken` 形状（A6）；`change_source` 返回 `ChangeSourceOutcome`（标明哪一级映射，FR-010b）；`ContentProvider` 含 `chapter_content`/`resolve_anchor`/`prefetch`
-  - [ ] trait 只引用 tome-core DTO/ErrorKind，不引用任何实现 crate 类型
-- [ ] T012 tome-core：宿主能力 trait `NetHost`/`StoreHost`/`CryptoHost` + 共享值对象 `RequestSpec`/`Response` 于 `crates/tome-core/src/seam/host.rs`（A1）
-  - [ ] RequestSpec 含 method/url/headers/body/charset/proxy_override/rate_limit_key/**timeout/retry**（FR-008 完整字段）
-  - [ ] tome-js / tome-net / tome-store 都将只依赖这些 trait/类型，互不依赖
+- [x] T009 [P] tome-core：领域 DTO（Book/Chapter/Source/SourceGroup/ReadProgress/Bookmark/Highlight/Memo/ReadRecord/各种 Rule/Cookie/LibraryRoot/ImageCacheRef）于 `crates/tome-core/src/model/`（对齐 data-model.md，纯数据，无 DB/UI 注解）
+  - [x] DTO 与 data-model.md 18 实体字段一致；阅读痕迹字段为字符区间（chapter_index+char_offset+length），无渲染坐标
+  - [x] `cargo test -p tome-core` 通过（DTO 构造/默认值单测）
+- [x] T010 [P] tome-core：错误分类枚举 `ErrorKind`（网络/规则/不支持能力/内容/存储/配置，共六类）+ 可本地化错误标识于 `crates/tome-core/src/error.rs`
+  - [x] ErrorKind 覆盖六类；携带 capability id 与人类可读说明（FR-006）
+  - [x] 不含 crate 专属细节（非上帝枚举——只做分类）
+- [x] T011 tome-core：顶层接缝 trait `SourceEngine` / `ContentProvider` / `BookRepository` 于 `crates/tome-core/src/seam/`（契约见 contracts/seams.md §1/§2/§3）
+  - [x] `search` 返回 `Stream + CancelToken` 形状（A6）；`change_source` 返回 `ChangeSourceOutcome`（标明哪一级映射，FR-010b）；`ContentProvider` 含 `chapter_content`/`resolve_anchor`/`prefetch`
+  - [x] trait 只引用 tome-core DTO/ErrorKind，不引用任何实现 crate 类型
+- [x] T012 tome-core：宿主能力 trait `NetHost`/`StoreHost`/`CryptoHost` + 共享值对象 `RequestSpec`/`Response` 于 `crates/tome-core/src/seam/host.rs`（A1）
+  - [x] RequestSpec 含 method/url/headers/body/charset/proxy_override/rate_limit_key/**timeout/retry**（FR-008 完整字段）
+  - [x] tome-js / tome-net / tome-store 都将只依赖这些 trait/类型，互不依赖
 
 > **⛔ 检查点：Foundational 完成**——S0 门已过 + tome-core 接缝就绪。此后各用户故事可开工。
 
@@ -88,62 +88,62 @@
 
 ### tome-net（网络层 + RequestSpec 执行 + 回放 adapter）
 
-- [ ] T013 [US6] tome-net：reqwest 客户端（rustls + rustls-platform-verifier，HTTP/2）+ 阻塞外观（blocking facade，供 JS 同步语义）于 `crates/tome-net/src/client.rs`
-  - [ ] GET/POST 可发；响应含 status/headers/body_bytes
-  - [ ] 阻塞外观与异步客户端并存（JS 用同步语义，R1）
-- [ ] T014 [P] [US6] tome-net：RequestSpec 执行器——接收 tome-core 定义的 `RequestSpec`，产出 `Response` 于 `crates/tome-net/src/executor.rs`（A2 纯化：规则引擎产出 spec，net 是唯一执行处；类型定义在 tome-core，见 T012）
-  - [ ] 支持超时与重试（读取 RequestSpec.timeout/retry）
-  - [ ] 不重复定义 RequestSpec/Response 类型（引用 tome-core）
-- [ ] T015 [P] [US6] tome-net：字符集检测与解码（encoding_rs + chardetng，声明与实际不符时容错）于 `crates/tome-net/src/charset.rs`（FR-009）
-  - [ ] GBK/GB18030/UTF-8/Big5 样本正确解码；声明错误仍能产出可读文本
-- [ ] T016 [P] [US6] tome-net：Cookie jar（按源隔离、可持久化序列化）于 `crates/tome-net/src/cookie.rs`（FR-008）
-- [ ] T017 [P] [US6] tome-net：代理配置（跟随系统代理 + 按源覆盖）于 `crates/tome-net/src/proxy.rs`（FR-008）
-  - [ ] 代理故障与目标站故障可区分（边缘情况）
-- [ ] T018 [P] [US6] tome-net：限速令牌桶（按 rate_limit_key 独立限速）于 `crates/tome-net/src/ratelimit.rs`（FR-008）
-  - [ ] 单源限速不影响其他源
-- [ ] T019 [US6] tome-net：回放 adapter（`record` 写请求指纹→响应到目录；`replay` 离线命中回放）于 `crates/tome-net/src/replay.rs`（差分测试确定性来源）
-  - [ ] 录制后可完全离线重放；指纹含 method+url+body+关键头
+- [x] T013 [US6] tome-net：reqwest 客户端（rustls + rustls-platform-verifier，HTTP/2）+ 阻塞外观（blocking facade，供 JS 同步语义）于 `crates/tome-net/src/client.rs`
+  - [x] GET/POST 可发；响应含 status/headers/body_bytes
+  - [x] 阻塞外观与异步客户端并存（JS 用同步语义，R1）
+- [x] T014 [P] [US6] tome-net：RequestSpec 执行器——接收 tome-core 定义的 `RequestSpec`，产出 `Response` 于 `crates/tome-net/src/executor.rs`（A2 纯化：规则引擎产出 spec，net 是唯一执行处；类型定义在 tome-core，见 T012）
+  - [x] 支持超时与重试（读取 RequestSpec.timeout/retry）
+  - [x] 不重复定义 RequestSpec/Response 类型（引用 tome-core）
+- [x] T015 [P] [US6] tome-net：字符集检测与解码（encoding_rs + chardetng，声明与实际不符时容错）于 `crates/tome-net/src/charset.rs`（FR-009）
+  - [x] GBK/GB18030/UTF-8/Big5 样本正确解码；声明错误仍能产出可读文本
+- [x] T016 [P] [US6] tome-net：Cookie jar（按源隔离、可持久化序列化）于 `crates/tome-net/src/cookie.rs`（FR-008）
+- [x] T017 [P] [US6] tome-net：代理配置（跟随系统代理 + 按源覆盖）于 `crates/tome-net/src/proxy.rs`（FR-008）
+  - [x] 代理故障与目标站故障可区分（边缘情况）
+- [x] T018 [P] [US6] tome-net：限速令牌桶（按 rate_limit_key 独立限速）于 `crates/tome-net/src/ratelimit.rs`（FR-008）
+  - [x] 单源限速不影响其他源
+- [x] T019 [US6] tome-net：回放 adapter（`record` 写请求指纹→响应到目录；`replay` 离线命中回放）于 `crates/tome-net/src/replay.rs`（差分测试确定性来源）
+  - [x] 录制后可完全离线重放；指纹含 method+url+body+关键头
 
 ### tome-rule 最小子集（CSS + 正则 + 替换链）
 
-- [ ] T020 [US2] tome-rule：自建 arena DOM（实现 html5ever `TreeSink`，保留节点类型细分 DataNode/CDataNode）于 `crates/tome-rule/src/dom.rs`（research R2：禁用 markup5ever_rcdom）
-  - [ ] html5lib 树构造样本解析正确；保留 jsoup 兼容所需节点类型
-  - [ ] 解析性能：1MB 乱网页 <100ms
-- [ ] T021 [US2] tome-rule：CSS 选择器引擎（Servo selectors + cssparser 跑在自建 DOM 上，实现 `Element` trait）于 `crates/tome-rule/src/css.rs`
-  - [ ] 标准选择器（类型/类/id/属性/组合子/nth/is/where/has/not）全部可用
-- [ ] T022 [US2] tome-rule：CSS 后缀与索引切片（`@text/@ownText/@html/@all/@attr(x)`、`[0]/.-1/[0:3]/[!0:3]`）于 `crates/tome-rule/src/css_post.rs`
-  - [ ] 各后缀语义正确；索引切片含负索引与反序
-- [ ] T023 [US2] tome-rule：规则分派器（前缀 `@css:`/`@json:`/`@XPath:`/`@js:`/`@@`/无前缀嗅探）+ 引号/括号感知组合符切分（`&&`/`||`/`%%`）于 `crates/tome-rule/src/dispatch.rs`（FR-003 规则选择语法）
-  - [ ] 组合符不被 JSONPath 内的 `&&` 误切（引号/括号感知）
-- [ ] T024 [US2] tome-rule：正则双引擎 + 规范化层 + `$1`→`${1}` 翻译层于 `crates/tome-rule/src/regex.rs`（research R5）
-  - [ ] 预扫描路由：无 fancy 特性走 regex 快路径；含 lookaround/backref 路由 fancy-regex
-  - [ ] **规范化层把 `a++`/`a*+`/`a?+` 显式转 `(?>a+)`**（regex 静默当嵌套重复的陷阱）
-  - [ ] 翻译层：`$1a` 不误读为组 `1a`；`\$`→`$$`；非法引用→空串
-  - [ ] fancy-regex 设低 backtrack_limit + 输入长度上限（防 20 万字挂起）
-- [ ] T025 [US2] tome-rule：替换链（`## regex ## replacement ##` 可叠加）+ `{{}}` JS 插值占位（接 T043 的 JS 桥）于 `crates/tome-rule/src/replace.rs`（FR-004）
-  - [ ] 多条替换按序叠加；`##` 边界引号感知
+- [x] T020 [US2] tome-rule：自建 arena DOM（实现 html5ever `TreeSink`，保留节点类型细分 DataNode/CDataNode）于 `crates/tome-rule/src/dom.rs`（research R2：禁用 markup5ever_rcdom）
+  - [x] html5lib 树构造样本解析正确；保留 jsoup 兼容所需节点类型
+  - [x] 解析性能：1MB 乱网页 <100ms
+- [x] T021 [US2] tome-rule：CSS 选择器引擎（Servo selectors + cssparser 跑在自建 DOM 上，实现 `Element` trait）于 `crates/tome-rule/src/css.rs`
+  - [x] 标准选择器（类型/类/id/属性/组合子/nth/is/where/has/not）全部可用
+- [x] T022 [US2] tome-rule：CSS 后缀与索引切片（`@text/@ownText/@html/@all/@attr(x)`、`[0]/.-1/[0:3]/[!0:3]`）于 `crates/tome-rule/src/css_post.rs`
+  - [x] 各后缀语义正确；索引切片含负索引与反序
+- [x] T023 [US2] tome-rule：规则分派器（前缀 `@css:`/`@json:`/`@XPath:`/`@js:`/`@@`/无前缀嗅探）+ 引号/括号感知组合符切分（`&&`/`||`/`%%`）于 `crates/tome-rule/src/dispatch.rs`（FR-003 规则选择语法）
+  - [x] 组合符不被 JSONPath 内的 `&&` 误切（引号/括号感知）
+- [x] T024 [US2] tome-rule：正则双引擎 + 规范化层 + `$1`→`${1}` 翻译层于 `crates/tome-rule/src/regex.rs`（research R5）
+  - [x] 预扫描路由：无 fancy 特性走 regex 快路径；含 lookaround/backref 路由 fancy-regex
+  - [x] **规范化层把 `a++`/`a*+`/`a?+` 显式转 `(?>a+)`**（regex 静默当嵌套重复的陷阱）
+  - [x] 翻译层：`$1a` 不误读为组 `1a`；`\$`→`$$`；非法引用→空串
+  - [x] fancy-regex 设低 backtrack_limit + 输入长度上限（防 20 万字挂起）
+- [x] T025 [US2] tome-rule：替换链（`## regex ## replacement ##` 可叠加）+ `{{}}` JS 插值占位（接 T043 的 JS 桥）于 `crates/tome-rule/src/replace.rs`（FR-004）
+  - [x] 多条替换按序叠加；`##` 边界引号感知
 
 ### tome-source 搜索路径
 
-- [ ] T026 [US6] tome-source：书源模型加载与三渠道导入（文件/URL/粘贴文本）于 `crates/tome-source/src/source.rs`（FR-001）
-  - [ ] 三渠道均可导入；重复 id 按更新处理（不重复条目）
-- [ ] T027 [US1] tome-source：搜索管线（规则求值→产出 RequestSpec→net 执行→结果解析）于 `crates/tome-source/src/search.rs`（FR-002 搜索/详情/目录/正文动作之一；SC-001 首结果 ≤30s）
-  - [ ] 单源搜索端到端出结构化结果（name/author/cover/intro/book_url）
-  - [ ] 规则求值全程不发请求（RequestSpec 纯化成立，A2）
-  - [ ] 正常网络下从触发到首个来源结果 ≤30s（SC-001）
+- [x] T026 [US6] tome-source：书源模型加载与三渠道导入（文件/URL/粘贴文本）于 `crates/tome-source/src/source.rs`（FR-001）
+  - [x] 三渠道均可导入；重复 id 按更新处理（不重复条目）
+- [x] T027 [US1] tome-source：搜索管线（规则求值→产出 RequestSpec→net 执行→结果解析）于 `crates/tome-source/src/search.rs`（FR-002 搜索/详情/目录/正文动作之一；SC-001 首结果 ≤30s）
+  - [x] 单源搜索端到端出结构化结果（name/author/cover/intro/book_url）
+  - [x] 规则求值全程不发请求（RequestSpec 纯化成立，A2）
+  - [x] 正常网络下从触发到首个来源结果 ≤30s（SC-001）
 
 ### tome-cli 最小命令
 
-- [ ] T028 [US6] tome-cli：`source import`（file/--url/--stdin 三渠道）+ `search`（JSON 输出）于 `crates/tome-cli/src/main.rs`（contracts/cli.md）
-  - [ ] 输出结构化 JSON；退出码语义正确（0/1/2/3）
-- [ ] T029 [US6] tome-cli：`--record`/`--replay`/`--offline` 接线到 net 回放 adapter 于 `crates/tome-cli/src/flags.rs`
-  - [ ] 录制→离线重放输出一致
+- [x] T028 [US6] tome-cli：`source import`（file/--url/--stdin 三渠道）+ `search`（JSON 输出）于 `crates/tome-cli/src/main.rs`（contracts/cli.md）
+  - [x] 输出结构化 JSON；退出码语义正确（0/1/2/3）
+- [x] T029 [US6] tome-cli：`--record`/`--replay`/`--offline` 接线到 net 回放 adapter 于 `crates/tome-cli/src/flags.rs`
+  - [x] 录制→离线重放输出一致
 
 > **⛔ 检查点：S1-1 之后（最小闭环）**
-> - [ ] 导入 CSS+正则型简化书源样本 → 搜索出结果（`--replay` 离线重放一致）——**注意：这是自洽性验证（同输入同输出），不等于语义已对齐上游；兼容性验证在 S1-3（合成语料）与 S1-6（真实书源基线）才发生**
-> - [ ] 全部测试通过；无全局 CONFIG；RequestSpec 纯化成立
-> - [ ] 配置注入成立；CLI 输出结构化 JSON
-> - [ ] 人工审查后进入下一阶段
+> - [x] 导入 CSS+正则型简化书源样本 → 搜索出结果（`--replay` 离线重放一致）——**注意：这是自洽性验证（同输入同输出），不等于语义已对齐上游；兼容性验证在 S1-3（合成语料）与 S1-6（真实书源基线）才发生**
+> - [x] 全部测试通过；无全局 CONFIG；RequestSpec 纯化成立
+> - [x] 配置注入成立；CLI 输出结构化 JSON
+> - [x] 人工审查后进入下一阶段
 
 ---
 

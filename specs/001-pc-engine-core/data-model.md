@@ -44,6 +44,9 @@ source
   enabled       INTEGER NOT NULL DEFAULT 1
   book_source_type  INTEGER      -- 文本/音频/图片(预留，本期音频/图片源经能力错误降级)
   book_url_pattern  TEXT         -- 书籍详情页 URL 匹配（用于识别"这个链接属于哪个源"）
+  -- 动作地址模板（公开格式的顶层字段）
+  search_url    TEXT   -- 搜索地址模板：{{key}}/{{page}} 插值 + `,{options}` 后缀（charset/method/body/headers/webView）
+  explore_url   TEXT   -- 发现地址规则：可 && 或换行分隔多地址，{{page}} 插值
   -- 五类动作的规则，整体 JSON
   rule_search    TEXT   -- 搜索规则（JSON：列表/书名/作者/封面/简介/详情URL 等字段）
   rule_explore   TEXT   -- 发现规则
@@ -59,7 +62,7 @@ source
   js            TEXT    -- 纯脚本源的主脚本（mainJs）
   -- 行为参数
   charset       TEXT
-  rate_limit_ms INTEGER  -- 请求间隔
+  rate_limit_ms INTEGER  -- 请求间隔（对应公开格式的 concurrentRate 字段，字符串形式的毫秒值，如 "1000"）
   weight        INTEGER  -- 排序权重
   explore_screen TEXT    -- 发现页配置
   -- 元信息

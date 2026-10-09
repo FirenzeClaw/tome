@@ -10,7 +10,7 @@
 //! - **`ErrorKind` 错误分类**（[`error`]）：各 crate 自带 thiserror 错误类型，
 //!   在接缝处映射为本 crate 的小型分类枚举，携带**可本地化的错误标识**而非文案
 //!   （FR-044 / SC-016）。
-//! - **顶层接缝 trait**：`SourceEngine` / `ContentProvider` / `BookRepository`。
+//! - **顶层接缝 trait**（[`seam`]）：`SourceEngine` / `ContentProvider` / `BookRepository`。
 //! - **宿主能力 trait 与共享值对象**：`NetHost` / `StoreHost` / `CryptoHost` 与
 //!   `RequestSpec` / `Response`。规则引擎求值产出 `RequestSpec`，管线是唯一发
 //!   请求处（架构决策 A2，规则引擎因此可离线重放）。
@@ -28,11 +28,16 @@
 //!
 //! - [`model`] —— 领域 DTO（T009）
 //! - [`error`] —— `ErrorKind` 六类错误分类（T010）
+//! - [`seam`] —— 顶层接缝 trait（T011）
 
 #![forbid(unsafe_code)]
 
 pub mod error;
 pub mod model;
+pub mod seam;
 
 pub use error::{ErrorCapability, ErrorKind, LocalizedMessage};
 pub use model::*;
+pub use seam::{
+    BookRepository, CancelToken, ChangeSourceOutcome, ContentProvider, SearchStream, SourceEngine,
+};

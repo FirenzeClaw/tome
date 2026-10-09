@@ -1,0 +1,29 @@
+# 项目内存（含会话数据）
+.kimi-tunnel/
+
+# agent 配置（可能含凭据，specify init 明确提示）
+.kimi-code/
+
+# 代码索引（本地生成）
+.codegraph/
+
+# Rust 构建产物（workspace 落地后生效）
+/target/
+**/*.rs.bk
+
+# 本地环境与覆盖配置
+.env
+.env.local
+*.local.toml
+
+# 真实书源的对照数据与抓取产物（第三方资产，不入仓库）
+/testdata/real-sources/
+/testdata/captures/
+
+# 编辑器与系统
+.idea/
+.vscode/*
+!.vscode/settings.json.example
+*.swp
+Thumbs.db
+.DS_Store

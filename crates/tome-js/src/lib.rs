@@ -22,8 +22,14 @@
 //!
 //! ## 关键入口
 //!
-//! 骨架阶段尚无公开 API；rquickjs 依赖在 Phase 2 引入，届时守卫脚本转为强断言模式。
+//! | 模块 | 职责 |
+//! |---|---|
+//! | [`runtime`] | QuickJS runtime 包装：内存/栈/中断三道护栏（T030） |
 //!
-//! [WIP] 本 crate 当前为空骨架，未含任何实现。
+//! [WIP] S1-2 阶段落地进行中；本 crate 此前为空骨架。
 
 #![forbid(unsafe_code)]
+
+pub mod runtime;
+
+pub use runtime::{CancelToken, JsValue, Limits, LimitsError, Sandbox, SandboxError};

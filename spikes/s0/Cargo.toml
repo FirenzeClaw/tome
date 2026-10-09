@@ -1,0 +1,86 @@
+# S0 可行性 spike —— 独立 crate，**刻意不进主 workspace**
+#
+# ## 为什么不进 workspace
+#
+# 本 crate 是**一次性验证骨架**（tasks.md T006-T008），验证完即完成使命。若并入
+# workspace，它会：① 被 `cargo build --workspace` / CI 的 build job 反复编译，
+# 把 eframe（含 wgpu/winit 全套图形栈）拉进主构建链路；② 污染 Cargo.lock 的
+# 依赖图——而 workspace 的 `[workspace.lints]` / `[profile.release]` 是**生产**
+# 配置，spike 的依赖不应影响它们；③ 违反「引擎不得依赖图形环境」（FR-036）
+# ——eframe 是图形依赖，绝不能出现在引擎侧的依赖图里。
+#
+# 故此处用 `[workspace]` 空表显式脱离父 workspace（Cargo 的机制：子目录中被
+# 显式声明为独立 workspace 根的包不属于外层 workspace）。
+#
+# ## 为什么要继承 workspace 的 release profile（T007 对照的前提）
+#
+# T007 要测「rquickjs 接入带来的体积增量」，而体积数字只有在**同一套优化配置**
+# 下才有可比性、也才能外推到真实产物。故此处逐项复制根 Cargo.toml 的
+# `[profile.release]`（lto=fat / codegen-units=1 / strip / panic=abort）。
+# 复制而非继承是被迫的：脱离 workspace 后 `[profile]` 不再从父级继承。
+# 若日后根配置变更，**必须同步改这里**，否则 T007 的基线失准。
+
+[workspace]
+
+[package]
+name = "tome-s0-spike"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "S0 技术栈可行性验证骨架（一次性，不进主 workspace）"
+
+[dependencies]
+# --- 图形：验证三平台能开窗口（eframe = egui + winit + wgpu/glow 后端）---
+eframe = { version = "0.36.2", default-features = false, features = [
+    "default_fonts",
+    "glow",
+    "wayland",
+    "x11",
+] }
+
+# --- 存储：验证 rusqlite bundled（自带 SQLite C 源码，无系统依赖）---
+# bundled 是关键：三平台都不依赖系统 libsqlite3，也避免 Windows 上找不到
+# sqlite3.lib 的问题（与「单一二进制、不含系统运行时依赖」的体积纪律一致）。
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+
+# --- 网络：验证 reqwest（rustls 而非 native-tls，避免 OpenSSL/schannel 系统依赖）---
+# 用 blocking 外观：书源脚本是同步语义（research.md R1），S1 也需要阻塞面。
+# feature 名在 0.13 是 "rustls"（0.12 时代叫 "rustls-tls"，0.13 已改名——
+# 写旧名会得到 "reqwest does not have that feature" 的解析期错误）。
+# 同时启用 system-proxy：FR-008 要求"跟随系统代理"，spike 顺带验证该 feature 可编译。
+reqwest = { version = "0.13.5", default-features = false, features = [
+    "blocking",
+    "rustls",
+    "http2",
+    "gzip",
+    "brotli",
+    "system-proxy",
+] }
+
+# --- 脚本：验证 rquickjs 三平台编译（含 Windows-gnu）---
+# research.md R1 缓解 1/2：版本 >= 0.14.0（中断 GC 修复）；**绝对不启用
+# rust-alloc / allocator**（会让 set_memory_limit 静默变 noop）。
+# T005 的守卫脚本 scripts/check-rquickjs-features.sh 会核查这一点。
+# 依赖版本在下方 `[features]` 处的 `spike-js` 中可选开关（见 T007 对照）。
+rquickjs = { version = "0.14.0", default-features = false, features = [
+    "std",
+    "macro",
+] }
+
+html5ever = "0.40.1"
+
+[features]
+default = []
+# T007 体积对照用的开关。默认**不启用**，目的有二：
+#   1. 让「空壳」臂的依赖图里根本不存在 rquickjs —— 体积差值才是真实的
+#      "接入 rquickjs 的代价"，而不是"某个 feature 的代价"；
+#   2. 不被 rquickjs 的编译失败（若某平台编译器不兼容）卡住另外两个验证项。
+# 用法：`cargo build --release --features spike-js`
+spike-js = []
+
+[profile.release]
+# 与根 Cargo.toml 逐项一致（见文件头说明）
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"

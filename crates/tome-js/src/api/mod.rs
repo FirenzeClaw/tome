@@ -27,6 +27,7 @@
 //!
 //! [WIP] 各子模块按任务顺序落地。
 
+pub mod text;
 pub mod unsupported;
 
 pub use unsupported::{register_all_unsupported, register_unsupported, UnsupportedCapability};

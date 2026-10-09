@@ -12,6 +12,9 @@
 
 use tome_core::error::ErrorKind;
 use tome_core::model::{Book, BookOrigin, Chapter};
+use tome_core::seam::host::{
+    HeaderMap, HttpMethod, ProxyOverride, RequestSpec, Response, RetryPolicy,
+};
 use tome_core::seam::{
     AnchorQuery, CancelToken, ChangeSourceOutcome, ChapterContent, CheckReport, CheckVerdict,
     ContentProvider, ExplorePage, ProgressMapping, SearchResultItem, SearchStream, SourceEngine,
@@ -306,6 +309,149 @@ fn 能力错误可被识别并用于降级() {
     // 保持 engine 被使用，避免未使用变量警告（spike 里它只是形状证明）
     let _ = engine;
 }
+// ---------------------------------------------------------------------------
+// T012：RequestSpec / Response 与宿主 trait
+// ---------------------------------------------------------------------------
+
+/// FR-008：`RequestSpec` 必须含**全部**九个维度。
+///
+/// 这条测试的价值在于：任一字段被删掉，此处**编译失败**——
+/// 比断言某个 getter 更早、更硬。
+#[test]
+fn 请求规格含_fr008_全字段() {
+    let spec = RequestSpec {
+        method: HttpMethod::Post,
+        url: "https://example.com/search".to_owned(),
+        headers: {
+            let mut headers = HeaderMap::new();
+            headers.append("User-Agent", "tome/0.1");
+            headers
+        },
+        body: Some(b"keyword=x".to_vec()),
+        charset: Some("GBK".to_owned()),
+        proxy_override: Some(ProxyOverride::Direct),
+        rate_limit_key: "source-a".to_owned(),
+        timeout_ms: 15_000,
+        retry: RetryPolicy::new(2, 500),
+    };
+
+    // 逐项验证语义（不只是"字段存在"）
+    assert_eq!(spec.method, HttpMethod::Post);
+    assert_eq!(spec.method.as_str(), "POST");
+    assert_eq!(spec.url, "https://example.com/search");
+    assert_eq!(spec.headers.get("user-agent"), Some("tome/0.1"));
+    assert_eq!(spec.body.as_deref(), Some(b"keyword=x".as_slice()));
+    assert_eq!(spec.charset.as_deref(), Some("GBK"));
+    assert_eq!(spec.proxy_override, Some(ProxyOverride::Direct));
+    assert_eq!(spec.rate_limit_key, "source-a");
+    assert_eq!(spec.timeout_ms, 15_000);
+    assert_eq!(spec.retry.max_retries, 2);
+    assert_eq!(spec.retry.backoff_ms, 500);
+}
+
+/// 未指定 URL/限速键以外的任何字段，仍能构造出合法请求。
+///
+/// 目的：`RequestSpec::get` 是"默认值只有一处定义"的落点——书源规则里大量
+/// 请求只给出 URL，这些默认值决定了它们的行为。
+#[test]
+fn 请求规格默认值可复现() {
+    let spec = RequestSpec::get("https://example.com", "source-a");
+    assert_eq!(spec.method, HttpMethod::Get);
+    assert!(spec.body.is_none());
+    assert!(spec.headers.is_empty());
+    assert_eq!(spec.timeout_ms, tome_core::seam::host::DEFAULT_TIMEOUT_MS);
+    assert_eq!(spec.retry, RetryPolicy::NONE);
+}
+
+/// `proxy_override` 的三态语义必须可区分（FR-008 跟随系统 vs 显式直连）。
+#[test]
+fn 代理覆盖区分跟随系统与显式直连() {
+    let follow_system = RequestSpec::get("https://example.com", "source-a");
+    assert_eq!(
+        follow_system.proxy_override, None,
+        "None 表示跟随系统代理，与 Direct 语义不同"
+    );
+
+    let direct = RequestSpec {
+        proxy_override: Some(ProxyOverride::Direct),
+        ..follow_system.clone()
+    };
+    let custom = RequestSpec {
+        proxy_override: Some(ProxyOverride::Custom("http://127.0.0.1:7890".to_owned())),
+        ..follow_system
+    };
+
+    assert_ne!(direct.proxy_override, custom.proxy_override);
+    assert_ne!(direct.proxy_override, None);
+}
+
+/// `HeaderMap` 必须保留重名头（HTTP 允许，且 Set-Cookie 等多值场景依赖它）。
+#[test]
+fn 头集合保留重名且支持大小写不敏感查找() {
+    let mut headers = HeaderMap::new();
+    headers.append("Set-Cookie", "a=1");
+    headers.append("Set-Cookie", "b=2");
+    assert_eq!(headers.len(), 2, "重名头不得被合并");
+
+    let values: Vec<&str> = headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case("set-cookie"))
+        .map(|(_, value)| value)
+        .collect();
+    assert_eq!(values, vec!["a=1", "b=2"]);
+
+    // 大小写不敏感查找
+    assert_eq!(headers.get("SET-COOKIE"), Some("a=1"));
+
+    // set 覆盖同名项
+    headers.set("set-cookie", "c=3");
+    assert_eq!(headers.len(), 1);
+    assert_eq!(headers.get("Set-Cookie"), Some("c=3"));
+}
+
+/// `Response` 的成功判定与体积读取。
+#[test]
+fn 响应可判定成功与体积() {
+    let ok = Response {
+        status: 200,
+        headers: HeaderMap::new(),
+        body_bytes: vec![1, 2, 3],
+        detected_charset: Some("UTF-8".to_owned()),
+    };
+    assert!(ok.is_success());
+    assert_eq!(ok.body_len(), 3);
+
+    let redirect = Response {
+        status: 302,
+        ..ok.clone()
+    };
+    assert!(!redirect.is_success(), "3xx 不算成功");
+
+    let failed = Response { status: 404, ..ok };
+    assert!(!failed.is_success());
+}
+
+/// `HttpMethod` 的往返转换与非法值拒绝。
+#[test]
+fn http_方法可解析且拒绝非法值() {
+    assert_eq!(
+        HttpMethod::from_str_ignore_case("get"),
+        Some(HttpMethod::Get)
+    );
+    assert_eq!(
+        HttpMethod::from_str_ignore_case("POST"),
+        Some(HttpMethod::Post)
+    );
+    assert_eq!(
+        HttpMethod::from_str_ignore_case("DELETE"),
+        Some(HttpMethod::Delete)
+    );
+    assert_eq!(HttpMethod::from_str_ignore_case("TRACE"), None);
+
+    // as_str 是 HTTP 请求行使用的大写形态
+    assert_eq!(HttpMethod::Head.as_str(), "HEAD");
+}
+
 // ---------------------------------------------------------------------------
 // 测试夹具
 // ---------------------------------------------------------------------------

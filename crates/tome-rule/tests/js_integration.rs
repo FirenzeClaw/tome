@@ -34,7 +34,7 @@ use std::time::Duration;
 
 use tome_js::{JsContext, Limits};
 use tome_rule::js_bridge::{is_webjs_prefix, wrap_inline_script, JobRuntime, JsPlaceholderBridge};
-use tome_rule::replace::{parse_interpolation, PlaceholderBridge};
+use tome_rule::replace::parse_interpolation;
 
 /// 建一个可用的规则运行时（带前导脚本与最小宿主桥）。
 fn runtime() -> JobRuntime {

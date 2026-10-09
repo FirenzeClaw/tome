@@ -779,6 +779,110 @@ fn evaluate_css_body(
     Ok(values)
 }
 
+// ---------------------------------------------------------------------------
+// 子树内的求值（T027 搜索必需）
+// ---------------------------------------------------------------------------
+
+/// 在一个**子树**内按选择器取节点（供搜索管线按 `bookList` 切出每本书的子树）。
+///
+/// ## 与 [`crate::css::select_in_document`] 的区别
+///
+/// 后者从文档根遍历，前者从 `root` 起遍历**且不越界**（`descendants_and_self`
+/// 的上溯边界保证了这一点）。搜索结果的字段选择器（`@css:.name@text`）
+/// 是以"每本书"为单位书写的，在整页上求会把所有书的字段混在一起。
+///
+/// [DONE] T027 的节点级入口。接受带 `@css:` 前缀与裸选择器两种写法
+/// （书源里两种都常见，见 `evaluate_rule` 的同款处理）。
+pub fn select_nodes(
+    document: &Document,
+    rule: &str,
+) -> Result<Vec<crate::dom::NodeRef>, crate::error::RuleError> {
+    use crate::dispatch::{dispatch_prefix, RuleKind};
+
+    // 先剥类型前缀——`bookList` 常写作 `@css:li.item`，直接把整串交给
+    // CSS 解析器会报 `EmptySelector`（`@css:` 不是合法选择器）。
+    let dispatched = dispatch_prefix(rule);
+    match dispatched.kind {
+        RuleKind::Css | RuleKind::Default | RuleKind::ExplicitDefault => {}
+        other => {
+            return Err(crate::error::RuleError::unsupported(
+                other.capability_id(),
+                "rule",
+            ));
+        }
+    }
+
+    let body = dispatched.body.trim();
+    if body.is_empty() {
+        return Err(crate::error::RuleError::syntax(format!(
+            "取节点的规则为空：`{rule}`"
+        )));
+    }
+
+    let tail = parse_rule_tail(body);
+    if tail.reversed || !tail.slice.is_all() || tail.suffix != RuleSuffix::Unspecified {
+        // `bookList` 这类"取节点"的规则不应带后缀或切片——带了说明作者写错了，
+        // 明确报错比静默忽略后半段好（忽略会让"为什么结果不对"无从排查）。
+        return Err(crate::error::RuleError::syntax(format!(
+            "取节点的规则不应带后缀或索引切片：`{rule}`"
+        )));
+    }
+    let selector = crate::css::compile(&tail.selector)?;
+    Ok(crate::css::select_in_document(document, &selector))
+}
+
+/// 在一个**节点子树内**求一条完整规则（选择器 + 切片 + 后缀）。
+///
+/// [DONE] T027 的字段级入口：搜索结果的每个字段都在"每本书的子树"内求值。
+///
+/// 与 [`evaluate_rule`] 的区别仅在于求值起点——它从文档根起，本函数从
+/// `root` 起。语义上等价于"在这个子树里跑同一条规则"。
+pub fn evaluate_rule_in(
+    root: &crate::dom::NodeRef,
+    rule: &str,
+) -> Result<Vec<String>, crate::error::RuleError> {
+    use crate::dispatch::{dispatch_prefix, RuleKind};
+
+    let dispatched = dispatch_prefix(rule);
+    match dispatched.kind {
+        RuleKind::Css | RuleKind::Default | RuleKind::ExplicitDefault => {}
+        other => {
+            return Err(crate::error::RuleError::unsupported(
+                other.capability_id(),
+                "rule",
+            ));
+        }
+    }
+
+    let body = if dispatched.reversed {
+        format!("-{}", dispatched.body)
+    } else {
+        dispatched.body.clone()
+    };
+    evaluate_css_body_in(root, &body)
+}
+
+fn evaluate_css_body_in(
+    root: &crate::dom::NodeRef,
+    rule: &str,
+) -> Result<Vec<String>, crate::error::RuleError> {
+    let tail = parse_rule_tail(rule);
+    let selector = crate::css::compile(&tail.selector)?;
+    // 从子树根起查：`css::select` 含起点自身，与 `select_in_document` 一致
+    let mut nodes = crate::css::select(root, &selector);
+
+    if tail.reversed {
+        nodes.reverse();
+    }
+    let nodes = tail.slice.apply_nodes(nodes);
+
+    let mut values = Vec::new();
+    for node in &nodes {
+        values.extend(tail.suffix.evaluate(node));
+    }
+    Ok(values)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

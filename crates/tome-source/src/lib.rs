@@ -38,4 +38,5 @@
 #![forbid(unsafe_code)]
 
 pub mod error;
+pub mod search;
 pub mod source;

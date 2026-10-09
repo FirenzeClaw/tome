@@ -27,6 +27,7 @@
 //!
 //! [WIP] 各子模块按任务顺序落地。
 
+pub mod crypto;
 pub mod text;
 pub mod unsupported;
 

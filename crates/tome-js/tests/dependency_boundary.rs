@@ -94,10 +94,18 @@ fn tome_js_只依赖_tome_core() {
         "tome-core",
         "rquickjs",
         "thiserror",
+        // 摘要与 Base64（纯计算）
         "md-5",
         "sha1",
         "sha2",
         "base64",
+        // 对称/非对称加密（纯计算）
+        "aes",
+        "cbc",
+        "des",
+        "rsa",
+        // RSA 的 PKCS#1 v1.5 填充需要随机数（纯计算，无 I/O）
+        "rand",
     ];
     let unexpected: Vec<&String> = names
         .iter()

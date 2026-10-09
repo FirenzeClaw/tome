@@ -25,11 +25,14 @@
 //! | 模块 | 职责 |
 //! |---|---|
 //! | [`runtime`] | QuickJS runtime 包装：内存/栈/中断三道护栏（T030） |
+//! | [`testdouble`] | 内存态 `StoreHost`/`CryptoHost` 替身（T033） |
 //!
 //! [WIP] S1-2 阶段落地进行中；本 crate 此前为空骨架。
 
 #![forbid(unsafe_code)]
 
 pub mod runtime;
+pub mod testdouble;
 
 pub use runtime::{CancelToken, JsValue, Limits, LimitsError, Sandbox, SandboxError};
+pub use testdouble::{MemoryCryptoHost, MemoryStoreHost};

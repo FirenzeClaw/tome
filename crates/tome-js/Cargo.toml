@@ -7,7 +7,11 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+base64 = "0.23.1"
+md-5 = "0.11.0"
 rquickjs = { version = "0.14.0", default-features = false, features = ["std"] }
+sha1 = "0.11.0"
+sha2 = "0.11.0"
 thiserror = "2.0.21"
 tome-core = { workspace = true }
 

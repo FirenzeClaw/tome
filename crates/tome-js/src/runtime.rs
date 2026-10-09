@@ -477,6 +477,38 @@ impl Sandbox {
         self.eval(crate::prelude::PRELUDE_JS).map(|_| ())
     }
 
+    /// 在沙箱的 JS 上下文里跑一段 Rust 代码（用于注册宿主函数、装配全局）。
+    ///
+    /// # 为什么必须经它而不是直接暴露 `Context`
+    ///
+    /// 暴露 `Context` 会让调用方绕开本模块的护栏与错误映射（`Ctx` 上的
+    /// 任何操作都可能产生 rquickjs 的原始错误）。经这个入口，调用方拿到
+    /// `Ctx` 但错误类型由自己定义，且明确处在"沙箱正在被配置"的语义下。
+    ///
+    /// # 借用语义（调用方必读）
+    ///
+    /// 回调执行期间 runtime 的 `RefCell` 被借出，故回调内**不得**调用
+    /// 本沙箱的其它方法（`eval` / `memory_usage_bytes` 等）——那会
+    /// `RefCell already borrowed` panic。回调只应操作 `Ctx` 与它自己的数据。
+    ///
+    /// # 为什么返回 `Result<T, String>`
+    ///
+    /// 装配期的失败原因五花八门（建对象、设属性、注册函数），且都是
+    /// **组合根的配置问题**而非运行时错误。用 `String` 承载诊断信息，
+    /// 由调用方决定如何呈现——本模块不替它选错误分类。
+    pub fn with_context<T>(
+        &self,
+        callback: impl FnOnce(Ctx<'_>) -> Result<T, String>,
+    ) -> Result<T, String> {
+        if self.is_poisoned() {
+            return Err("沙箱已废弃，不得再配置".to_string());
+        }
+        // 标记"已使用过"：让"求值之后才注入宿主桥"被挡在配置阶段
+        // （见 `install_host_bridge` 的说明）。
+        self.evaluated.store(true, Ordering::SeqCst);
+        self.context.with(callback)
+    }
+
     /// 求值一段脚本，返回其值。
     ///
     /// # 中断语义

@@ -47,12 +47,14 @@
 // `unsafe` 仍会被 CI 的 `-D warnings` 拦下，护栏强度不降。
 #![deny(unsafe_code)]
 
+pub mod api;
 pub mod bridge;
 pub mod prelude;
 pub mod runtime;
 pub mod sandbox_error;
 pub mod testdouble;
 
+pub use api::{register_all_unsupported, UnsupportedCapability};
 pub use bridge::{host_bridge, require_bridge, throw_host_error, HostBridge, JsContext};
 pub use prelude::PRELUDE_JS;
 pub use runtime::{CancelToken, JsValue, Limits, LimitsError, Sandbox, SandboxError};

@@ -1,0 +1,1181 @@
+//! CSS 后缀与索引切片（tasks.md T022）
+//!
+//! # 依据来源
+//!
+//! 本节所有语法取自**书源规则的公开语法约定**（社区流通的《书源规则说明》文档，
+//! 属公开资料，非某实现的源码）。原文要点抄录如下，作为实现的直接依据：
+//!
+//! ## 后缀（原文：「@的最后一段为获取内容」）
+//!
+//! > 如text,textNodes,ownText,href,src,html,all等
+//!
+//! 故 `href` / `src` 是**一等后缀**而非 `@attr(href)` 的语法糖——两者等价，
+//! 但前者在书源里更常见，必须直接支持。
+//!
+//! ## 索引（原文：「第三段是位置」）
+//!
+//! > 位置正着数从0开始,0是第一个,如为负数则是取倒着数的值,-1为倒数第一个,-2为倒数第二个
+//! > !是排除,有些位置不符合需要排除用!,后面的序号用:隔开0是第1个,负数为倒数序号,-1最后一个
+//! > 获取列表的最前面加上负号- 可以使列表倒置,有些网站目录列表是倒的,前面加个负号可变为正的
+//!
+//! ## 索引的出现形态有两种
+//!
+//! 原文的 Default（jsoup）语法把索引写成第三段（用 `.` 分隔，如
+//! `class.odd.0@tag.a.0@text`）；而 CSS 规则把索引写成方括号附在选择器后
+//! （如 `@css:.name>a@href` 取全部、`@css:p:eq(2)>a@text` 用伪类定位）。
+//! 本模块**两种形态都接受**：[`IndexSlice::parse_bracket`] 处理 `[0]` / `[0:3]`
+//! / `[!0:3]`，[`IndexSlice::parse_dot`] 处理 `.0` / `.-1`。语义完全一致。
+//!
+//! # 与 Jsoup 的关系
+//!
+//! 后缀里的 `text` / `ownText` / `html` / `all` 都直接落在 [`crate::dom`] 已实现的
+//! Jsoup 语义上（`text()` 空白归一化、`ownText()` 只看直接子级、`html()` 是内部
+//! HTML 序列化）。故这里只做"取哪个"的分派，语义不在本模块重复实现。
+
+use crate::dom::{Document, NodeRef};
+
+/// 规则后缀：取节点的哪一部分。
+///
+/// 依据见模块文档引用的公开规则说明（「如text,textNodes,ownText,href,src,html,all等」）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuleSuffix {
+    /// 元素及后代的文本，空白归一化（Jsoup `text()`）
+    Text,
+    /// **直接子级文本节点**的列表（Jsoup `textNodes()`）。与 `text` 的区别是
+    /// 它返回**多个**值而不是拼接成一个。
+    TextNodes,
+    /// 直接子级的文本，空白归一化（Jsoup `ownText()`）
+    OwnText,
+    /// 内部 HTML（Jsoup `html()`）
+    Html,
+    /// 元素的外部 HTML（Jsoup `outerHtml()`）
+    OuterHtml,
+    /// 全部：对元素是外部 HTML，对文本节点是文本值。
+    ///
+    /// 公开文档把它列在"获取内容"清单里，且书源用它的场合多为"拿到这段原始内容
+    /// 再交给后续替换链处理"。
+    All,
+    /// 属性值（`@attr(href)` / `@attr(src)` 等任意属性名）
+    Attr(String),
+    /// 节点的值（Jsoup `Node#nodeValue()`）。文本/注释/Data 节点用。
+    NodeValue,
+    /// 取原始 HTML 串（等价于 `All` 对元素的行为）；`html` 与 `all` 在文本节点上
+    /// 行为不同，故保留独立变体以便分别处理。
+    Href,
+    /// `src` 后缀——等价于 `@attr(src)`，但作为一等后缀存在（见模块文档）
+    Src,
+    /// 未指定后缀：默认行为。
+    ///
+    /// 默认行为的定义在公开文档里没有单独一句话，但从示例可推断：
+    /// `"name": "@css:.name@text"` 显式写了 `text`，而 `"chapterName": "text"` 是
+    /// Default 语法的简写。故"未指定"时按 `Text` 处理是安全的选择——这也是
+    /// 唯一能让"只给选择器不给后缀"的规则产出有意义结果的解释。
+    Unspecified,
+}
+
+impl RuleSuffix {
+    /// 按后缀名解析。名字大小写敏感（书源里一律小写）。
+    ///
+    /// 返回 `None` 表示不是已知后缀——调用方应把整段当属性名还是报错，
+    /// 由更上层决定（本模块不做"猜"）。
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "text" => Some(Self::Text),
+            "textNodes" => Some(Self::TextNodes),
+            "ownText" => Some(Self::OwnText),
+            "html" => Some(Self::Html),
+            "outerHtml" => Some(Self::OuterHtml),
+            "all" => Some(Self::All),
+            "nodeValue" => Some(Self::NodeValue),
+            "href" => Some(Self::Href),
+            "src" => Some(Self::Src),
+            "" => Some(Self::Unspecified),
+            _ => None,
+        }
+    }
+
+    /// 规范名（诊断用）。
+    pub fn canonical_name(&self) -> &str {
+        match self {
+            Self::Text => "text",
+            Self::TextNodes => "textNodes",
+            Self::OwnText => "ownText",
+            Self::Html => "html",
+            Self::OuterHtml => "outerHtml",
+            Self::All => "all",
+            Self::Attr(name) => name,
+            Self::NodeValue => "nodeValue",
+            Self::Href => "href",
+            Self::Src => "src",
+            Self::Unspecified => "",
+        }
+    }
+
+    /// 该后缀是否产出**多个**值（调用方据此决定是拼接还是保留列表）。
+    ///
+    /// 只有 `textNodes` 是多值：公开文档把它与 `text` 并列列出，二者的实质区别
+    /// 正是"接成一段"与"逐节点给"。
+    pub fn is_multi_valued(&self) -> bool {
+        matches!(self, Self::TextNodes)
+    }
+
+    /// 对单个节点求值。
+    ///
+    /// [DONE] 后缀求值的唯一入口。`document` 参数用于 `Html`/`OuterHtml` 的序列化。
+    pub fn evaluate(&self, node: &NodeRef) -> Vec<String> {
+        match self {
+            Self::Text => vec![node.text()],
+            Self::TextNodes => collect_text_nodes(node),
+            Self::OwnText => vec![node.own_text()],
+            Self::Html => vec![inner_html(node)],
+            Self::OuterHtml | Self::All => vec![outer_html(node)],
+            Self::Attr(name) => node.attr(name).into_iter().collect(),
+            Self::Href => node.attr("href").into_iter().collect(),
+            Self::Src => node.attr("src").into_iter().collect(),
+            Self::NodeValue => vec![node.node_value()],
+            // 未指定后缀按 `Text` 处理（理由见变体文档）
+            Self::Unspecified => vec![node.text()],
+        }
+    }
+}
+
+/// 取元素的直接子**文本节点**的内容（Jsoup `textNodes()`）。
+///
+/// 依据 Jsoup 公开文档 `Element#textNodes` 条目给出的确切例子：
+///
+/// > with the input HTML `<p>One <span>Two</span> Three <br> Four</p>`, and the `p`
+/// > element selected: `p.textNodes()` = `List<TextNode>["One ", " Three ", " Four"]`
+fn collect_text_nodes(node: &NodeRef) -> Vec<String> {
+    node.children()
+        .filter(|child| child.kind() == crate::dom::NodeKind::Text)
+        .map(|child| child.node_value())
+        .collect()
+}
+
+/// 元素的**内部** HTML（Jsoup `html()`）。
+///
+/// 依据 Jsoup 公开文档：*"on a `<div>` with one empty `<p>`, this returns `<p></p>`,
+/// whereas `Node.outerHtml()` returns `<div><p></p></div>`"*。
+fn inner_html(node: &NodeRef) -> String {
+    let mut buffer = String::new();
+    for child in node.children() {
+        serialize_node(&child, &mut buffer);
+    }
+    buffer
+}
+
+/// 元素及其子树的 HTML（Jsoup `outerHtml()`）。
+fn outer_html(node: &NodeRef) -> String {
+    let mut buffer = String::new();
+    serialize_node(node, &mut buffer);
+    buffer
+}
+
+/// 把一个节点序列化回 HTML 文本。
+///
+/// ## 这是本项目自带的序列化，不是"对齐 Jsoup 的输出格式"
+///
+/// 书源规则里的 `@html` 多数只用来"拿到这段内容再交给替换链/正则处理"，
+/// 故本实现的取舍是：**结构保真、字符转义与自闭合形式按 HTML5 规范**，
+/// 不追求与 Jsoup 逐字节相同（那需要对照数据，属 S1-6 真实书源基线的范畴）。
+///
+/// [UNCERTAIN] 属性引号风格、自闭合标签写法（`<br>` vs `<br/>`）、实体转义
+/// 范围这三处与 Jsoup 的差异未逐项对照。S1-6 的差分基线会给出实测差异率。
+fn serialize_node(node: &NodeRef, buffer: &mut String) {
+    use crate::dom::NodeKind;
+
+    match node.kind() {
+        NodeKind::Document => {
+            for child in node.children() {
+                serialize_node(&child, buffer);
+            }
+        }
+        NodeKind::Doctype => {
+            let name = node.node_value();
+            if let Some((public_id, system_id)) = node.doctype_ids() {
+                buffer.push_str("<!DOCTYPE ");
+                buffer.push_str(&name);
+                if !public_id.is_empty() {
+                    buffer.push_str(" PUBLIC \"");
+                    buffer.push_str(&public_id);
+                    buffer.push('"');
+                }
+                if !system_id.is_empty() {
+                    buffer.push_str(" \"");
+                    buffer.push_str(&system_id);
+                    buffer.push('"');
+                }
+                buffer.push('>');
+            } else {
+                buffer.push_str("<!DOCTYPE ");
+                buffer.push_str(&name);
+                buffer.push('>');
+            }
+        }
+        NodeKind::Comment => {
+            buffer.push_str("<!--");
+            buffer.push_str(&node.node_value());
+            buffer.push_str("-->");
+        }
+        NodeKind::ProcessingInstruction => {
+            buffer.push_str("<?");
+            buffer.push_str(&node.processing_instruction_target().unwrap_or_default());
+            buffer.push(' ');
+            buffer.push_str(&node.node_value());
+            buffer.push('>');
+        }
+        // Data 与 CData 的内容按原样输出（rawtext 元素的正文不该被转义）
+        NodeKind::Data | NodeKind::CData => buffer.push_str(&node.node_value()),
+        NodeKind::Text => escape_text(&node.node_value(), buffer),
+        NodeKind::Element => serialize_element(node, buffer),
+    }
+}
+
+fn serialize_element(node: &NodeRef, buffer: &mut String) {
+    buffer.push('<');
+    buffer.push_str(&node.qualified_name());
+    for (name, value) in node.attributes() {
+        buffer.push(' ');
+        buffer.push_str(&name);
+        buffer.push_str("=\"");
+        escape_attribute(&value, buffer);
+        buffer.push('"');
+    }
+    buffer.push('>');
+
+    for child in node.children() {
+        serialize_node(&child, buffer);
+    }
+
+    // 空元素（void element）不写结束标签。清单取自 WHATWG 规范 "void elements"。
+    if !is_void_element(&node.node_name()) {
+        buffer.push_str("</");
+        buffer.push_str(&node.qualified_name());
+        buffer.push('>');
+    }
+}
+
+/// WHATWG 规范定义的 void elements（不自闭合、无结束标签）。
+fn is_void_element(local_name: &str) -> bool {
+    matches!(
+        local_name,
+        "area"
+            | "base"
+            | "br"
+            | "col"
+            | "embed"
+            | "hr"
+            | "img"
+            | "input"
+            | "link"
+            | "meta"
+            | "source"
+            | "track"
+            | "wbr"
+    )
+}
+
+/// 文本节点的转义：`&`、`<`、`>`（HTML5 规范 "escaping a string" 的最小子集）。
+fn escape_text(text: &str, buffer: &mut String) {
+    for character in text.chars() {
+        match character {
+            '&' => buffer.push_str("&amp;"),
+            '<' => buffer.push_str("&lt;"),
+            '>' => buffer.push_str("&gt;"),
+            _ => buffer.push(character),
+        }
+    }
+}
+
+/// 属性值的转义：另加 `"`（本实现统一用双引号包裹）。
+fn escape_attribute(value: &str, buffer: &mut String) {
+    for character in value.chars() {
+        match character {
+            '&' => buffer.push_str("&amp;"),
+            '"' => buffer.push_str("&quot;"),
+            _ => buffer.push(character),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 索引切片
+// ---------------------------------------------------------------------------
+
+/// 索引切片。
+///
+/// 依据见模块文档引用的公开规则说明（「第三段是位置」整段）。所有负索引都是
+/// **从末尾倒数**（-1 是最后一个），所有区间端点都是**闭区间**（原文的
+/// 「0是第1个,负数为倒数序号,-1最后一个」描述的是端点语义，不是长度）。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum IndexSlice {
+    /// 不切片：取全部。
+    #[default]
+    All,
+    /// 单个索引：正数从 0 起，负数从末尾倒数（-1 是最后一个）。
+    Single(i64),
+    /// 区间 `[start:end]`，两端都是**闭区间**。
+    Range {
+        /// 起点（含）
+        start: i64,
+        /// 终点（含）。`None` 表示到末尾。
+        end: Option<i64>,
+    },
+    /// 排除区间 `[!start:end]`（原文：「!是排除」）。
+    Exclude {
+        /// 起点（含）
+        start: i64,
+        /// 终点（含）。`None` 表示到末尾。
+        end: Option<i64>,
+    },
+}
+
+impl IndexSlice {
+    /// 解析方括号形态：`[0]` / `[0:3]` / `[!0:3]` / `[-1]` / `[2:]`。
+    ///
+    /// 返回 `None` 表示不是合法的切片（调用方据此把它当别的语法处理）。
+    pub fn parse_bracket(text: &str) -> Option<Self> {
+        let inner = text.strip_prefix('[')?.strip_suffix(']')?.trim();
+        if inner.is_empty() {
+            return None;
+        }
+
+        // `!` 前缀标记排除
+        let (excluded, body) = match inner.strip_prefix('!') {
+            Some(rest) => (true, rest.trim()),
+            None => (false, inner),
+        };
+
+        if let Some((start_text, end_text)) = body.split_once(':') {
+            let start = parse_signed(start_text.trim())?;
+            let end = match end_text.trim() {
+                "" => None,
+                other => Some(parse_signed(other)?),
+            };
+            return Some(if excluded {
+                Self::Exclude { start, end }
+            } else {
+                Self::Range { start, end }
+            });
+        }
+
+        // 排除形态必须有区间，单独的 `[!3]` 无意义
+        if excluded {
+            return None;
+        }
+        parse_signed(body).map(Self::Single)
+    }
+
+    /// 解析点号形态：`.0` / `.-1`（Default 语法的第三段）。
+    ///
+    /// 注意 `.` 后必须紧跟数字（可带负号），否则不是索引——例如
+    /// `class.odd.0` 里的 `class` 与 `odd` 是类型与名称，只有 `.0` 是索引。
+    pub fn parse_dot(text: &str) -> Option<Self> {
+        let body = text.strip_prefix('.')?;
+        // `.0` 之外的内容（如 `.-1`）都交给同一个带符号解析
+        parse_signed(body).map(Self::Single)
+    }
+
+    /// 是否"取全部"（无需切片）。
+    pub fn is_all(&self) -> bool {
+        matches!(self, Self::All)
+    }
+
+    /// 把切片施加到一个列表上。
+    ///
+    /// [DONE] 索引语义的唯一落点。
+    ///
+    /// ## 端点归一化
+    ///
+    /// 负端点在**施加时**才换算成绝对位置（因为要列表长度）。换算规则按原文
+    /// 「-1为倒数第一个,-2为倒数第二个」：`index < 0` → `len + index`。
+    ///
+    /// ## 越界处理
+    ///
+    /// 越界端点被**夹到合法范围**而不是报错。理由：书源规则里的索引常按
+    /// "推测的列表长度"书写（例如固定写 `[0:9]` 取前十条），实际不足十条时
+    /// 报错会让整条搜索失败，而"取到几条算几条"是书源作者的预期。
+    pub fn apply(&self, values: Vec<String>) -> Vec<String> {
+        match self {
+            Self::All => values,
+            Self::Single(index) => {
+                let position = normalize(*index, values.len());
+                match position {
+                    Some(position) => vec![values[position].clone()],
+                    None => Vec::new(),
+                }
+            }
+            Self::Range { start, end } => {
+                let (start, end) = range_bounds(*start, *end, values.len());
+                match (start, end) {
+                    (Some(start), Some(end)) if start <= end => values[start..=end].to_vec(),
+                    _ => Vec::new(),
+                }
+            }
+            Self::Exclude { start, end } => {
+                let (start, end) = range_bounds(*start, *end, values.len());
+                match (start, end) {
+                    (Some(start), Some(end)) => values
+                        .into_iter()
+                        .enumerate()
+                        .filter(|(position, _)| *position < start || *position > end)
+                        .map(|(_, value)| value)
+                        .collect(),
+                    _ => values,
+                }
+            }
+        }
+    }
+
+    /// 把切片施加到一个**节点**列表上（选择器结果用）。
+    ///
+    /// 与 [`Self::apply`] 分开是为了避免"先把节点转成字符串再切"——那会丢掉
+    /// 元素身份，使后续的 `@attr(x)` 后缀无从取值。
+    pub fn apply_nodes(&self, values: Vec<NodeRef>) -> Vec<NodeRef> {
+        match self {
+            Self::All => values,
+            Self::Single(index) => match normalize(*index, values.len()) {
+                Some(position) => vec![values[position].clone()],
+                None => Vec::new(),
+            },
+            Self::Range { start, end } => {
+                let (start, end) = range_bounds(*start, *end, values.len());
+                match (start, end) {
+                    (Some(start), Some(end)) if start <= end => values[start..=end].to_vec(),
+                    _ => Vec::new(),
+                }
+            }
+            Self::Exclude { start, end } => {
+                let (start, end) = range_bounds(*start, *end, values.len());
+                match (start, end) {
+                    (Some(start), Some(end)) => values
+                        .into_iter()
+                        .enumerate()
+                        .filter(|(position, _)| *position < start || *position > end)
+                        .map(|(_, value)| value)
+                        .collect(),
+                    _ => values,
+                }
+            }
+        }
+    }
+}
+
+/// 解析带符号整数（允许前导 `-`）。
+fn parse_signed(text: &str) -> Option<i64> {
+    if text.is_empty() {
+        return None;
+    }
+    // 只接受纯数字与可选前导负号——`+3` 在书源里不出现，且 CSS 选择器里的
+    // `+` 是组合子，误吞会破坏解析。
+    let (negative, digits) = match text.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, text),
+    };
+    if digits.is_empty() || !digits.chars().all(|character| character.is_ascii_digit()) {
+        return None;
+    }
+    let magnitude: i64 = digits.parse().ok()?;
+    Some(if negative { -magnitude } else { magnitude })
+}
+
+/// 把索引归一化到 `[0, len)`。越界返回 `None`。
+fn normalize(index: i64, len: usize) -> Option<usize> {
+    if len == 0 {
+        return None;
+    }
+    let resolved = if index < 0 { len as i64 + index } else { index };
+    if resolved < 0 || resolved >= len as i64 {
+        return None;
+    }
+    Some(resolved as usize)
+}
+
+/// 把区间端点归一化并夹到合法范围。返回 `(起点, 终点)`，任一为 `None` 表示空结果。
+fn range_bounds(start: i64, end: Option<i64>, len: usize) -> (Option<usize>, Option<usize>) {
+    if len == 0 {
+        return (None, None);
+    }
+    let last = len as i64 - 1;
+    let resolve = |index: i64| -> i64 {
+        if index < 0 {
+            len as i64 + index
+        } else {
+            index
+        }
+    };
+
+    let start_resolved = resolve(start).max(0);
+    let end_resolved = match end {
+        Some(end) => resolve(end).min(last),
+        None => last,
+    };
+
+    if start_resolved > last || end_resolved < 0 {
+        return (None, None);
+    }
+    (
+        Some(start_resolved.min(last) as usize),
+        Some(end_resolved.max(0) as usize),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// 规则尾部解析（后缀 + 切片 + 反序）
+// ---------------------------------------------------------------------------
+
+/// 一条 CSS 规则被拆出的尾部成分。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuleTail {
+    /// 选择器（不含尾部）
+    pub selector: String,
+    /// 后缀
+    pub suffix: RuleSuffix,
+    /// 索引切片
+    pub slice: IndexSlice,
+    /// 是否反序（原文：「获取列表的最前面加上负号- 可以使列表倒置」）
+    pub reversed: bool,
+}
+
+/// 解析 `@css:` 规则的选择器部分，拆出选择器、后缀、索引切片与反序标记。
+///
+/// # 接受的全部形态
+///
+/// | 输入 | 选择器 | 后缀 | 切片 | 反序 |
+/// |---|---|---|---|---|
+/// | `.name>a@href` | `.name>a` | `href` | all | 否 |
+/// | `.name>a[0]@text` | `.name>a` | `text` | `[0]` | 否 |
+/// | `.name>a[0:3]` | `.name>a` | 未指定 | `[0:3]` | 否 |
+/// | `.list.-1@text` | `.list` | `text` | `.-1` | 否 |
+/// | `-.list@text` | `.list` | `text` | all | 是 |
+/// | `.list@attr(data-id)` | `.list` | 属性 | all | 否 |
+///
+/// ## 解析顺序为什么是「反序 → 切片 → 后缀」
+///
+/// 三者的语法标记互不重叠，但**切片在后缀之前**这一点是必须的：后缀名
+/// （`text` 等）不含 `[`，而切片总是带方括号；若先剥后缀，遇到
+/// `[0:3]@text` 这种写法会先剥掉 `text` 再处理切片，结果一样。真正需要顺序的是
+/// 反序标记（最前面的 `-`）——它必须在切片之后判断，否则 `.list.-1` 里的 `-`
+/// 会被误当反序标记。
+pub fn parse_rule_tail(rule: &str) -> RuleTail {
+    let mut remaining = rule.trim();
+    let mut reversed = false;
+
+    // 1) 反序标记：列表最前面的 `-`。只在它**不紧邻数字**时才算反序标记，
+    //    否则会把负索引（`.list.-1`）的开头误判——不过 `.list.-1` 里的 `-`
+    //    前面是 `.` 不是串首，故这里只需排除"串首的 `-` 后紧跟数字"这一种情况
+    //    （那种写法不是合法的书源规则，但明确排除比默默吞掉好）。
+    if let Some(rest) = remaining.strip_prefix('-') {
+        if !rest.starts_with(|character: char| character.is_ascii_digit()) {
+            reversed = true;
+            remaining = rest.trim();
+        }
+    }
+
+    // 2) 后缀：最后一个未被方括号包裹的 `@`
+    let (body, suffix) = split_suffix(remaining);
+    remaining = body;
+
+    // 3) 切片：尾部的方括号，或尾部点号形态的索引
+    let (selector, slice) = split_slice(remaining);
+
+    RuleTail {
+        selector: selector.trim().to_string(),
+        suffix,
+        slice,
+        reversed,
+    }
+}
+
+/// 从尾部切出后缀。返回 (剩余部分, 后缀)。
+fn split_suffix(text: &str) -> (&str, RuleSuffix) {
+    // 从右往左找第一个不在方括号内的 `@`
+    let bytes = text.as_bytes();
+    let mut depth = 0i32;
+    let mut position = bytes.len();
+    while position > 0 {
+        position -= 1;
+        match bytes[position] {
+            b']' => depth += 1,
+            b'[' => depth -= 1,
+            // `@` 也可能出现在 `@attr(...)` 的实参里，但那种情况括号已由 depth 覆盖
+            b'@' if depth == 0 => {
+                let suffix_text = &text[position + 1..];
+                if let Some(suffix) = parse_suffix_text(suffix_text) {
+                    return (&text[..position], suffix);
+                }
+                // `@` 后的内容不是已知后缀（可能是 `@css:` 之类的前缀残留，
+                // 但那种情况调用方已剥掉）——按"无后缀"处理，把整段留给选择器，
+                // 让 CSS 解析器报出准确错误。
+                return (text, RuleSuffix::Unspecified);
+            }
+            _ => {}
+        }
+    }
+    (text, RuleSuffix::Unspecified)
+}
+
+/// 解析后缀文本，支持 `attr(name)` 形态。
+fn parse_suffix_text(text: &str) -> Option<RuleSuffix> {
+    let trimmed = text.trim();
+    if let Some(argument) = trimmed
+        .strip_prefix("attr(")
+        .and_then(|rest| rest.strip_suffix(')'))
+    {
+        let name = argument
+            .trim()
+            .trim_matches(|quote| quote == '"' || quote == '\'');
+        if name.is_empty() {
+            return None;
+        }
+        return Some(RuleSuffix::Attr(name.to_string()));
+    }
+    RuleSuffix::parse(trimmed)
+}
+
+/// 从尾部切出索引切片。返回 (选择器, 切片)。
+fn split_slice(text: &str) -> (&str, IndexSlice) {
+    let trimmed = text.trim();
+
+    // 方括号形态：尾部成对的 `[...]`，且其中内容能解析成切片。
+    // 必须是**尾部**——CSS 里的 `[href]` 是属性选择器，出现在中间，不该被切掉。
+    if trimmed.ends_with(']') {
+        if let Some(open) = matching_open_bracket(trimmed) {
+            let candidate = &trimmed[open..];
+            if let Some(slice) = IndexSlice::parse_bracket(candidate) {
+                return (trimmed[..open].trim_end(), slice);
+            }
+        }
+    }
+
+    // 点号形态：末段的 `.N` / `.-N`
+    if let Some(position) = trimmed.rfind('.') {
+        let candidate = &trimmed[position..];
+        if let Some(slice) = IndexSlice::parse_dot(candidate) {
+            // 排除小数/类名误判：`.5` 之后不能再有字母数字
+            return (trimmed[..position].trim_end(), slice);
+        }
+    }
+
+    (trimmed, IndexSlice::All)
+}
+
+/// 找与尾部 `]` 配对的 `[` 的下标。
+fn matching_open_bracket(text: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut depth = 0i32;
+    let mut position = bytes.len();
+    while position > 0 {
+        position -= 1;
+        match bytes[position] {
+            b']' => depth += 1,
+            b'[' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(position);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// 便捷：把一条规则应用到一组节点上，产出字符串列表。
+///
+/// 接受两种输入形态（都要支持）：
+///
+/// - 裸选择器：`div.a@text`
+/// - 带 `@css:` 前缀：`@css:div.a@text`（书源规则的常见写法）
+///
+/// 故先按 [`crate::dispatch::dispatch_prefix`] 剥掉类型前缀。**只接受 CSS 与
+/// Default 两类**——其余类型（JSONPath/XPath/JS）在此产出结构化「不支持能力」
+/// 错误（FR-006），而不是把 `$.a` 当 CSS 选择器去解析后报一个无关的语法错。
+pub fn evaluate_rule(
+    document: &Document,
+    rule: &str,
+) -> Result<Vec<String>, crate::error::RuleError> {
+    use crate::dispatch::{dispatch_prefix, RuleKind};
+
+    let dispatched = dispatch_prefix(rule);
+    match dispatched.kind {
+        RuleKind::Css | RuleKind::Default | RuleKind::ExplicitDefault => {}
+        other => {
+            let capability = match other {
+                RuleKind::JsonPath => "jsonPath",
+                RuleKind::XPath => "xpath",
+                RuleKind::JavaScript => "js",
+                RuleKind::RegexAllInOne => "regexAllInOne",
+                // 已在上面的分支里放过，这里不可达
+                RuleKind::Css | RuleKind::Default | RuleKind::ExplicitDefault => "css",
+            };
+            return Err(crate::error::RuleError::unsupported(capability, "rule"));
+        }
+    }
+
+    let mut body = dispatched.body.as_str();
+    if dispatched.reversed {
+        // 段首的 `-` 已在 dispatch 里摘掉，这里把它还原到规则文本上——
+        // 反序语义由 `parse_rule_tail` 统一处理，避免两处各实现一份。
+        let restored = format!("-{body}");
+        // 借一次局部字符串：后续只读它
+        return evaluate_css_body(document, &restored);
+    }
+    // 显式 Default 前缀 `@@` 已剥掉，其余与裸选择器一致
+    let _ = &mut body;
+    evaluate_css_body(document, body)
+}
+
+fn evaluate_css_body(
+    document: &Document,
+    rule: &str,
+) -> Result<Vec<String>, crate::error::RuleError> {
+    let tail = parse_rule_tail(rule);
+    let selector = crate::css::compile(&tail.selector)?;
+    let mut nodes = crate::css::select_in_document(document, &selector);
+
+    // 反序在**切片之前**：原文说"获取列表的最前面加上负号- 可以使列表倒置"，
+    // 而目录列表的典型用法是"整个列表倒过来"，故先整体反序再取位置。
+    if tail.reversed {
+        nodes.reverse();
+    }
+
+    let nodes = tail.slice.apply_nodes(nodes);
+
+    let mut values = Vec::new();
+    for node in &nodes {
+        values.extend(tail.suffix.evaluate(node));
+    }
+    Ok(values)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---------- 后缀 ----------
+
+    #[test]
+    fn 已知后缀可解析() {
+        assert_eq!(RuleSuffix::parse("text"), Some(RuleSuffix::Text));
+        assert_eq!(RuleSuffix::parse("textNodes"), Some(RuleSuffix::TextNodes));
+        assert_eq!(RuleSuffix::parse("ownText"), Some(RuleSuffix::OwnText));
+        assert_eq!(RuleSuffix::parse("html"), Some(RuleSuffix::Html));
+        assert_eq!(RuleSuffix::parse("all"), Some(RuleSuffix::All));
+        assert_eq!(RuleSuffix::parse("href"), Some(RuleSuffix::Href));
+        assert_eq!(RuleSuffix::parse("src"), Some(RuleSuffix::Src));
+        assert_eq!(
+            RuleSuffix::parse("unknownSuffix"),
+            None,
+            "未知后缀不该被猜成某个已存在的"
+        );
+    }
+
+    #[test]
+    fn 后缀求值落在jsoup语义上() {
+        let document = Document::parse_html("<div id=\"w\"><p>Hello <b>there</b> now!</p></div>");
+        let paragraph = document
+            .descendant_elements()
+            .find(|node| node.node_name() == "p")
+            .expect("p 应存在");
+
+        // text 归一化（Jsoup 公开文档的确切例子）
+        assert_eq!(
+            RuleSuffix::Text.evaluate(&paragraph),
+            vec!["Hello there now!"]
+        );
+        // ownText 只看直接子级
+        assert_eq!(RuleSuffix::OwnText.evaluate(&paragraph), vec!["Hello now!"]);
+        // href / src 是一等后缀
+        let document = Document::parse_html(r#"<a href="/x" data-k="v">t</a>"#);
+        let anchor = document
+            .descendant_elements()
+            .find(|node| node.node_name() == "a")
+            .expect("a 应存在");
+        assert_eq!(RuleSuffix::Href.evaluate(&anchor), vec!["/x"]);
+        assert_eq!(RuleSuffix::Src.evaluate(&anchor), Vec::<String>::new());
+        assert_eq!(
+            RuleSuffix::Attr("data-k".to_string()).evaluate(&anchor),
+            vec!["v"]
+        );
+        assert_eq!(RuleSuffix::Text.evaluate(&anchor), vec!["t"]);
+    }
+
+    #[test]
+    fn textnodes逐个给值而不是拼接() {
+        // Jsoup 公开文档给出的例子：textNodes() = ["One ", " Three ", " Four"]
+        let document = Document::parse_html("<p>One <span>Two</span> Three <br> Four</p>");
+        let paragraph = document
+            .descendant_elements()
+            .find(|node| node.node_name() == "p")
+            .expect("p 应存在");
+        assert_eq!(
+            RuleSuffix::TextNodes.evaluate(&paragraph),
+            vec!["One ", " Three ", " Four"]
+        );
+        assert!(RuleSuffix::TextNodes.is_multi_valued());
+        assert!(!RuleSuffix::Text.is_multi_valued());
+    }
+
+    #[test]
+    fn html后缀产出可再解析的片段() {
+        let document = Document::parse_html(r#"<div><p class="a">x</p></div>"#);
+        let div = document
+            .descendant_elements()
+            .find(|node| node.node_name() == "div")
+            .expect("div 应存在");
+        assert_eq!(
+            RuleSuffix::Html.evaluate(&div),
+            vec![r#"<p class="a">x</p>"#]
+        );
+        assert_eq!(
+            RuleSuffix::All.evaluate(&div),
+            vec![r#"<div><p class="a">x</p></div>"#]
+        );
+    }
+
+    #[test]
+    fn html序列化对void元素不写结束标签() {
+        let document = Document::parse_html("<div><br><img src=\"/a.png\"></div>");
+        let div = document
+            .descendant_elements()
+            .find(|node| node.node_name() == "div")
+            .expect("div 应存在");
+        assert_eq!(
+            RuleSuffix::Html.evaluate(&div),
+            vec![r#"<br><img src="/a.png">"#]
+        );
+    }
+
+    #[test]
+    fn html序列化转义文本与属性() {
+        let document = Document::parse_html(r#"<div title="a&quot;b">x &lt; y</div>"#);
+        let div = document
+            .descendant_elements()
+            .find(|node| node.node_name() == "div")
+            .expect("div 应存在");
+        let html = RuleSuffix::All.evaluate(&div).remove(0);
+        assert!(html.contains("x &lt; y"), "文本里的 `<` 应被转义：{html}");
+        assert!(
+            html.contains(r#"title="a&quot;b""#),
+            "属性里的引号应被转义：{html}"
+        );
+    }
+
+    #[test]
+    fn 未指定后缀按文本处理() {
+        assert_eq!(RuleSuffix::parse(""), Some(RuleSuffix::Unspecified));
+        let document = Document::parse_html("<p>x</p>");
+        let paragraph = document
+            .descendant_elements()
+            .find(|node| node.node_name() == "p")
+            .expect("p 应存在");
+        assert_eq!(RuleSuffix::Unspecified.evaluate(&paragraph), vec!["x"]);
+    }
+
+    // ---------- 索引切片 ----------
+
+    #[test]
+    fn 单个索引含负数() {
+        let values: Vec<String> = (0..5).map(|index| index.to_string()).collect();
+        assert_eq!(IndexSlice::Single(0).apply(values.clone()), vec!["0"]);
+        assert_eq!(IndexSlice::Single(2).apply(values.clone()), vec!["2"]);
+        // 原文：-1 为倒数第一个，-2 为倒数第二个
+        assert_eq!(IndexSlice::Single(-1).apply(values.clone()), vec!["4"]);
+        assert_eq!(IndexSlice::Single(-2).apply(values.clone()), vec!["3"]);
+        // 越界返回空而不是报错（理由见 apply 的文档）
+        assert_eq!(
+            IndexSlice::Single(99).apply(values.clone()),
+            Vec::<String>::new()
+        );
+        assert_eq!(IndexSlice::Single(-99).apply(values), Vec::<String>::new());
+    }
+
+    #[test]
+    fn 区间切片两端都是闭区间() {
+        let values: Vec<String> = (0..5).map(|index| index.to_string()).collect();
+        assert_eq!(
+            IndexSlice::Range {
+                start: 0,
+                end: Some(2)
+            }
+            .apply(values.clone()),
+            vec!["0", "1", "2"],
+            "闭区间：[0:2] 取三个元素"
+        );
+        assert_eq!(
+            IndexSlice::Range {
+                start: 2,
+                end: None
+            }
+            .apply(values.clone()),
+            vec!["2", "3", "4"]
+        );
+        assert_eq!(
+            IndexSlice::Range {
+                start: -2,
+                end: None
+            }
+            .apply(values.clone()),
+            vec!["3", "4"]
+        );
+        // 越界端点被夹到合法范围
+        assert_eq!(
+            IndexSlice::Range {
+                start: 3,
+                end: Some(99)
+            }
+            .apply(values.clone()),
+            vec!["3", "4"]
+        );
+        // 起点晚于终点 → 空
+        assert_eq!(
+            IndexSlice::Range {
+                start: 4,
+                end: Some(1)
+            }
+            .apply(values),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn 排除切片() {
+        let values: Vec<String> = (0..5).map(|index| index.to_string()).collect();
+        assert_eq!(
+            IndexSlice::Exclude {
+                start: 1,
+                end: Some(2)
+            }
+            .apply(values.clone()),
+            vec!["0", "3", "4"]
+        );
+        assert_eq!(
+            IndexSlice::Exclude {
+                start: 0,
+                end: Some(0)
+            }
+            .apply(values),
+            vec!["1", "2", "3", "4"]
+        );
+    }
+
+    #[test]
+    fn 空列表上任何切片都产出空() {
+        for slice in [
+            IndexSlice::Single(0),
+            IndexSlice::Single(-1),
+            IndexSlice::Range {
+                start: 0,
+                end: None,
+            },
+            IndexSlice::Exclude {
+                start: 0,
+                end: None,
+            },
+            IndexSlice::All,
+        ] {
+            assert_eq!(slice.apply(Vec::new()), Vec::<String>::new());
+        }
+    }
+
+    #[test]
+    fn 方括号形态可解析() {
+        assert_eq!(
+            IndexSlice::parse_bracket("[0]"),
+            Some(IndexSlice::Single(0))
+        );
+        assert_eq!(
+            IndexSlice::parse_bracket("[-1]"),
+            Some(IndexSlice::Single(-1))
+        );
+        assert_eq!(
+            IndexSlice::parse_bracket("[0:3]"),
+            Some(IndexSlice::Range {
+                start: 0,
+                end: Some(3)
+            })
+        );
+        assert_eq!(
+            IndexSlice::parse_bracket("[2:]"),
+            Some(IndexSlice::Range {
+                start: 2,
+                end: None
+            })
+        );
+        // 原文：「!是排除」
+        assert_eq!(
+            IndexSlice::parse_bracket("[!0:3]"),
+            Some(IndexSlice::Exclude {
+                start: 0,
+                end: Some(3)
+            })
+        );
+        assert_eq!(
+            IndexSlice::parse_bracket("[!-3:-1]"),
+            Some(IndexSlice::Exclude {
+                start: -3,
+                end: Some(-1)
+            })
+        );
+        // 非切片的方括号（CSS 属性选择器）不该被认下
+        assert_eq!(IndexSlice::parse_bracket("[href]"), None);
+        assert_eq!(IndexSlice::parse_bracket("[]"), None);
+        assert_eq!(IndexSlice::parse_bracket("[!3]"), None, "排除必须带区间");
+    }
+
+    #[test]
+    fn 点号形态可解析() {
+        assert_eq!(IndexSlice::parse_dot(".0"), Some(IndexSlice::Single(0)));
+        assert_eq!(IndexSlice::parse_dot(".-1"), Some(IndexSlice::Single(-1)));
+        assert_eq!(IndexSlice::parse_dot(".odd"), None, "类名不是索引");
+        assert_eq!(IndexSlice::parse_dot("0"), None);
+    }
+
+    // ---------- 规则尾部解析 ----------
+
+    #[test]
+    fn 尾部解析覆盖公开文档的全部形态() {
+        // 公开文档示例：@css:.name>a@href
+        let tail = parse_rule_tail(".name>a@href");
+        assert_eq!(tail.selector, ".name>a");
+        assert_eq!(tail.suffix, RuleSuffix::Href);
+        assert_eq!(tail.slice, IndexSlice::All);
+        assert!(!tail.reversed);
+
+        // 公开文档示例：@css:p:eq(2)>a@text（伪类定位，切片为全部）
+        let tail = parse_rule_tail("p:eq(2)>a@text");
+        assert_eq!(tail.selector, "p:eq(2)>a");
+        assert_eq!(tail.suffix, RuleSuffix::Text);
+
+        // 方括号切片 + 后缀
+        let tail = parse_rule_tail(".list[0]@text");
+        assert_eq!(tail.selector, ".list");
+        assert_eq!(tail.suffix, RuleSuffix::Text);
+        assert_eq!(tail.slice, IndexSlice::Single(0));
+
+        // 方括号切片，无后缀
+        let tail = parse_rule_tail(".list[0:3]");
+        assert_eq!(tail.selector, ".list");
+        assert_eq!(tail.suffix, RuleSuffix::Unspecified);
+        assert_eq!(
+            tail.slice,
+            IndexSlice::Range {
+                start: 0,
+                end: Some(3)
+            }
+        );
+
+        // 点号索引 + 后缀（Default 语法形态）
+        let tail = parse_rule_tail(".list.-1@text");
+        assert_eq!(tail.selector, ".list");
+        assert_eq!(tail.suffix, RuleSuffix::Text);
+        assert_eq!(tail.slice, IndexSlice::Single(-1));
+
+        // 反序标记
+        let tail = parse_rule_tail("-.list@text");
+        assert_eq!(tail.selector, ".list");
+        assert_eq!(tail.suffix, RuleSuffix::Text);
+        assert!(tail.reversed);
+
+        // 属性后缀
+        let tail = parse_rule_tail(".list@attr(data-id)");
+        assert_eq!(tail.selector, ".list");
+        assert_eq!(tail.suffix, RuleSuffix::Attr("data-id".to_string()));
+    }
+
+    #[test]
+    fn 属性选择器不被误当切片() {
+        // `[href]` 在**中间**，不是尾部切片
+        let tail = parse_rule_tail("a[href]@text");
+        assert_eq!(tail.selector, "a[href]");
+        assert_eq!(tail.suffix, RuleSuffix::Text);
+        assert_eq!(tail.slice, IndexSlice::All);
+
+        // 尾部是属性选择器但整体无后缀——这是合法 CSS，不该被当切片
+        let tail = parse_rule_tail("a[href]");
+        assert_eq!(tail.selector, "a[href]");
+        assert_eq!(tail.slice, IndexSlice::All);
+    }
+
+    #[test]
+    fn 未知后缀不被吞掉() {
+        // `@unknown` 不是后缀，应留在选择器里让 CSS 解析器报出准确错误
+        let tail = parse_rule_tail(".list@unknownThing");
+        assert_eq!(tail.selector, ".list@unknownThing");
+        assert_eq!(tail.suffix, RuleSuffix::Unspecified);
+    }
+
+    // ---------- 端到端 ----------
+
+    #[test]
+    fn 端到端规则求值() {
+        let document = Document::parse_html(
+            r#"<ul><li class="i"><a href="/1">一</a></li>\
+               <li class="i"><a href="/2">二</a></li>\
+               <li class="i"><a href="/3">三</a></li></ul>"#,
+        );
+        assert_eq!(
+            evaluate_rule(&document, ".i>a@href").expect("应求值成功"),
+            vec!["/1", "/2", "/3"]
+        );
+        assert_eq!(
+            evaluate_rule(&document, ".i>a[0]@href").expect("应求值成功"),
+            vec!["/1"]
+        );
+        assert_eq!(
+            evaluate_rule(&document, ".i>a[-1]@href").expect("应求值成功"),
+            vec!["/3"]
+        );
+        assert_eq!(
+            evaluate_rule(&document, ".i>a[0:1]@href").expect("应求值成功"),
+            vec!["/1", "/2"]
+        );
+        assert_eq!(
+            evaluate_rule(&document, ".i>a[!0:1]@href").expect("应求值成功"),
+            vec!["/3"]
+        );
+        // 反序
+        assert_eq!(
+            evaluate_rule(&document, "-.i>a@href").expect("应求值成功"),
+            vec!["/3", "/2", "/1"]
+        );
+        // 反序 + 切片：先反序再取位置
+        assert_eq!(
+            evaluate_rule(&document, "-.i>a[0]@href").expect("应求值成功"),
+            vec!["/3"]
+        );
+        // 后缀
+        assert_eq!(
+            evaluate_rule(&document, ".i>a@text").expect("应求值成功"),
+            vec!["一", "二", "三"]
+        );
+        assert_eq!(
+            evaluate_rule(&document, ".i@html")
+                .expect("应求值成功")
+                .len(),
+            3
+        );
+    }
+
+    #[test]
+    fn 端到端非法选择器返回结构化错误() {
+        let document = Document::parse_html("<p>x</p>");
+        let error = evaluate_rule(&document, "div >").expect_err("应报错");
+        assert_eq!(error.to_error_kind(), tome_core::ErrorKind::Rule);
+    }
+
+    #[test]
+    fn 端到端无匹配产出空列表() {
+        let document = Document::parse_html("<p>x</p>");
+        assert_eq!(
+            evaluate_rule(&document, ".missing@text").expect("应求值成功"),
+            Vec::<String>::new()
+        );
+        // 有匹配但属性不存在 → 空
+        assert_eq!(
+            evaluate_rule(&document, "p@attr(nope)").expect("应求值成功"),
+            Vec::<String>::new()
+        );
+    }
+}

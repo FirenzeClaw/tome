@@ -1,0 +1,31 @@
+# rustfmt 配置（对应 tasks.md T003）
+#
+# 取值原则：**只用 stable 上可用的选项**。
+# rustfmt 有一批选项（wrap_comments / comment_width / imports_granularity /
+# group_imports 等）仅在 nightly channel 可设，stable 下会打印
+# "unstable features are only available in nightly channel" 警告并被忽略。
+# 本项目钉 stable 工具链，故这些选项一律不写——写了既无效又制造噪音，
+# 还会让开发者误以为格式已被统一（实际没有）。
+#
+# 默认值（max_width=100 / tab_spaces=4 / newline_style=Auto）已与 Rust
+# 社区惯例及 AGENTS.md 一致，此处显式写出以防止后续被无意改动。
+
+edition = "2021"
+
+# 行宽 100：Rust 社区默认，与 IDE 并排双栏阅读兼容
+max_width = 100
+
+# 缩进 4 空格（Rust 标准；不使用 tab）
+hard_tabs = false
+tab_spaces = 4
+
+# 换行风格交给 rustfmt 自动判定。
+# 本项目在 Windows 上开发（CRLF）而 CI 含 Linux/macOS（LF）——
+# 若在此写死 Unix，Windows 开发者的提交会被 CI 判为格式错误。
+# 故保持 Auto；仓库内换行由 .gitattributes 统一。
+newline_style = "Auto"
+
+# 结构体字面量的宽度阈值：低于此值才允许单行书写。
+# 目的是让 rustfmt --check 的输出更稳定、diff 噪音更小。
+struct_lit_width = 18
+struct_variant_width = 0

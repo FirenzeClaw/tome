@@ -1,0 +1,30 @@
+# clippy 配置（对应 tasks.md T003）
+#
+# 这里只放"lint 行为参数"，不放 lint 的启用/禁用清单——
+# 启用哪些 lint 属于 workspace 契约，写在根 Cargo.toml 的
+# [workspace.lints.clippy]，以便各 crate 通过 [lints] workspace = true 继承。
+
+# 单个函数最大行数。AGENTS.md「函数超过 50 行考虑拆分」是**软约定**
+# （"考虑拆分"，非"必须"），故这里不取 50——把它变成硬门槛会逼出
+# 刻意的碎片化拆函数，反而伤害可读性。取 100 作为硬上限：
+# 为软约定留一倍余量，同时仍然挡住真正失控的实现。
+too-many-lines-threshold = 100
+
+# 单个函数的参数个数上限。参数过多通常意味着该引入结构体承载参数，
+# 而不是继续加形参。取 7 是在"配置注入类接口"与"真正需要拆分的接口"之间的折中。
+too-many-arguments-threshold = 7
+
+# 认知复杂度上限（clippy::cognitive_complexity 的阈值）。
+# AGENTS.md 要求"嵌套 ≤3 层、复杂条件提取为布尔变量"，
+# 15 是该约定的量化落点。
+cognitive-complexity-threshold = 15
+
+# 类型复杂度上限。规则引擎涉及较多泛型组合（DPT 等），
+# 阈值给到 300 以免对合法抽象误报。
+type-complexity-threshold = 300
+
+# 允许的标识符最小长度。AGENTS.md 明确"禁 1-2 字符名"，
+# 故此处不含 single_char 豁免——1 字符变量会被本规则直接点名。
+# 例外：闭包参数与循环变量由 Clippy 自身的 allow-* 系列单独豁免，
+# 不在此放宽，以免把"故意的短名"也放过去。
+min-ident-chars-threshold = 3

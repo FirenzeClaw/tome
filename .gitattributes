@@ -1,0 +1,36 @@
+# 换行统一：仓库内存 LF，检出到各平台时由 Git 决定本地表示
+#
+# 为什么必须显式声明：本项目在 Windows 上开发（core.autocrlf=true 会把
+# 工作区写成 CRLF），而 CI 含 ubuntu-latest / macos-latest（LF）。
+# 若不在仓库内统一，rustfmt.toml 的 newline_style = "Auto" 会让
+# `cargo fmt --check` 在 Windows 与 Linux 上得到不同结果，CI 必红。
+#
+# 做法：仓库内一律存 LF。Windows 开发者检出时得到 CRLF（由 autocrlf 处理），
+# 提交时自动转回 LF，两端因此看到一致的字节序列。
+* text=auto eol=lf
+
+# Rust 源码与清单
+*.rs    text eol=lf
+*.toml  text eol=lf
+
+# 锁文件：由 cargo 生成，必须逐字节稳定，禁止任何换行转换
+Cargo.lock  -text
+
+# 二进制资产不做换行转换（未来可能加入的测试语料/字体等）
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.epub  binary
+*.mobi  binary
+*.azw3  binary
+*.db    binary
+*.sqlite binary
+
+# 以下目录为第三方资产或构建产物，标记为二进制避免 diff 噪音
+/testdata/captures/  binary

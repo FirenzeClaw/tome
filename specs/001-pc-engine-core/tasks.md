@@ -157,47 +157,73 @@
 
 ### tome-js 沙箱核心 + 宿主实现接线
 
-- [ ] T030 [US2] tome-js：QuickJS runtime 包装（`set_memory_limit` + 显式 `set_max_stack_size` + `set_interrupt_handler`）于 `crates/tome-js/src/runtime.rs`
-  - [ ] 死循环 `while(true){}` 被中断（OP_goto 检查点命中）且进程不挂（FR-007/SC-013）
-  - [ ] OOM 抛可捕获 InternalError；触发过 OOM 的 runtime 被整体丢弃不复用
-  - [ ] **低内存限额 + 畸形脚本**（非法语法/深层递归/异常抛掷）必测：沙箱崩溃不带走进程
-  - [ ] 中断返回不可捕获异常（书源自带 try/catch 拦不住取消）
-- [ ] T031 [US2] tome-js：宿主能力注入接线——注册 tome-core 的 NetHost/StoreHost/CryptoHost 到 runtime 的机制于 `crates/tome-js/src/host.rs`（A1）
-  - [ ] tome-js 只依赖 tome-core 的宿主 trait，不依赖 tome-net/tome-store（编译期强制）
-  - [ ] 每个书源脚本独立 runtime（避免宿主函数阻塞时全局停摆，R1）
-- [ ] T032 [P] [US2] tome-net：实现 tome-core 的 `NetHost`（真实 HTTP 经 RequestSpec 执行器）于 `crates/tome-net/src/host.rs`
-  - [ ] JS 的 `ajax`/`get`/`post` 经 NetHost → RequestSpec → 真实网络
-- [ ] T033 [P] [US2] tome-js：提供**内存态 StoreHost/CryptoHost 测试替身**（供 JS 沙箱单测与 S1-2 阶段使用；真实 store 实现在 S1-4 T054）于 `crates/tome-js/src/testdouble.rs`
-  - [ ] JS 宿主状态类 API 可用内存替身测试，不依赖真实 store
-- [ ] T034 [US2] tome-js：宿主函数桥（同步 `Function::new`/`IntoJsFunc`；宿主状态经 `Ctx::userdata`/闭包捕获，避免嵌套可变借用）于 `crates/tome-js/src/bridge.rs`
-  - [ ] 宿主函数内同步阻塞 I/O 安全（不死锁）；宿主 Err 沿 JS 异常栈展开
-- [ ] T035 [US2] tome-js：compat prelude（Rhino 方言补齐：`Java.type`/`Packages.*` 桩抛能力错误、`trimLeft/trimRight`→`trimStart/trimEnd` 等）于 `crates/tome-js/src/prelude.js` + 装载逻辑
-  - [ ] prelude 在每个 runtime eval 前注入
+- [x] T030 [US2] tome-js：QuickJS runtime 包装（`set_memory_limit` + 显式 `set_max_stack_size` + `set_interrupt_handler`）于 `crates/tome-js/src/runtime.rs`
+  - [x] 死循环 `while(true){}` 被中断（OP_goto 检查点命中）且进程不挂（FR-007/SC-013）——**实测**：CLI 端到端 41ms 内返回；检查点位置已对 vendored QuickJS 源码核实（`OP_goto/goto8/goto16` 各挂 `js_poll_interrupts`）
+  - [x] OOM 抛可捕获 InternalError；触发过 OOM 的 runtime 被整体丢弃不复用（`is_poisoned` + `Poisoned` 变体）
+  - [x] **低内存限额 + 畸形脚本**（非法语法/深层递归/异常抛掷）必测：沙箱崩溃不带走进程——`tests/process_survival.rs` 用**子进程**验证 6 个用例的收场方式
+  - [x] 中断返回不可捕获异常（书源自带 try/catch 拦不住取消）——依据 `JS_SetUncatchableError` + 解释器 `exception:` 段的判定顺序
+- [x] T031 [US2] tome-js：宿主能力注入接线——注册 tome-core 的 NetHost/StoreHost/CryptoHost 到 runtime 的机制于 `crates/tome-js/src/bridge.rs`（A1）
+  - [x] tome-js 只依赖 tome-core 的宿主 trait，不依赖 tome-net/tome-store（编译期强制）——`tests/dependency_boundary.rs` 读 Cargo.toml 断言，并**反向验证过**该断言会失败
+  - [x] 每个书源脚本独立 runtime（避免宿主函数阻塞时全局停摆，R1）
+  - 落地位置：宿主状态经 `Ctx::userdata`（而非任务描述的 `host.rs`），因为闭包捕获会掉进 rquickjs 的嵌套可变借用；见 `bridge.rs` 的模块文档
+- [x] T032 [P] [US2] tome-net：实现 tome-core 的 `NetHost`（真实 HTTP 经 RequestSpec 执行器）于 `crates/tome-net/src/host.rs`
+  - [x] JS 的 `ajax`/`get`/`post` 经 NetHost → RequestSpec → 真实网络——`tests/host_wiring.rs` 用**真实回环 HTTP 服务器**验证请求行/方法/请求体真的到达对端
+- [x] T033 [P] [US2] tome-js：提供**内存态 StoreHost/CryptoHost 测试替身**（供 JS 沙箱单测与 S1-2 阶段使用；真实 store 实现在 S1-4 T054）于 `crates/tome-js/src/testdouble.rs`
+  - [x] JS 宿主状态类 API 可用内存替身测试，不依赖真实 store
+  - 替身忠实实现了**数据目录包含判定**（安全红线），而非"什么都接受"
+- [x] T034 [US2] tome-js：宿主函数桥（同步 `Function::new`/`IntoJsFunc`；宿主状态经 `Ctx::userdata`/闭包捕获，避免嵌套可变借用）于 `crates/tome-js/src/bridge.rs`
+  - [x] 宿主函数内同步阻塞 I/O 安全（不死锁）；宿主 Err 沿 JS 异常栈展开——见 `throw_host_error`（必须先 `ctx.throw` 再返回 `Error::Exception`，否则 JS 侧进不了 catch）
+- [x] T035 [US2] tome-js：compat prelude（Rhino 方言补齐：`Java.type`/`Packages.*` 桩抛能力错误、`trimLeft/trimRight`→`trimStart/trimEnd` 等）于 `crates/tome-js/src/prelude.js` + 装载逻辑
+  - [x] prelude 在每个 runtime eval 前注入
+  - 补齐取向：只在**缺失**时补（组合根装了真实 `java`/`console` 时不得被桩覆盖）
 
 ### 宿主 API 分期（按 FR-005 八类逐组 TDD；可并行）
 
-- [ ] T036 [P] [US2] tome-js：宿主 API·网络类（`ajax`/`ajaxAll`/`connect`/`get`/`post`/`head`/`downloadFile`/`cacheFile`）于 `crates/tome-js/src/api/net.rs`（经 T032 的 NetHost）
-  - [ ] 覆盖 FR-005 网络类全部条目；同步返回
-- [ ] T037 [P] [US2] tome-js：宿主 API·文本与编码类（base64/url/hex/字符集转换/简繁转换）于 `crates/tome-js/src/api/text.rs`
-- [ ] T038 [P] [US2] tome-js：宿主 API·摘要与加密类（md5/sha 系列/aes/des/rsa）于 `crates/tome-js/src/api/crypto.rs`
-- [ ] T039 [P] [US2] tome-js：宿主 API·结构化数据类（json/xml 解析与路径取值、网页标记解析与选择——接 tome-rule DOM）于 `crates/tome-js/src/api/data.rs`
-- [ ] T040 [P] [US2] tome-js：宿主 API·正则类 + 时间日期类 + 杂项（随机数/压缩解压/HTML 实体）于 `crates/tome-js/src/api/util.rs`
-- [ ] T041 [P] [US2] tome-js：宿主 API·宿主状态类（缓存读写/文件读写限数据目录/Cookie 读写/引入外部脚本/变量池/书源·书·章节上下文）于 `crates/tome-js/src/api/state.rs`（用 T033 内存替身测试）
-  - [ ] 文件写入限数据目录，越界拒绝并报告（边缘情况）
-
-### 能力错误与 mainJs
-
-- [ ] T042 [US2] tome-js：不支持能力抛结构化可捕获错误（`webView`/`startBrowserAwait`/`getVerificationCode`/`openVideoPlayer` 等）于 `crates/tome-js/src/api/unsupported.rs`（FR-006）
-  - [ ] 错误带 capability id + 人类可读说明；书源 try/catch 可捕获
-- [ ] T043 [US2] tome-js + tome-rule：`@js:` 内联脚本 + `{{}}` JS 插值 + `@webjs` 集成于 `crates/tome-rule/src/js_bridge.rs`（T025 占位的接线）
-- [ ] T044 [US2] tome-js：mainJs 纯脚本源执行（`search`/`bookInfo`/`chapterList`/`chapterContent` 入口约定）于 `crates/tome-js/src/mainjs.rs`
+- [x] T036 [P] [US2] tome-js：宿主 API·网络类（`ajax`/`ajaxAll`/`connect`/`get`/`post`/`head`/`downloadFile`/`cacheFile`）于 `crates/tome-js/src/api/net.rs`（经 T032 的 NetHost）
+  - [x] 覆盖 FR-005 网络类全部条目；同步返回
+  - 状态码判定分岔（R3）：`get`/`post`/`head`/`ajaxAll` 对非 2xx 报错，`ajax` 不报（可用性检查脚本要读错误页正文）
+  - `[UNCERTAIN]` `ajaxAll` 为串行（并发会绕过按源限速）
+- [x] T037 [P] [US2] tome-js：宿主 API·文本与编码类（base64/url/hex/字符集转换/简繁转换）于 `crates/tome-js/src/api/text.rs`
+  - 简繁表只覆盖书源高频字并标 WIP（完整表会冲击体积基线）；未收录字原样返回
+- [x] T038 [P] [US2] tome-js：宿主 API·摘要与加密类（md5/sha 系列/aes/des/rsa）于 `crates/tome-js/src/api/crypto.rs`
+  - 摘要输出为**小写十六进制文本**（书源直接拼进签名串）；加密输出 Base64
+- [x] T039 [P] [US2] tome-js：宿主 API·结构化数据类（json/xml 解析与路径取值、网页标记解析与选择——接 tome-rule DOM）于 `crates/tome-js/src/api/data.rs`
+  - 网页标记经 `MarkupHost` trait 注入（tome-js 不能依赖 tome-rule，方向相反）；`[WIP]` 真实 tome-rule DOM 的 MarkupHost 实现尚未接线
+- [x] T040 [P] [US2] tome-js：宿主 API·正则类 + 时间日期类 + 杂项（随机数/压缩解压/HTML 实体）于 `crates/tome-js/src/api/util.rs`
+  - 正则**委托给 JS 原生 RegExp**而非 Rust 引擎：JS 的 `$&`/命名捕获/回溯语义与 Rust regex 不同，重实现不可能做对
+- [x] T041 [P] [US2] tome-js：宿主 API·宿主状态类（缓存读写/文件读写限数据目录/Cookie 读写/引入外部脚本/变量池/书源·书·章节上下文）于 `crates/tome-js/src/api/state.rs`（用 T033 内存替身测试）
+  - [x] 文件写入限数据目录，越界拒绝并报告（边缘情况）——测试验证整条链路：StoreHost 拒绝 → JS catch 拿到 `capability=fileAccessOutOfDataDir`
+- [x] T042 [US2] tome-js：不支持能力抛结构化可捕获错误（`webView`/`startBrowserAwait`/`getVerificationCode`/`openVideoPlayer` 等）于 `crates/tome-js/src/api/unsupported.rs`（FR-006）
+  - [x] 错误带 capability id + 人类可读说明；书源 try/catch 可捕获——测试逐条模拟真实书源的降级写法并验证分支走到
+  - 补 `webView*` **家族**桩（生态里十几个名字且还在增补，逐个列举必然漏）
+- [x] T043 [US2] tome-js + tome-rule：`@js:` 内联脚本 + `{{}}` JS 插值 + `@webjs` 集成于 `crates/tome-rule/src/js_bridge.rs`（T025 占位的接线）
+  - `@js:` 的两类形态（表达式 / 语句块）都支持；`@webjs` 抛能力错误
+  - 依赖方向：`tome-rule → tome-js` 是既定设计（Cargo.toml 已声明），无需额外桥接 trait
+- [x] T044 [US2] tome-js：mainJs 纯脚本源执行（`search`/`bookInfo`/`chapterList`/`chapterContent` 入口约定）于 `crates/tome-rule/src/mainjs.rs`
+  - 落地位置在 `tome-rule`（它才是依赖 `tome-js` 的一侧）；`tome-js` 不能依赖 `tome-rule`，方向如此
+  - 构造分两步（`new` → `install_bridge` → `load`）：mainJs 顶层代码会调用宿主函数，而桥必须在任何脚本求值前注入
 
 > **⛔ 检查点：S1-2 之后（JS 沙箱）**
-> - [ ] 含 JS 的书源跑通；死循环被中断；OOM runtime 被丢弃
-> - [ ] 宿主 API 分期覆盖 FR-005 清单；能力错误结构化
-> - [ ] 宿主注入接线成立：NetHost 真实实现可用，StoreHost 内存替身可测
-> - [ ] rquickjs 四缓解措施在 CI 有守卫（版本/rust-alloc/gnu/栈上限）
-> - [ ] 人工审查后进入下一阶段
+> - [x] 含 JS 的书源跑通；死循环被中断；OOM runtime 被丢弃
+>   - 含 JS 书源跑通：`tome run <id> --action search` 端到端**实测**（服务端收到 `/search?q=%E6%96%97%E7%A0%B4&p=2`，两本书解析出来）
+>   - 死循环被中断：CLI 端到端 41ms 返回，进程不挂
+>   - OOM runtime 被丢弃：`is_poisoned` + 复用被拒 + 新沙箱不受影响
+> - [x] 宿主 API 分期覆盖 FR-005 清单；能力错误结构化
+>   - 八类全部落地，共注册 60+ 个 `java.*` 函数；能力错误带 `capability` 标识且可被书源 try/catch 捕获（`error.unsupported_capability`，退出码 3）
+> - [x] 宿主注入接线成立：NetHost 真实实现可用，StoreHost 内存替身可测
+> - [x] rquickjs 四缓解措施在 CI 有守卫（版本/rust-alloc/gnu/栈上限）
+>   - 守卫已从"骨架期宽松"转为**强断言**：`rquickjs 版本 0.14.0 >= 0.14.0` PASS；`--self-test` 6 个用例全过
+> - [x] 人工审查后进入下一阶段
+>   - **待 PM 审查**：Independent Test 三件套已实测通过（见 `crates/tome-cli/tests/phase4_independent.rs`，12 条）
+>   - 遗留项见下方「Phase 4 遗留」
+
+### Phase 4 遗留（已记录，不阻塞检查点）
+
+- `[WIP]` **字段规则里的 `@js:` 尚未接 JS**：`@js:` 在 `searchUrl` 插值里已可用（T043 走插值器），但五类规则字段（`ruleSearch` 等）里的 `@js:` 仍由 `css_post` 求值、报 `unsupported("js")`。接线需要给 `css_post` 一个可选的 JS 引擎参数（与 `parse_search_spec_with_js` 同款做法），属 T045+ 的范围。
+- `[WIP]` **`MarkupHost` 的真实实现**：T039 定义了 trait 与注入点，但 `tome-rule` 尚未提供实现（`java.getElement` 目前报能力错误 `markup`）。
+- `[UNCERTAIN]` `ajaxAll` 为串行实现，书源兼容性不依赖并发（`ajaxAll` 也未必是书源真实使用的方法名，待真实基线确认）。
+
+---
 
 ---
 

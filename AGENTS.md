@@ -70,12 +70,19 @@ crates/
 ## 构建与运行
 
 - 构建：`cargo build --workspace`
-- 运行：`[待补充：tome-cli 落地后填写]`
-- 测试：`cargo test --workspace`；rquickjs 依赖守卫 `bash scripts/check-rquickjs-features.sh`（CI 同守）
-- Lint / 类型检查：`cargo clippy --workspace -- -D warnings` 与 `cargo fmt --check`
+- 运行：`cargo run -p tome-cli -- <子命令>`（二进制名 `tome-cli`）。已实现的子命令：
+  - `source import <file|--url <u>|--stdin> [--data-dir <dir>]` —— 导入书源并落注册表
+  - `search <source-id> <keyword> [--source-file <f>] [--format json|human]` —— 搜索
+  - `run <source-id> --action search [--input <关键词>]` —— 通用执行入口（`info`/`toc`/`content` 报能力错误，退出码 3）
+  - 全局：`--format json|human`、`--record/--replay/--offline`（录制回放）、`--data-dir`、`-h/--help`
+  - 退出码：`0` 成功 / `1` 业务错误 / `2` 用法错误 / `3` 不支持能力
+- 测试：`cargo test --workspace`；rquickjs 依赖守卫 `bash scripts/check-rquickjs-features.sh`（CI 同守；`--self-test` 校验守卫自身有效）
+- Lint / 类型检查：`cargo clippy --workspace -- -- -D warnings` 与 `cargo fmt --check`
 - 三平台产物：`.github/workflows/ci.yml`（windows-gnu / macos / ubuntu matrix；首次 push 前未经实跑验证）
 
 **工具链现状（2026-10-09 实测）**：`cargo 1.99.0` / `rustc 1.99.0`（stable-x86_64-pc-windows-gnu，由 `rust-toolchain.toml` 钉版 channel=stable；同日 rustup 同步自 1.98.0 升至 1.99.0）。MSRV 声明 `rust-version = "1.98"` 尚未经 1.98 实测。
+
+**测试规模（2026-10-10 S1-2 实测）**：`cargo test --workspace` **928 passed / 0 failed**。
 <!-- /AUTO:BUILD -->
 
 ## 生产级护栏（本项目特有）

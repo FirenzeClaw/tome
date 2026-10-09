@@ -173,6 +173,17 @@ struct SourceJson {
     main_js: Option<String>,
     #[serde(rename = "charset")]
     charset: Option<String>,
+    /// 请求间隔（公开书源格式的顶层 `concurrentRate`）。
+    ///
+    /// ## 为什么用 `serde_json::Value` 而不是 `Option<String>`
+    ///
+    /// 社区真实书源把它写成**字符串毫秒值**（`"1000"` / `"2000"` / `"3000"`），
+    /// 但也有作者写成数字。用 `Value` 让两种形态都能进到
+    /// [`parse_concurrent_rate`] 里做归一，而不是让 serde 在类型不匹配时
+    /// **静默把整个字段丢掉**——那正是"源能跑但没有限速"这类问题的成因，
+    /// 且完全不可观测。
+    #[serde(rename = "concurrentRate")]
+    concurrent_rate: Option<serde_json::Value>,
     /// 自定义排序（书源格式里的 `customOrder`）。
     ///
     /// 与 `weight` 是两个独立的排序位：上游用 `customOrder` 表达用户手动排序、
@@ -324,15 +335,9 @@ fn convert_entry(entry: &serde_json::Value, index: usize) -> Result<ParsedSource
             .or_else(|| view.main_js.clone())
             .filter(|text| !text.is_empty()),
         charset: view.charset.clone().filter(|text| !text.is_empty()),
-        // ## 为什么解析阶段不带出请求间隔
-        //
-        // 社区流通的书源 JSON 里**没有**独立的间隔字段——间隔要么由
-        // `customOrder`/`weight` 之外的机制表达（上游把它放在请求选项里），
-        // 要么根本不声明。故解析期置 `None`（= 未声明，见 R2 的三态语义），
-        // 由使用方（CLI 的 `--interval` 或存储层的用户配置）决定。
-        // [UNCERTAIN] 若 S1-6 的真实书源基线发现存在该字段的方言变体，
-        // 应在此处补映射而不是在命令行层打补丁。
-        rate_limit_ms: None,
+        // R5（PM 仲裁 2026-10-10）：`concurrentRate` 是公开书源格式的顶层键，
+        // 社区真实书源把它写成字符串毫秒值（见 `parse_concurrent_rate`）。
+        rate_limit_ms: parse_concurrent_rate(view.concurrent_rate.as_ref()),
         weight: view.weight.map(|value| value as i32),
         explore_screen: view.explore_url.clone().filter(|text| !text.is_empty()),
         comment: view
@@ -455,6 +460,80 @@ fn json_kind(value: &serde_json::Value) -> &'static str {
         serde_json::Value::Array(_) => "数组",
         serde_json::Value::Object(_) => "对象",
     }
+}
+
+/// 解析书源的请求间隔（R5，PM 仲裁 2026-10-10）。
+///
+/// # 依据来源
+///
+/// `concurrentRate` 是公开书源格式的顶层键。社区真实书源把它写成**字符串
+/// 毫秒值**——`"1000"` / `"2000"` / `"3000"` 是最常见的三个取值。语义是
+/// "同一书源两次请求之间的最小间隔"，正好对应 `Source::rate_limit_ms`
+/// →`RequestSpec::request_interval_ms` 这条链路（FR-008）。
+///
+/// # 容错取向（逐条对应一种真实存在的畸形输入）
+///
+/// | 输入 | 结果 | 理由 |
+/// |---|---|---|
+/// | `"1000"` / `1000` / `2000.0` | `Some(n)` | 三种形态语义无歧义，都接受 |
+/// | 缺字段 / `null` | `None` | 未声明 |
+/// | `""` / `"abc"` / `"1000ms"` | `None` | 非纯数字一律按未声明处理 |
+/// | 负数 | `None` | 见下 |
+/// | `0` | `None` | 见下 |
+/// | 对象 / 数组 | `None` | 类型不符 |
+///
+/// ## 为什么负数是 `None` 而不是钳到 0
+///
+/// `Some(0)` 在 R2 的三态语义里是"书源**显式声明**不要间隔"，会**覆盖**本机
+/// 配置的默认限速；而 `None` 是"未声明"，限速器仍用它自己的默认值。
+/// 把 `-1` 钳成 0 等于把一条写错的源变成"要求完全不限速"，比忽略它激进得多——
+/// 而这条源恰恰是作者以为加了限速的。故一律 `None`。
+///
+/// ## 为什么 `0` 也是 `None`
+///
+/// 同一理由的弱化版：真实的"不要间隔"声明几乎不会写成 `0`（写 `0` 的多半是
+/// 占位或误填），而"显式关掉限速"在本产品的场景里没有正当用途（AGENTS.md
+/// 安全红线要求遵守书源声明的请求间隔，逆向即"不声明就不关"）。
+/// [UNCERTAIN] 若 S1-6 的真实书源基线里出现确实声明 `0` 的源，应改为
+/// `Some(0)` 并在此注明依据。
+///
+/// ## 为什么整条源不因它而失败
+///
+/// spec 的容错取向是"书源是不可信输入，一个字段写错不该让整条源消失"。
+/// 限速值尤其如此：丢掉限速只会让请求快一点，而拒绝整条源会让用户
+/// 完全用不了这本书。
+pub fn parse_concurrent_rate(value: Option<&serde_json::Value>) -> Option<i64> {
+    let value = value?;
+    // 先归一成"可能的数字文本"：字符串形态是社区主流，数字形态也接受。
+    let text = match value {
+        serde_json::Value::String(text) => text.trim().to_string(),
+        serde_json::Value::Number(number) => number.to_string(),
+        // `null` 与其它类型（对象/数组/布尔）一律视为未声明
+        _ => return None,
+    };
+    if text.is_empty() {
+        return None;
+    }
+
+    // 数字形态统一成小数再取整：`2000` / `2000.0` / `"2000"` 三者应同解。
+    // 用 `/` 而非字符串切分：能一并拒绝 `"1000ms"`、`"1e3ms"` 这类带尾巴的写法
+    // （`serde_json` 的 `as_f64` 只接受严格 JSON 数字文本，`"1e3"` 会被接受，
+    // 那正是我们要的——它确实是 1000 毫秒）。
+    let numeric: f64 = text.parse().ok()?;
+    // `NaN`/`inf` 在 f64 上可表示，但它们不是合法毫秒数。
+    if !numeric.is_finite() {
+        return None;
+    }
+    // 负数、零、以及超出 i64 的荒唐值：一律未声明（理由见上）。
+    if numeric <= 0.0 {
+        return None;
+    }
+    // 上限用 i64 的边界而不是 i64::MAX 直接比较：f64 转 i64 时越界是饱和的，
+    // 先判大小可以避免"把 inf 附近的量悄悄变成 i64::MAX"这种静默失真。
+    if numeric > i64::MAX as f64 {
+        return None;
+    }
+    Some(numeric.round() as i64)
 }
 
 /// 当前 Unix 秒。用于 `Source::created_at`。
@@ -917,7 +996,173 @@ mod tests {
             .contains("search"));
     }
 
-    // ---------- 请求头解析 ----------
+    // ---------- R5：concurrentRate → rate_limit_ms ----------
+
+    /// 社区真实书源样本（含 `concurrentRate`）。
+    ///
+    /// ## 这个样本的据实来源
+    ///
+    /// `concurrentRate` 是公开书源格式里的顶层键，社区流通的真实书源把它写成
+    /// **字符串毫秒值**（`"1000"` / `"2000"` / `"3000"` 是出现频率最高的三个取值）。
+    /// 该键的形状（字符串而非数字）是本样本要钉住的关键事实——写成数字会写错格式。
+    ///
+    /// 其余字段取自公开《书源规则说明》示例的形态（`searchUrl` + `ruleSearch`
+    /// 的 CSS 规则），不含任何具体站点的真实地址。
+    fn real_format_sample() -> &'static str {
+        r#"[
+          {
+            "bookSourceComment": "免责声明：仅供学习交流",
+            "bookSourceGroup": "自用",
+            "bookSourceName": "示例·聚合",
+            "bookSourceType": 0,
+            "bookSourceUrl": "https://example-aggregate.test",
+            "concurrentRate": "1000",
+            "customOrder": 0,
+            "enabled": true,
+            "enabledExplore": true,
+            "exploreUrl": "/explore/{{page}}",
+            "header": "{\"User-Agent\":\"Mozilla/5.0\"}",
+            "searchUrl": "/search?q={{key}}&page={{page}}",
+            "weight": 0,
+            "ruleSearch": {
+              "bookList": "@css:div.result-list>div",
+              "name": "@css:.book-name@text",
+              "author": "@css:.book-author@text",
+              "bookUrl": "@css:.book-name@href"
+            }
+          },
+          {
+            "bookSourceName": "示例·慢源",
+            "bookSourceUrl": "https://example-slow.test",
+            "concurrentRate": "3000",
+            "searchUrl": "/s?q={{key}}",
+            "ruleSearch": {"bookList": "@css:li"}
+          },
+          {
+            "bookSourceName": "示例·无速率声明",
+            "bookSourceUrl": "https://example-plain.test",
+            "searchUrl": "/s?q={{key}}",
+            "ruleSearch": {"bookList": "@css:li"}
+          }
+        ]"#
+    }
+
+    #[test]
+    fn 真实格式样本含_concurrentrate_被解析() {
+        let outcome = parse_sources(real_format_sample()).expect("真实格式样本应解析成功");
+        assert_eq!(
+            outcome.sources.len(),
+            3,
+            "三条源都应解析（含带 concurrentRate 的）"
+        );
+        assert_eq!(outcome.report.skipped, 0);
+
+        // 按 id 取：`parse_sources` 用 `BTreeMap` 收集（遍历顺序确定，便于 CLI
+        // 输出 diff），故结果顺序是 id 排序而非文件顺序。
+        let by_id = |id: &str| -> &Source {
+            &outcome
+                .sources
+                .iter()
+                .find(|parsed| parsed.source.id == id)
+                .unwrap_or_else(|| panic!("应有源 {id}"))
+                .source
+        };
+
+        // 字符串毫秒值 → i64 毫秒
+        assert_eq!(
+            by_id("https://example-aggregate.test").rate_limit_ms,
+            Some(1000),
+            "`concurrentRate: \"1000\"` 应解析为 1000 毫秒"
+        );
+        assert_eq!(by_id("https://example-slow.test").rate_limit_ms, Some(3000));
+        // 未声明 → None（三态语义里的"未声明"，见 core 的 request_interval_ms 文档）
+        assert_eq!(
+            by_id("https://example-plain.test").rate_limit_ms,
+            None,
+            "未声明 concurrentRate 应是 None 而不是 Some(0)"
+        );
+    }
+
+    #[test]
+    fn concurrentrate_流向_requestspec_的请求间隔() {
+        // R5 的端到端验收：书源的 concurrentRate 最终体现在 RequestSpec 上，
+        // 由 tome-net 的限速器消费（FR-008）。
+        let outcome = parse_sources(real_format_sample()).expect("应解析成功");
+        let declared = outcome
+            .sources
+            .iter()
+            .find(|parsed| parsed.source.id == "https://example-aggregate.test")
+            .expect("应有声明了速率的源");
+        let plan = crate::search::parse_search_spec(declared, "关键词", 1).expect("应构造成功");
+        assert_eq!(
+            plan.spec.request_interval_ms,
+            Some(1000),
+            "concurrentRate 应成为 RequestSpec.request_interval_ms"
+        );
+
+        let plain = outcome
+            .sources
+            .iter()
+            .find(|parsed| parsed.source.id == "https://example-plain.test")
+            .expect("应有未声明速率的源");
+        let plan = crate::search::parse_search_spec(plain, "关键词", 1).expect("应构造成功");
+        assert_eq!(
+            plan.spec.request_interval_ms, None,
+            "未声明时必须保持 None（否则会覆盖本机默认限速）"
+        );
+    }
+
+    #[test]
+    fn concurrentrate_兼容数字形态() {
+        // 有的书源把 concurrentRate 写成数字而非字符串。两种都接受——
+        // 拒绝数字形态会让一批能用的源变成不可用，而它的语义没有歧义。
+        for (raw, expected) in [
+            ("\"2000\"", Some(2000i64)),
+            ("2000", Some(2000)),
+            ("2000.0", Some(2000)),
+        ] {
+            let text = format!(
+                r#"{{"bookSourceName":"数字形态","bookSourceUrl":"https://numeric.test","concurrentRate":{raw}}}"#
+            );
+            let outcome = parse_sources(&text).expect("应解析成功");
+            assert_eq!(
+                outcome.sources[0].source.rate_limit_ms, expected,
+                "concurrentRate={raw} 应解析为 {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn concurrentrate_非数字与负数容错为_none_而不拒绝整源() {
+        // spec：书源是不可信输入，一个字段写错不该让整条源消失。
+        // 负数是"未声明"而非"要求负间隔"——截断成 0 会反而变成"要求零间隔"，
+        // 比未声明更激进（见 search.rs 的 `interval_from_source` 同款理由）。
+        for raw in [
+            r#""abc""#,
+            r#""""#,
+            r#""1000ms""#,
+            "-1000",
+            r#""-500""#,
+            "0",
+            r#""0""#,
+            "null",
+            "{}",
+        ] {
+            let text = format!(
+                r#"{{"bookSourceName":"畸形速率","bookSourceUrl":"https://bad-rate.test","concurrentRate":{raw},"searchUrl":"/s?q={{{{key}}}}","ruleSearch":"{{\"bookList\":\"@css:li\"}}"}}"#
+            );
+            let outcome = parse_sources(&text).expect("整份文件不应因一个字段而失败");
+            assert_eq!(
+                outcome.sources.len(),
+                1,
+                "concurrentRate={raw} 不应导致整条源被跳过"
+            );
+            assert_eq!(
+                outcome.sources[0].source.rate_limit_ms, None,
+                "concurrentRate={raw} 应容错为 None"
+            );
+        }
+    }
 
     #[test]
     fn 请求头被解析为_header_map() {

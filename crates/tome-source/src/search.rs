@@ -200,6 +200,9 @@ pub const SEARCH_TIMEOUT_MS: u64 = 15_000;
 
 /// 从书源取出请求间隔（毫秒）。
 ///
+/// 值的来源是书源的 `concurrentRate`（R5，PM 仲裁 2026-10-10，见
+/// `crate::source::parse_concurrent_rate`）。
+///
 /// `Source::rate_limit_ms` 是 `Option<i64>`，而 `RequestSpec.request_interval_ms`
 /// 是 `Option<u32>`：负数与超出 u32 的荒唐值（书源是不可信输入）一律视为"未声明"，
 /// 而不是截断——截断会把 `-1` 变成 0（反而变成"要求零间隔"，比未声明更激进）。
@@ -818,6 +821,48 @@ mod tests {
         let plan = parse_search_spec(&parsed, "k", 1).expect("应构造成功");
         // 未声明速率时是 None（不是 Some(0)）——见 R2 的三态语义
         assert_eq!(plan.spec.request_interval_ms, None);
+    }
+
+    #[test]
+    fn 书源声明的_concurrentrate_填进请求间隔() {
+        // R5 的正向验收：声明了速率的源必须把它带进 RequestSpec，
+        // 否则限速器只能看到"未声明"（= 用默认间隔），书源的声明被静默忽略。
+        let text = r#"{
+          "bookSourceName": "限速源",
+          "bookSourceUrl": "https://x.com",
+          "concurrentRate": "2000",
+          "searchUrl": "/s?q={{key}}",
+          "ruleSearch": "{\"bookList\":\"@css:li\"}"
+        }"#;
+        let parsed = parse_sources(text).expect("应解析").sources.remove(0);
+        assert_eq!(parsed.source.rate_limit_ms, Some(2000), "解析层应认出它");
+        let plan = parse_search_spec(&parsed, "k", 1).expect("应构造成功");
+        assert_eq!(
+            plan.spec.request_interval_ms,
+            Some(2000),
+            "声明值必须一路传到 RequestSpec（R5）"
+        );
+    }
+
+    #[test]
+    fn 超范围的速率值被当作未声明() {
+        // `rate_limit_ms` 是 i64、`request_interval_ms` 是 u32：
+        // 超出 u32 的荒唐值（书源不可信）按未声明处理，而不是截断。
+        // 截断会把 `4294967296` 变成 0，即"要求不限速"。
+        let text = r#"{
+          "bookSourceName": "荒唐速率源",
+          "bookSourceUrl": "https://x.com",
+          "concurrentRate": "4294967296",
+          "searchUrl": "/s?q={{key}}",
+          "ruleSearch": "{\"bookList\":\"@css:li\"}"
+        }"#;
+        let parsed = parse_sources(text).expect("应解析").sources.remove(0);
+        assert_eq!(parsed.source.rate_limit_ms, Some(4_294_967_296));
+        let plan = parse_search_spec(&parsed, "k", 1).expect("应构造成功");
+        assert_eq!(
+            plan.spec.request_interval_ms, None,
+            "超 u32 应视为未声明而非截断为 0"
+        );
     }
 
     // ---------- 结果解析（不发请求） ----------

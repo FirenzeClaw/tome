@@ -11,5 +11,18 @@ tome-core = { workspace = true }
 # tome-rule 依赖 tome-js 以执行规则内嵌脚本片段；求值只产出 RequestSpec 不亲自发请求（A2）
 tome-js = { workspace = true }
 
+# HTML5 解析（T020 / research R2）：唯一"浏览器级"选择，禁用 markup5ever_rcdom（自建 arena DOM）
+html5ever = "0.40.1"
+# servo selectors + cssparser 跑在自建 DOM 上（T021）
+selectors = "0.41.0"
+cssparser = "0.38.0"
+
+# 双正则引擎（T024 / research R5）：默认 regex 线性快路径，含 fancy 特性路由 fancy-regex
+regex = "1.13.1"
+fancy-regex = "0.19.2"
+
+# 本 crate 自身错误类型（AGENTS.md：每个 crate 拥有自己的错误类型）
+thiserror = "2.0.21"
+
 [lints]
 workspace = true

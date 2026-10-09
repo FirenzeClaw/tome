@@ -18,10 +18,24 @@
 //! - `[attr~=regex]` 在 CSS 标准中是空白分词、在 Jsoup 中被重载为正则——
 //!   此差异必须特判并注释说明。
 //!
+//! [DONE] S1-1 阶段实现的模块：
+//! - [`dom`] —— 自建 arena DOM（T020）
+//! - [`regex`] —— 双正则引擎（T024）
+//! - [`error`] —— 本 crate 错误类型与结构化「不支持能力」（FR-006）
+//!
 //! ## 关键入口
 //!
-//! 骨架阶段尚无公开 API；Phase 2 起陆续落地。
+//! - [`dom`] —— 自建 arena DOM（T020），承载节点类型细分（Text/Data/CData）
+//! - [`css`] —— CSS 选择器引擎（T021），servo `selectors` + `cssparser` 跑在自建 DOM 上
+//! - [`css_post`] —— CSS 后缀与索引切片（T022）
+//! - [`dispatch`] —— 规则分派与组合符切分（T023）
+//! - [`regex`] —— 双正则引擎 + 规范化层 + 替换串翻译层（T024）
+//! - [`replace`] —— 替换链与 `{{}}` 插值占位（T025）
 //!
-//! [WIP] 本 crate 当前为空骨架，未含任何实现。
+//! [WIP] S1-1 阶段落地 CSS + 正则 + 替换链最小子集；JSONPath（S1-2）与 XPath（S1-3）
+//! 尚未实现——但分派器已能识别它们并抛出**结构化「不支持能力」错误**（FR-006），
+//! 供书源的 `try/catch` 降级逻辑判断。
 
 #![forbid(unsafe_code)]
+
+pub mod dom;

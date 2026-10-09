@@ -109,6 +109,9 @@ fn tome_js_只依赖_tome_core() {
         // 结构化数据：JSON 解析/序列化（纯计算）
         // 与 tome-store 的 SQLite 无关——不引入任何 I/O 能力
         "serde_json",
+        // 压缩/解压（纯计算）。选它是因为它**已在 workspace 依赖树里**
+        // （reqwest 的 gzip/deflate 特性），故新增零体积成本。
+        "flate2",
     ];
     let unexpected: Vec<&String> = names
         .iter()

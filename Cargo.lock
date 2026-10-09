@@ -2180,6 +2180,7 @@ dependencies = [
  "base64",
  "cbc",
  "des",
+ "flate2",
  "md-5",
  "rand 0.8.8",
  "rquickjs",

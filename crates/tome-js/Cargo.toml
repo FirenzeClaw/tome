@@ -11,6 +11,7 @@ aes = "0.9.3"
 base64 = "0.23.1"
 cbc = "0.2.1"
 des = "0.9.0"
+flate2 = "1.1.10"
 md-5 = "0.11.0"
 rand = "0.8"
 rquickjs = { version = "0.14.0", default-features = false, features = ["std"] }

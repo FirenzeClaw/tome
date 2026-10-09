@@ -31,5 +31,6 @@ pub mod crypto;
 pub mod data;
 pub mod text;
 pub mod unsupported;
+pub mod util;
 
 pub use unsupported::{register_all_unsupported, register_unsupported, UnsupportedCapability};

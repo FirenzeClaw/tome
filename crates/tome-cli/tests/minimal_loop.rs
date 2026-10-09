@@ -647,6 +647,88 @@ fn 无全局配置_配置经参数注入() {
 }
 
 // ---------------------------------------------------------------------------
+// SC-001：从触发到首个来源结果 ≤ 30 秒
+// ---------------------------------------------------------------------------
+
+/// SC-001 的计时口径与实测（spec §SC-001）。
+///
+/// ## 口径（"从输入关键词到看到至少一个来源的搜索结果"对应代码里的哪一段）
+///
+/// 计时区间 = **`search` 命令入口（`commands::run`）到首个源的结果产出**。
+/// 不含进程启动、书源文件读取、参数解析——那些是"程序还没开始搜索"的部分，
+/// 而 SC-001 说的是"读者从输入关键词到看到结果"。
+///
+/// 严格讲还应包含"用户敲完回车"到"命令入口"之间的一切（读写书源文件、
+/// 构造执行器），故本测试的区间是**宽松下界**；完整链路的实测数字另记。
+///
+/// ## 为什么用回放而不是真实网络
+///
+/// SC-001 的前提是"正常网络条件"，而测试不能依赖外网（CI 无网、站点会挂）。
+/// 回放路径与真实路径共用同一套规则求值 + 结果解析（只有取响应那一步不同），
+/// 故它测的是"引擎处理一条响应要多久"。真实网络下的总耗时等于本测的耗时
+/// 加上网络往返时间；本地回环的往返在毫秒级，故本测给出的数字对真实网络
+/// 仍是有效参考。
+///
+/// ## 阈值
+///
+/// 断言取 5 秒而非 30 秒：CI runner 的负载波动可能让耗时翻几倍，而 5 秒
+/// 与实际耗时（数十毫秒）之间已有两个数量级余量——这个断言要抓的是
+/// "数量级退化"（例如某处引入了 O(n²) 或固定 sleep），不是精确计时。
+#[test]
+fn sc001_首个来源结果远快于30秒() {
+    let server = MiniServer::start(SEARCH_HTML);
+    let (_guard, source_path) = localized_source(&server);
+    let capture_dir = tempfile::tempdir().expect("应能建录制目录");
+    let source_arg = source_path.to_str().expect("路径应为 UTF-8").to_string();
+
+    // 先录一条，让计时跑在确定性的回放路径上
+    let options = GlobalOptions {
+        format: OutputFormat::Json,
+        network: tome_cli::NetworkMode::Record(capture_dir.path().to_path_buf()),
+        data_dir: None,
+    };
+    let executor = executor_for(&options);
+    let warmup = run_cli(
+        &options,
+        &["search", "--source-file", &source_arg, "斗破"],
+        &executor,
+    );
+    assert_eq!(warmup.exit_code, 0, "录制应成功：{}", warmup.stderr);
+
+    let replay_options = GlobalOptions {
+        format: OutputFormat::Json,
+        network: tome_cli::NetworkMode::Replay {
+            root: capture_dir.path().to_path_buf(),
+            offline: true,
+        },
+        data_dir: None,
+    };
+    let replay_executor = executor_for(&replay_options);
+
+    // 计时：命令入口 → 结果产出
+    let started = std::time::Instant::now();
+    let outcome = run_cli(
+        &replay_options,
+        &["search", "--source-file", &source_arg, "斗破"],
+        &replay_executor,
+    );
+    let elapsed = started.elapsed();
+
+    assert_eq!(outcome.exit_code, 0);
+    assert!(
+        !outcome.stdout.is_empty()
+            && outcome.stdout
+                != "[]
+",
+        r#"应产出至少一条结果（SC-001 的判据是「至少一个来源的搜索结果」）"#
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(5),
+        "SC-001：首个来源结果耗时 {elapsed:?}，远超 30 秒预算（阈值取 5 秒留两个数量级余量）"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // 检查点：错误路径的退出码
 // ---------------------------------------------------------------------------
 

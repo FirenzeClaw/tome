@@ -19,8 +19,9 @@
 | 便携 JDK | Temurin 21.0.12.1+1 | `D:\dev\toolchain\jdk\jdk-21.0.12.1+1`（免安装、不进 C 盘、不改系统环境变量） |
 | Jsoup | 1.23.2 | `lib/jsoup-1.23.2.jar`（取自 `maven.aliyun.com/repository/central`） |
 
-`lib/` 下的 jar 与编译产物**不入仓库**（见仓库 `.gitignore` 的通用忽略项；
-若发现被跟踪，请补 `spikes/s0/tools/*.class` 与 `lib/*.jar`）。
+`lib/` 下的 jar 与编译产物（`.class`）**不入仓库**，已由仓库根 `.gitignore` 的两条
+规则覆盖：`*.class` 与 `/spikes/s0/tools/lib/`。故 `mvn`/`javac` 的产物不会污染提交。
+若首次克隆后要跑本工具，先按下方"依赖"获取 jar 与 JDK。
 
 ## 用法
 

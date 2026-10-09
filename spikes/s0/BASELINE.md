@@ -70,10 +70,16 @@ Get-Process -Id $p.Id | Select-Object ProcessName, MainWindowTitle, MainWindowHa
 | 平台 | 结论 |
 |---|---|
 | windows-gnu | ✅ **本机实测通过**（含 eval 运行） |
-| macos / linux | ⏳ **遗留**：CI job 已就绪（`.github/workflows/ci.yml` 的 `s0-spike` job），待仓库 push 后实跑 |
+| macos / linux | ⏳ **遗留**：CI job 已就绪（`.github/workflows/ci.yml` 的 `s0-spike` job），**尚未实跑** |
 
-> 仓库当前**无 remote**（`git remote -v` 为空），CI 从未实跑。故 macOS/Linux
-> 一项**不能**标为已验证——只标"job 就绪 + 待 push"。
+> **为什么尚未实跑**（2026-10-09 核实）：本仓库配置了 remote
+> `git@github.com:FirenzeClaw/tome.git`，但
+> - 本地 `origin/main` 引用停留在 Phase 1 的 `19f6086`（无本次任何提交）
+> - `git ls-remote --heads origin` 对 `refs/heads/main` 返回全零哈希
+> - `git show origin/main:.github/workflows/ci.yml` 中**不含** `s0-spike` job
+>
+> 即：**新增的 spike job 从未到达远端**，故 macOS/Linux 的 spike 构建在任何
+> 地方都未曾运行。本项**不能**标为已验证——只标"job 就绪 + 待 push 后实跑"。
 
 ### 2.3 无非用户触发的网络外发（FR-041 / SC-012）
 
@@ -82,17 +88,24 @@ Get-Process -Id $p.Id | Select-Object ProcessName, MainWindowTitle, MainWindowHa
 1. `netstat -ano` 轮询进程 PID（60 次采样）
 2. `Get-NetTCPConnection -OwningProcess <pid>`（PowerShell 7，5ms 间隔）
 
-```
-$ ./target/release/tome-s0-spike.exe --headless &
-$ pwsh -NoProfile -File monitor.ps1 -TargetPid $PID -Seconds 1
-TOTAL_DISTINCT=0
+第二个工具的脚本已随结论入仓库（`monitor-process-network.ps1`）——结论若不
+可复现就等于没有证据。复现方式：
+
+```powershell
+$p = Start-Process -FilePath '.\target\release\tome-s0-spike.exe' -ArgumentList '--headless' -PassThru
+pwsh -NoProfile -File monitor-process-network.ps1 -TargetPid $p.Id -Seconds 1
+# → TOTAL_DISTINCT=0
 ```
 
 **结论**：headless 路径**零 TCP 连接**（含未建立的 SYN 尝试）。
 
 **监控器自身有效性已验证**（防止"永远为 0"的假阴性）：对同一监控器观察一个
-已知联网的进程（`curl https://example.com`），检出 4 条连接（含 `SynSent ::1:443`）。
+已知联网的进程（`curl https://example.com`），检出 4 条连接
+（`Bound|:::0`、`SynSent|::1:443`、`Bound|0.0.0.0:0`、`SynSent|127.0.0.1:443`）。
 故 `TOTAL_DISTINCT=0` 是真实的"无外发"，而非监控失效。
+
+**局限**：只覆盖 TCP。spike 的 headless 路径不做任何名称服务调用，
+且其代码中不存在 HTTP 调用（见下），故 UDP/DNS 方向无外发来源。
 
 **设计层保障**：`--headless`（CI 路径）**不含任何 HTTP 调用**；HTTP 走独立的
 `--http` 子命令，须用户显式触发。即"无外发"不是靠纪律，而是路径本身不存在外发。
@@ -252,23 +265,27 @@ $ cargo run --quiet -- dom-diff corpus
 
 | 检查项 | 状态 | 证据 |
 |---|---|---|
-| 三平台均产出可运行骨架产物 | ⚠️ **部分** | Windows 实测 ✅；macOS/Linux CI job 就绪、**待 push 后实跑** |
+| 三平台均产出可运行骨架产物 | ⚠️ **部分** | Windows 实测 ✅；macOS/Linux CI job 就绪、**从未实跑**（见 §2.2 的核实说明） |
 | 体积与启动耗时基线已记录 | ✅ | §2.4 / §3 |
-| 无非用户触发的网络外发 | ✅ | §2.3（双工具监控 + 监控器有效性验证） |
+| 无非用户触发的网络外发 | ✅ | §2.3（双工具监控 + 监控器有效性验证；脚本已入仓库可复现） |
 | rquickjs 在三平台编译通过 | ⚠️ **部分** | Windows-gnu 实测 ✅；macOS/Linux 同上 |
 | **人工审查技术栈实测数据后再继续** | ⏳ | **本文件的读者即审查者** |
 
 **遗留问题（须 PM/人工裁决）**：
 
-1. **CI 从未实跑**：仓库无 remote。macOS/Linux 的 spike 与主构建均只经本地
-   语法校验（YAML 可解析、`cargo` 命令逐条本机复现），三平台一致性
-   **未经实跑证明**。
+1. **spike 的三平台一致性未经实跑**：`s0-spike` CI job 在本地已就绪并经 YAML
+   语法校验、`cargo` 命令逐条本机复现，但**从未到达远端**（`origin/main` 上
+   的 `ci.yml` 不含该 job）。故 macOS/Linux 的 spike 构建**没有任何实跑证据**。
+   （附带发现：远端 CI 的 `lint` job 因 `rust-toolchain.toml` 钉了
+   `stable-x86_64-pc-windows-gnu` 而在 ubuntu runner 上失败——该 job 未像
+   `build` job 那样覆盖 `RUSTUP_TOOLCHAIN`。此项不在 T006-T012 范围内，
+   留给负责 CI 的会话处理。）
 2. **`panic="abort"` 与测试的交互**：spike 的 release profile 继承 `panic="abort"`，
    而 `cargo test --release` 需要 unwind。本 spike 的测试用 debug profile 跑
    （已验证通过）；CI 的 spike 单测步骤未指定 `--release`，故不受影响。
    **但 S1 若引入 `release` 模式的测试需留意此点**。
 3. **未固化的观测项**：`09-deep-nesting` 只到 30 层，未触及 Jsoup 的
-   `maxDepth=512`；该上限与 html5ever 的差异属已知未验证区。
+   `maxDepth=512`；该上限与 html5ever 的差异属已知未验证区（见 §4.5）。
 
 ---
 
@@ -295,4 +312,11 @@ cargo run --quiet -- dom-dump corpus/01-unclosed-tags.html   # 单样本 html5ev
 # rquickjs 依赖约束守卫（含 spike 覆盖）
 cd ../..
 bash scripts/check-rquickjs-features.sh
+
+# T006 无网络外发验证（脚本随结论入仓库，保证可复现）
+cd spikes/s0
+pwsh -NoProfile -Command "
+  \$p = Start-Process -FilePath '.\target\release\tome-s0-spike.exe' -ArgumentList '--headless' -PassThru
+  pwsh -NoProfile -File monitor-process-network.ps1 -TargetPid \$p.Id -Seconds 1"
+# → TOTAL_DISTINCT=0
 ```

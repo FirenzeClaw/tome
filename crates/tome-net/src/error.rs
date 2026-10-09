@@ -106,9 +106,15 @@ pub enum NetError {
 
     /// 非 2xx 状态码（4xx/5xx）。
     ///
-    /// 只带状态码与 URL：正文已随响应读入，但接缝只允许 `ErrorKind`，
-    /// 需要正文的调用方应走 [`crate::RequestExecutor::execute_once`] 之外的路径
-    /// （见本模块文档中关于缺口的部分）。
+    /// ## 触发范围（R3 后收窄）
+    ///
+    /// **接缝（[`NetHost::fetch`]）不再触发本变体**——它把"事务完成但状态非
+    /// 2xx"作为 `Ok(Response)` 返回，因为接缝的调用方（书源脚本）需要读错误页
+    /// 正文，且"状态码算不算失败"是调用方的判断（R3，PM 仲裁 2026-10-10）。
+    ///
+    /// 本变体保留给**异步 API 的严格模式**：[`ExecutionPolicy::fail_on_status`]
+    /// 为 `true`（默认）时，[`RequestExecutor::execute`] 这条取内容路径仍按
+    /// "拿不到内容就是失败"处理，并借本变体携带 `retry_after` 供重试循环降速。
     ///
     /// `retry_after` 承载服务端在 `Retry-After` 头里声明的等待时长——
     /// 它是站点把"该等多久"明说出来的唯一渠道，重试循环据此降速而不是按

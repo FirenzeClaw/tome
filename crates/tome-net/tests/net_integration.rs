@@ -616,6 +616,76 @@ fn declared_interval_does_not_leak_across_sources() {
 }
 
 // ---------------------------------------------------------------------------
+// R3（PM 仲裁）：NetHost 对"事务完成但状态非 2xx"返回 Ok(Response)
+// ---------------------------------------------------------------------------
+
+/// 403 响应经 `NetHost::fetch` 必须得到 `Ok`，且正文可读。
+///
+/// ## 为什么这是正确的接缝语义（R3 修订理由）
+///
+/// `Response` 已含 status/body_bytes——书源的 `check` 脚本与规则需要读错误页
+/// 内容（403 验证页往往写着"请在浏览器中完成验证"，正是排查依据）。
+/// 而"状态码是不是失败"是**调用方的判断**：同一个 403，取正文的调用点该失败，
+/// 检查可用性的调用点该成功并报告"源失效（403）"。
+///
+/// 故 `ErrorKind` 只承载**传输层失败**（连接/超时/DNS/TLS/代理/重定向），
+/// 不含"服务端回了但状态非 2xx"。
+#[test]
+fn net_host_returns_ok_for_non_2xx_with_body() {
+    let server = TestServer::start(vec![Reply::status_text(
+        403,
+        "请在浏览器中完成验证后再访问",
+    )]);
+    let executor = RequestExecutor::new().expect("应能构造");
+
+    let spec = RequestSpec::get(server.url("/blocked"), "src");
+    let response = NetHost::fetch(&executor, spec).expect("403 是完成的事务，不是传输失败");
+
+    assert_eq!(response.status, 403);
+    assert!(
+        !response.body_bytes.is_empty(),
+        "正文必须可读——书源的 check 脚本要靠它判断是验证页还是拒绝页"
+    );
+    assert!(
+        String::from_utf8_lossy(&response.body_bytes).contains("完成验证"),
+        "正文内容应原样保留，实际：{}",
+        String::from_utf8_lossy(&response.body_bytes)
+    );
+    assert!(response.detected_charset.is_some(), "字符集仍应被检测");
+}
+
+/// 传输层失败仍必须是 `Err`——R3 只改"状态非 2xx"这一类。
+#[test]
+fn net_host_still_errors_on_transport_failure() {
+    let unused = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("应能绑定");
+        let address = listener.local_addr().expect("应能取地址");
+        drop(listener);
+        address
+    };
+    let executor = RequestExecutor::new().expect("应能构造");
+    let spec = RequestSpec::get(format!("http://{unused}/"), "src");
+
+    let error = NetHost::fetch(&executor, spec).expect_err("连不上就是传输失败");
+    assert_eq!(error, ErrorKind::Network, "目标站不可达必须仍是网络错");
+}
+
+/// 5xx 同样以 `Ok` 返回（它是"服务端答了但答的是错误"，非传输失败）。
+#[test]
+fn net_host_returns_ok_for_server_errors_too() {
+    let server = TestServer::start(vec![Reply::status_text(503, "service unavailable")]);
+    let executor = RequestExecutor::new().expect("应能构造");
+    let spec = RequestSpec::get(server.url("/down"), "src");
+
+    let response = NetHost::fetch(&executor, spec).expect("503 应作为响应返回");
+    assert_eq!(response.status, 503);
+    assert_eq!(
+        String::from_utf8_lossy(&response.body_bytes),
+        "service unavailable"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // T019：回放（离线）
 // ---------------------------------------------------------------------------
 

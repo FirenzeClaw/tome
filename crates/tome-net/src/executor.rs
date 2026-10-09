@@ -45,6 +45,21 @@
 //!
 //! 4xx 不重试这条尤其重要：它直接对应 spec 边缘情况的"书源被限流或封禁时
 //! 遵循声明间隔并降速，而**不是重试到被封**"。
+//!
+//! # 状态码与错误分类的分工（R3，PM 仲裁 2026-10-10）
+//!
+//! **接缝（[`NetHost::fetch`]）只把传输层失败报为 `Err`**：连接、超时、DNS、
+//! TLS、代理、重定向。至于"服务端答了但状态非 2xx"，一律 `Ok(Response)`——
+//! `Response` 已含 `status` 与 `body_bytes`，而"状态码算不算失败"是**调用方
+//! 的判断**：同一个 403，取正文的调用点该失败，检查可用性的调用点该成功并
+//! 报告"源失效（403）"。
+//!
+//! 书源的 `check` 脚本正是靠这条读 403 验证页的正文——页面上往往写着
+//! "请在浏览器中完成验证"，那是唯一的排查依据。
+//!
+//! 异步 API（[`RequestExecutor::execute`]）保留"非 2xx 即错误"的默认行为，
+//! 因为它服务的是取内容场景；两者共用同一套重试/Cookie/字符集/录制逻辑，
+//! 只在状态判定上分岔（见 `StatusPolicy`）。
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -110,6 +125,13 @@ pub struct ExecutionPolicy {
     ///   （书源里的 `check` 脚本要知道 404 还是 403）。
     ///
     /// 默认 `true`：多数调用点是取内容，让它们不必逐个判状态码。
+    ///
+    /// ## 本策略**不**作用于接缝
+    ///
+    /// `NetHost::fetch` 固定按"非 2xx 是 `Ok(Response)`"处理（R3，PM 仲裁
+    /// 2026-10-10），与本标志无关——接缝的调用方是书源脚本，它需要读错误页
+    /// 正文来区分"需要人工验证"与"源已失效"。本标志只作用于 `execute` /
+    /// `execute_once` 这两条异步 API。
     pub fail_on_status: bool,
 }
 
@@ -155,8 +177,29 @@ impl RequestExecutor {
 
     /// 执行一次请求（**不做重试**，供需要精确控制次数的调用点使用）。
     ///
-    /// 大多数调用点应该用 [`NetHost::fetch`]（含重试）。
+    /// 状态判定用执行器自身的 [`ExecutionPolicy::fail_on_status`] 策略。
+    /// 大多数调用点应该用 [`NetHost::fetch`]（含重试，且非 2xx 返回 `Ok`）。
     pub async fn execute_once(&self, spec: &RequestSpec) -> Result<Response, NetError> {
+        let policy = if self.fail_on_error_status {
+            StatusPolicy::FailOnError
+        } else {
+            StatusPolicy::AllowError
+        };
+        self.execute_once_with_policy(spec, policy).await
+    }
+
+    /// 执行一次请求，状态判定由参数决定。
+    ///
+    /// `status_policy` 是**本 crate 内部的接缝语义开关**：`NetHost::fetch`
+    /// 固定用 [`StatusPolicy::AllowError`]（R3），异步 API 用执行器策略。
+    /// 用参数而非"复制一个改过标志的执行器"，是因为后者要么需要给
+    /// 所有字段加 `Clone`（`BlockingClient`/`ReplayStore` 都不该为这个理由可克隆），
+    /// 要么要重复一遍构造逻辑——两条都让接缝语义渗进构造层。
+    async fn execute_once_with_policy(
+        &self,
+        spec: &RequestSpec,
+        status_policy: StatusPolicy,
+    ) -> Result<Response, NetError> {
         // 1. URL / scheme 校验（安全红线，见模块文档的次序说明）。
         client::validate_url(&spec.url)?;
 
@@ -195,14 +238,28 @@ impl RequestExecutor {
         let response = self.http.send(spec, &route, &extra_headers).await?;
 
         // 6-9. 响应后处理（吸收 cookie → 解码字符集 → 录制 → 状态判定）。
-        self.finish_response(spec, response)
+        self.finish_response(spec, response, status_policy)
     }
 
     /// 执行一次请求，并按 `spec.retry` 重试（T014 验收：读取 `RequestSpec.retry`）。
     pub async fn execute(&self, spec: &RequestSpec) -> Result<Response, NetError> {
+        let policy = if self.fail_on_error_status {
+            StatusPolicy::FailOnError
+        } else {
+            StatusPolicy::AllowError
+        };
+        self.execute_with_policy(spec, policy).await
+    }
+
+    /// 执行并按 `spec.retry` 重试，状态判定由参数决定（见 [`Self::execute_once_with_policy`]）。
+    async fn execute_with_policy(
+        &self,
+        spec: &RequestSpec,
+        status_policy: StatusPolicy,
+    ) -> Result<Response, NetError> {
         let mut attempt = 0u32;
         loop {
-            match self.execute_once(spec).await {
+            match self.execute_once_with_policy(spec, status_policy).await {
                 Ok(response) => return Ok(response),
                 Err(error) => {
                     let retryable = error.is_retryable()
@@ -258,7 +315,12 @@ impl RequestExecutor {
         }
         let extra_headers = self.cookie_headers(spec)?;
         let response = blocking.send_blocking(spec, &route, &extra_headers)?;
-        self.finish_response(spec, response)
+        let status_policy = if self.fail_on_error_status {
+            StatusPolicy::FailOnError
+        } else {
+            StatusPolicy::AllowError
+        };
+        self.finish_response(spec, response, status_policy)
     }
 
     /// 响应到手之后的统一处理（异步与同步路径共用）。
@@ -274,13 +336,14 @@ impl RequestExecutor {
         &self,
         spec: &RequestSpec,
         mut response: Response,
+        status_policy: StatusPolicy,
     ) -> Result<Response, NetError> {
         self.absorb_cookies(spec, &response)?;
         attach_charset(&mut response, spec);
         if self.mode.records() {
             self.record(spec, &response)?;
         }
-        if self.fail_on_error_status && !response.is_success() {
+        if status_policy == StatusPolicy::FailOnError && !response.is_success() {
             return Err(NetError::Status {
                 status: response.status,
                 url: spec.url.clone(),
@@ -389,6 +452,18 @@ impl NetHost for RequestExecutor {
     /// 实现方式与 [`BlockingClient`] 一致：自持 runtime + `block_on`。
     /// R1 已约定"每个书源脚本用独立 runtime"，故宿主函数阻塞期间
     /// 只影响自己那一个引擎（契约要求，由组合根保证）。
+    ///
+    /// # 非 2xx 返回 `Ok`（R3，PM 仲裁 2026-10-10）
+    ///
+    /// 接缝只把**传输层失败**报为 `Err`（连接/超时/DNS/TLS/代理/重定向）。
+    /// "事务完成但状态非 2xx"一律 `Ok(Response)`——理由见模块文档与
+    /// [`ExecutionPolicy::fail_on_status`]：`Response` 已含 status/body_bytes，
+    /// 而"状态码算不算失败"是调用方的判断。书源的 `check` 脚本正需要读
+    /// 403 验证页的正文来区分"需要人工验证"与"源已失效"。
+    ///
+    /// 故本方法**固定**用 `fail_on_status = false`，与自己持有的
+    /// `fail_on_error_status` 策略无关——那个策略服务于 `execute` 这条
+    /// 异步 API（取内容场景）。
     fn fetch(&self, spec: RequestSpec) -> Result<Response, ErrorKind> {
         // 复用阻塞外观的 runtime（若组合根提供了它），否则临时造一个——
         // 临时造只发生在"只用同步 API 但没显式启用阻塞外观"的调用点，
@@ -396,12 +471,24 @@ impl NetHost for RequestExecutor {
         // 组合两层的 `Result`：外层是"能否跑起来"（runtime 构造/上下文受限），
         // 内层是"请求本身的结果"。两者都可能是错误，但只有内层的错误需要分类。
         let outcome: Result<Response, NetError> = match self.blocking.as_ref() {
-            Some(blocking) => blocking.run(self.execute(&spec)).and_then(identity),
-            None => HttpClient::block_on(self.execute(&spec)).and_then(identity),
+            Some(blocking) => blocking
+                .run(self.execute_with_policy(&spec, StatusPolicy::AllowError))
+                .and_then(identity),
+            None => HttpClient::block_on(self.execute_with_policy(&spec, StatusPolicy::AllowError))
+                .and_then(identity),
         };
         // 接缝边界：此处是全 crate 唯一的错误分类转换点。
         outcome.map_err(|error| error.to_error_kind())
     }
+}
+
+/// 非 2xx 状态的处理方式（[`NetHost::fetch`] 与异步 API 的分歧点，见 R3）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StatusPolicy {
+    /// 非 2xx 视为错误（异步 API 的取内容语义）
+    FailOnError,
+    /// 非 2xx 也返回 `Ok(Response)`（接缝语义，R3）
+    AllowError,
 }
 
 /// 从 `Result<Result<T, E>, E>` 里取出内层结果（两层的错误类型相同，故可直接合并）。

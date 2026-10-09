@@ -65,6 +65,21 @@ pub enum RuleKind {
 }
 
 impl RuleKind {
+    /// 本类型对应的能力标识（FR-006 的结构化错误载荷）。
+    ///
+    /// 用书源生态的**通用叫法**（`jsonPath` / `xpath` / `js` / `css`），
+    /// 因为书源自身的 `try/catch` 降级逻辑要按这些标识判断"是哪一项能力
+    /// 不可用"——自造命名会让既有书源认不出来，违背兼容性优先（宪法原则 I）。
+    pub fn capability_id(self) -> &'static str {
+        match self {
+            Self::JsonPath => "jsonPath",
+            Self::XPath => "xpath",
+            Self::JavaScript => "js",
+            Self::Css | Self::Default | Self::ExplicitDefault => "css",
+            Self::RegexAllInOne => "regexAllInOne",
+        }
+    }
+
     /// 类型名（诊断用）。
     pub fn name(self) -> &'static str {
         match self {
@@ -115,14 +130,7 @@ impl RuleSegment {
 
     /// 本段对应的能力标识。
     pub fn capability_id(&self) -> &'static str {
-        match self.kind {
-            RuleKind::JsonPath => "jsonPath",
-            RuleKind::XPath => "xpath",
-            RuleKind::JavaScript => "js",
-            // 已实现的三类不会走到这里，给一个明确的兜底标识
-            RuleKind::Default | RuleKind::Css | RuleKind::ExplicitDefault => "css",
-            RuleKind::RegexAllInOne => "regexAllInOne",
-        }
+        self.kind.capability_id()
     }
 }
 

@@ -699,31 +699,25 @@ pub fn evaluate_rule(
 
     let dispatched = dispatch_prefix(rule);
     match dispatched.kind {
+        // 可求值的三类：`dispatched.body` 已剥掉类型前缀（`@css:` / `@@`），
+        // 反序标记也已摘出，故正文可以直接交给 CSS 求值。
         RuleKind::Css | RuleKind::Default | RuleKind::ExplicitDefault => {}
         other => {
-            let capability = match other {
-                RuleKind::JsonPath => "jsonPath",
-                RuleKind::XPath => "xpath",
-                RuleKind::JavaScript => "js",
-                RuleKind::RegexAllInOne => "regexAllInOne",
-                // 已在上面的分支里放过，这里不可达
-                RuleKind::Css | RuleKind::Default | RuleKind::ExplicitDefault => "css",
-            };
-            return Err(crate::error::RuleError::unsupported(capability, "rule"));
+            return Err(crate::error::RuleError::unsupported(
+                other.capability_id(),
+                "rule",
+            ));
         }
     }
 
-    let mut body = dispatched.body.as_str();
-    if dispatched.reversed {
-        // 段首的 `-` 已在 dispatch 里摘掉，这里把它还原到规则文本上——
-        // 反序语义由 `parse_rule_tail` 统一处理，避免两处各实现一份。
-        let restored = format!("-{body}");
-        // 借一次局部字符串：后续只读它
-        return evaluate_css_body(document, &restored);
-    }
-    // 显式 Default 前缀 `@@` 已剥掉，其余与裸选择器一致
-    let _ = &mut body;
-    evaluate_css_body(document, body)
+    // 反序标记由 `dispatch_prefix` 摘出，但反序语义在 `parse_rule_tail` 里统一
+    // 处理——把 `-` 拼回去而不是在两处各实现一份反序。
+    let body = if dispatched.reversed {
+        format!("-{}", dispatched.body)
+    } else {
+        dispatched.body.clone()
+    };
+    evaluate_css_body(document, &body)
 }
 
 fn evaluate_css_body(

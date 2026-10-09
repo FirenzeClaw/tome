@@ -88,10 +88,19 @@ pub fn parse_replace_chain(rule: &str) -> ReplaceChain {
     let mut replacements = Vec::new();
     let mut index = 1usize;
     while index < parts.len() {
-        let pattern = unquote_pattern(parts[index].trim());
+        // ## 正则与替换内容都**不 trim**
+        //
+        // 理由：`##` 已经精确界定了两端的边界，任何空白都是作者有意写的。
+        // 最典型的反例是"把连续空白折叠为单个空格"：
+        //
+        //     ##\s+## ##       ← 替换内容是一个空格，trim 掉就变成了"删除空白"
+        //
+        // 这是净化规则里极常见的一类，trim 会让它静默产出错误结果。
+        // 忠实于原文是兼容性优先（宪法原则 I）在该处的落点。
+        let pattern = unquote_pattern(&parts[index]);
         let replacement = parts
             .get(index + 1)
-            .map(|text| text.trim().to_string())
+            .map(|text| text.to_string())
             .unwrap_or_default();
         if !pattern.is_empty() {
             replacements.push(Replacement {
@@ -176,19 +185,21 @@ fn split_by_hash_hash(rule: &str) -> Vec<String> {
 ///
 /// 公开文档给的示例里正则都不加引号（`:href="(/read[^"]*html)">([^<]*)`），
 /// 但实践中有人写成 `"正则"` 以避开 `##` 的歧义。剥掉成对引号是宽容处理。
+///
+/// **不 trim 内部内容**：`" a "` 剥引号后是 ` a `（含空格）而不是 `a`——
+/// 引号已经明确了边界，内部的空白是作者写的（理由同 `parse_replace_chain`）。
 fn unquote_pattern(text: &str) -> String {
-    let trimmed = text.trim();
-    if trimmed.len() >= 2 {
-        let mut chars = trimmed.chars();
+    if text.len() >= 2 {
+        let mut chars = text.chars();
         let first = chars.next();
-        let last = trimmed.chars().next_back();
+        let last = text.chars().next_back();
         if let (Some(first), Some(last)) = (first, last) {
             if (first == '"' || first == '\'') && first == last {
-                return trimmed[1..trimmed.len() - 1].to_string();
+                return text[first.len_utf8()..text.len() - last.len_utf8()].to_string();
             }
         }
     }
-    trimmed.to_string()
+    text.to_string()
 }
 
 impl ReplaceChain {

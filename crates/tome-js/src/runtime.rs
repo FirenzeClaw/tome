@@ -335,8 +335,14 @@ pub struct Sandbox {
     /// 与 handler 共享同一个 `Arc`——两处各建一个会让 handler 永远读到
     /// `None`（见 `Sandbox::new` 里的说明）。
     deadline: Arc<std::sync::Mutex<Option<Instant>>>,
-    /// 是否已发生过求值（用于拒绝"求值之后才注入桥"这类配置错误）
+    /// 是否已开始装配（`install_prelude` / `with_context` 会置位）
+    ///
+    /// 与 `source_evaluated` 的区别见 `install_host_bridge` 的文档。
     evaluated: AtomicBool,
+    /// 是否已跑过**书源脚本**（`eval` 会置位）
+    ///
+    /// 只有它守"宿主桥的注入时机"——prelude 是装配步骤，不算书源求值。
+    source_evaluated: AtomicBool,
 }
 
 impl Sandbox {
@@ -400,6 +406,7 @@ impl Sandbox {
             poison_reason: std::sync::Mutex::new(None),
             deadline,
             evaluated: AtomicBool::new(false),
+            source_evaluated: AtomicBool::new(false),
         })
     }
 
@@ -428,12 +435,23 @@ impl Sandbox {
 
     /// 注入宿主桥（A1：宿主能力由组合根注入）。
     ///
-    /// # 为什么必须在 eval 之前
+    /// # 为什么必须在书源脚本求值之前
     ///
-    /// 宿主桥经 `Ctx::userdata` 存放，宿主函数在运行期取它。之后注入
-    /// 会让"之前那次求值里的函数拿不到桥"——而那种失败表现为运行时的
-    /// "宿主桥未注入"，归因困难。故本方法在已有求值发生过时**拒绝**注入，
-    /// 把问题挡在配置阶段。
+    /// 宿主桥经 `Ctx::userdata` 存放，宿主函数在运行期取它。之后注入会让
+    /// "之前那次求值里注册的函数"拿不到桥——而那种失败表现为运行期的
+    /// "宿主桥未注入"，归因困难。故本方法在已有**书源脚本**求值发生过时
+    /// 拒绝注入，把问题挡在配置阶段。
+    ///
+    /// ## `evaluated` 记的是"是否已开始装配"，不是"是否跑过书源脚本"
+    ///
+    /// 一个容易踩的坑：前导脚本（[`Self::install_prelude`]）也走 `eval`。
+    /// 若把"任何 eval"都算作"已求值"，那么组合根的正常顺序
+    /// （注 prelude → 注桥 → 跑脚本）会被自己的守卫挡下——
+    /// 而那个顺序正是**推荐**的顺序（prelude 要在书源脚本之前注入）。
+    ///
+    /// 故 [`Self::eval`] 设 [`Self::source_evaluated`]，而 prelude 与
+    /// [`Self::with_context`] 只设 `evaluated`（"装配已开始"）。
+    /// 两者用途不同：前者守"桥的注入时机"，后者守"装配期方法的调用时机"。
     ///
     /// # 为什么用 `Ctx::userdata` 而不是闭包捕获
     ///
@@ -443,9 +461,9 @@ impl Sandbox {
         &self,
         bridge: crate::bridge::HostBridge,
     ) -> Result<(), SandboxError> {
-        if self.evaluated.load(Ordering::SeqCst) {
+        if self.source_evaluated.load(Ordering::SeqCst) {
             return Err(SandboxError::Setup {
-                reason: "宿主桥必须在首次求值之前注入（之后的注入对已注册的宿主函数无效）"
+                reason: "宿主桥必须在首次书源脚本求值之前注入（之后的注入对已注册的宿主函数无效）"
                     .to_string(),
             });
         }
@@ -474,7 +492,33 @@ impl Sandbox {
     /// `[UNCERTAIN]`：目前没有发现"prelude 与书源脚本冲突"的真实案例，
     /// 若始终不出现，这个开关可以收敛掉（直接内置进 `new`）。
     pub fn install_prelude(&self) -> Result<(), SandboxError> {
-        self.eval(crate::prelude::PRELUDE_JS).map(|_| ())
+        // ## 为什么不用 `self.eval(...)`
+        //
+        // `eval` 会置 `source_evaluated`（"书源脚本已求值"），而守卫
+        // `install_host_bridge` 看的正是这个标志。组合根的**推荐**顺序是
+        // "注 prelude → 注桥 → 跑书源脚本"，若 prelude 也算书源求值，
+        // 那个顺序会被自己的守卫挡下。
+        //
+        // 故这里走一个不置位求值标志的内部路径。前导脚本是**装配步骤**，
+        // 不是书源执行。
+        self.evaluated.store(true, Ordering::SeqCst);
+        self.context
+            .with(|ctx: Ctx<'_>| -> Result<(), String> {
+                match ctx.eval::<rquickjs::Value<'_>, _>(crate::prelude::PRELUDE_JS.as_bytes()) {
+                    Ok(_) => Ok(()),
+                    Err(rquickjs::Error::Exception) => {
+                        let exception = ctx.catch();
+                        let message = exception
+                            .as_object()
+                            .and_then(|object| object.get::<_, String>("message").ok())
+                            .or_else(|| exception.as_string().and_then(|s| s.to_string().ok()))
+                            .unwrap_or_else(|| "前导脚本执行失败".to_string());
+                        Err(format!("前导脚本执行失败：{message}"))
+                    }
+                    Err(other) => Err(format!("前导脚本执行失败：{other}")),
+                }
+            })
+            .map_err(|reason| SandboxError::Setup { reason })
     }
 
     /// 在沙箱的 JS 上下文里跑一段 Rust 代码（用于注册宿主函数、装配全局）。
@@ -551,8 +595,10 @@ impl Sandbox {
 
         // 设定本次求值的截止时刻（中断 handler 读它判超时）。
         self.set_deadline();
-        // 标记"已求值过"：让"求值之后才注入宿主桥"被挡在配置阶段
-        // （见 `install_host_bridge` 的说明）。
+        // 标记"书源脚本已求值"：让"之后才注入宿主桥"被挡在配置阶段
+        // （见 `install_host_bridge` 的说明）。同时置 `evaluated`——
+        // 跑过书源当然说明装配已开始。
+        self.source_evaluated.store(true, Ordering::SeqCst);
         self.evaluated.store(true, Ordering::SeqCst);
 
         // ## `with` 作用域内的三条硬约束

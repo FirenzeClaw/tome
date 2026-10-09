@@ -218,6 +218,17 @@ pub struct JsContext {
     pub variables: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, String>>>,
     /// 当前书籍/章节上下文（`baseUrl` 等）
     pub base_url: Option<String>,
+    /// 书源声明的字符集（FR-009）
+    ///
+    /// 放在这里而不是"每次请求都从书源对象现取"：宿主函数只有桥，
+    /// 拿不到书源对象（那会让 tome-js 依赖 tome-source 的类型）。
+    /// 组合根在装配时把值填进来。
+    pub declared_charset: Option<String>,
+    /// 书源声明的请求间隔（毫秒，来自 R5 的 `concurrentRate`）
+    ///
+    /// 同 `declared_charset`：由组合根在装配时填入，供网络类入口构造
+    /// `RequestSpec` 时使用（FR-008）。
+    pub request_interval_ms: Option<u32>,
 }
 
 impl JsContext {
@@ -227,7 +238,23 @@ impl JsContext {
             source_id: source_id.into(),
             variables: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             base_url: None,
+            declared_charset: None,
+            request_interval_ms: None,
         }
+    }
+
+    /// 带上书源声明的字符集与请求间隔（组合根装配时调用）。
+    ///
+    /// 两者都不影响脚本可见的接口，只影响宿主函数构造 `RequestSpec` 时的
+    /// 默认值（FR-008/FR-009）。
+    pub fn with_source_request_config(
+        mut self,
+        charset: Option<String>,
+        request_interval_ms: Option<u32>,
+    ) -> Self {
+        self.declared_charset = charset;
+        self.request_interval_ms = request_interval_ms;
+        self
     }
 
     /// 读一个变量。`Mutex` 毒化时用 `into_inner` 继续（数据是脚本变量，

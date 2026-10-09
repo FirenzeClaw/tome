@@ -1,0 +1,662 @@
+//! [DONE] CLI 参数解析（tasks.md T028/T029 / `contracts/cli.md`）
+//!
+//! # 为什么手写解析而不引第三方库
+//!
+//! `contracts/cli.md` 定义的参数面很小（十来个选项），而引 `clap` 会带来
+//! 编译期与体积成本——体积纪律（宪法「附加约束」）把它列为需要权衡的事。
+//! 手写的代价是要自己保证"用法错误 → 退出码 2"，故本模块的每条解析分支
+//! 都显式返回 [`ParseOutcome::Usage`]，由调用方转成对应的退出码。
+//!
+//! # 退出码（`contracts/cli.md` 的全局约定）
+//!
+//! | 码 | 含义 |
+//! |---|---|
+//! | 0 | 成功 |
+//! | 1 | 业务错误（源失效/规则错） |
+//! | 2 | 用法错误 |
+//! | 3 | 不支持能力 |
+//!
+//! 退出码的映射在 [`crate::exit_code_for`]——它只依赖 [`ErrorKind`]，
+//! 故"哪种错误对应哪个码"是**单一处**的定义。
+
+use std::path::PathBuf;
+
+use tome_core::{ErrorCapability, ErrorKind};
+
+/// 输出格式（`contracts/cli.md`：默认 JSON，可选 human）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OutputFormat {
+    /// 结构化 JSON（可 diff，默认）
+    #[default]
+    Json,
+    /// 人类可读
+    Human,
+}
+
+/// 网络录制/回放模式（`--record` / `--replay` / `--offline` 的接线结果）。
+///
+/// ## 与 `tome_net::ReplayMode` 的关系
+///
+/// 本枚举是 CLI 层面的**意图**，`tome_net::ReplayMode` 是执行层面的**模式**。
+/// 分开是为了让 CLI 的三个开关（`--record` / `--replay` / `--offline`）
+/// 的组合语义在一处确定，而不是散在各个 `if` 里。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum NetworkMode {
+    /// 真实联网，不录制（默认）
+    #[default]
+    Live,
+    /// 录制到目录（可同时真实联网）
+    Record(PathBuf),
+    /// 从目录回放；`offline` 为真时**绝不**触网，未命中即失败
+    Replay {
+        /// 语料目录
+        root: PathBuf,
+        /// 是否完全离线（`--offline`）
+        offline: bool,
+    },
+}
+
+impl NetworkMode {
+    /// 对应的执行层模式与语料目录。
+    pub fn to_executor_mode(&self) -> Option<(PathBuf, tome_net::ReplayMode)> {
+        match self {
+            Self::Live => None,
+            Self::Record(root) => Some((root.clone(), tome_net::ReplayMode::Record)),
+            // `--replay` 不带 `--offline` 时用 `RecordOnce`：命中回放、未命中补抓。
+            // 带 `--offline` 时用 `Replay`：未命中即失败——那才是"完全离线"的语义，
+            // 也是 T029 验收项"录制后可完全离线重放"的判据。
+            Self::Replay { root, offline } => Some((
+                root.clone(),
+                if *offline {
+                    tome_net::ReplayMode::Replay
+                } else {
+                    tome_net::ReplayMode::RecordOnce
+                },
+            )),
+        }
+    }
+}
+
+/// 解析出的命令。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Command {
+    /// `source import <file|--url <u>|--stdin>`
+    SourceImport {
+        /// 文件渠道（位置参数）
+        file: Option<PathBuf>,
+        /// URL 渠道
+        url: Option<String>,
+        /// 是否从标准输入读（第三渠道）
+        stdin: bool,
+    },
+    /// `search <source-id> <keyword>`（`--url-of-source` 可换成临时源文件）
+    Search {
+        /// 书源 id（与 `--source-file` 二选一）
+        source_id: Option<String>,
+        /// 临时书源文件（S1-1 阶段书源尚未落库，故支持直接给文件）
+        source_file: Option<PathBuf>,
+        /// 搜索关键词
+        keyword: String,
+    },
+}
+
+/// 全局选项。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GlobalOptions {
+    /// 输出格式
+    pub format: OutputFormat,
+    /// 网络模式
+    pub network: NetworkMode,
+    /// 数据目录
+    pub data_dir: Option<PathBuf>,
+}
+
+/// 解析结果。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParseOutcome {
+    /// 解析成功
+    Run {
+        /// 全局选项
+        options: GlobalOptions,
+        /// 要执行的命令
+        command: Command,
+    },
+    /// 用法错误（退出码 2），附带可读说明
+    Usage(String),
+    /// 请求帮助（退出码 0）
+    Help(String),
+}
+
+/// 解析命令行参数（**不含**程序名）。
+///
+/// [DONE] T028/T029 的入口。参数解析的全部规则集中在这里，
+/// 便于让"用法错误 → 退出码 2"这条契约只需在一处保证。
+pub fn parse(args: &[String]) -> ParseOutcome {
+    let mut options = GlobalOptions::default();
+    let mut positionals: Vec<String> = Vec::new();
+    let mut record: Option<PathBuf> = None;
+    let mut replay: Option<PathBuf> = None;
+    let mut offline = false;
+    let mut url: Option<String> = None;
+    let mut stdin = false;
+    let mut source_file: Option<PathBuf> = None;
+
+    // ## 迭代协议：每个分支返回"消费了几个参数"，循环统一推进
+    //
+    // 首版让每个分支自己 `index += n`，同时循环末尾又 `+= 1`——
+    // 于是每个选项都多吃掉一个参数（`--format json` 会把 `json` 当位置参数）。
+    // 改为"分支只报消费数、循环只推进一次"，参数消费就只有一个推进点。
+    let mut index = 0usize;
+    while index < args.len() {
+        let arg = args[index].as_str();
+        let consumed = match arg {
+            "-h" | "--help" => return ParseOutcome::Help(help_text()),
+            "--format" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value.as_str(),
+                    None => return ParseOutcome::Usage("--format 需要一个值".to_string()),
+                };
+                options.format = match value {
+                    "json" => OutputFormat::Json,
+                    "human" => OutputFormat::Human,
+                    other => {
+                        return ParseOutcome::Usage(format!(
+                            "--format 只接受 json 或 human，实际 `{other}`"
+                        ));
+                    }
+                };
+                2
+            }
+            "--record" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => return ParseOutcome::Usage("--record 需要一个目录".to_string()),
+                };
+                record = Some(PathBuf::from(value));
+                2
+            }
+            "--replay" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => return ParseOutcome::Usage("--replay 需要一个目录".to_string()),
+                };
+                replay = Some(PathBuf::from(value));
+                2
+            }
+            "--offline" => {
+                offline = true;
+                1
+            }
+            "--data-dir" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => return ParseOutcome::Usage("--data-dir 需要一个路径".to_string()),
+                };
+                options.data_dir = Some(PathBuf::from(value));
+                2
+            }
+            "--url" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => return ParseOutcome::Usage("--url 需要一个值".to_string()),
+                };
+                url = Some(value.clone());
+                2
+            }
+            "--stdin" => {
+                stdin = true;
+                1
+            }
+            "--source-file" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => return ParseOutcome::Usage("--source-file 需要一个路径".to_string()),
+                };
+                source_file = Some(PathBuf::from(value));
+                2
+            }
+            // 未知的 `--xxx` 报用法错
+            other if other.starts_with("--") => {
+                return ParseOutcome::Usage(format!("未知选项 `{other}`"));
+            }
+            other => {
+                positionals.push(other.to_string());
+                1
+            }
+        };
+        index += consumed;
+    }
+
+    // 组合 `--record`/`--replay`/`--offline` 的语义。
+    //
+    // `--offline` 单独出现（无 `--replay`）是用法错误：完全离线却没有语料源，
+    // 结果是"所有请求都失败"——那不该被当成合法的调用方式。
+    // `--record` 与 `--replay` 同时给也是用法错误：一个要写、一个要读，
+    // 同一份目录同时读写会让语料自相矛盾。
+    options.network = match (record, replay, offline) {
+        (Some(_), Some(_), _) => {
+            return ParseOutcome::Usage(
+                "--record 与 --replay 不能同时使用（一个写一个读，同一目录会自相矛盾）".to_string(),
+            );
+        }
+        (Some(root), None, _) => NetworkMode::Record(root),
+        (None, Some(root), offline) => NetworkMode::Replay { root, offline },
+        (None, None, true) => {
+            return ParseOutcome::Usage(
+                "--offline 需与 --replay 同用（没有语料源时完全离线会让所有请求失败）".to_string(),
+            );
+        }
+        (None, None, false) => NetworkMode::Live,
+    };
+
+    // 命令
+    let Some(subcommand) = positionals.first().map(String::as_str) else {
+        return ParseOutcome::Usage("缺少子命令（可用：source import / search）".to_string());
+    };
+
+    let rest = &positionals[1..];
+    let command = match subcommand {
+        "source" => {
+            let Some(action) = rest.first().map(String::as_str) else {
+                return ParseOutcome::Usage("`source` 需要一个动作（import）".to_string());
+            };
+            match action {
+                "import" => Command::SourceImport {
+                    file: rest.get(1).map(PathBuf::from),
+                    url,
+                    stdin,
+                },
+                other => {
+                    return ParseOutcome::Usage(format!("未知的 source 动作 `{other}`"));
+                }
+            }
+        }
+        "search" => {
+            // 位置参数可为：`<source-id> <keyword>` 或 `--source-file <f> <keyword>`
+            match (rest.first(), source_file) {
+                (Some(keyword), Some(path)) => Command::Search {
+                    source_id: None,
+                    source_file: Some(path),
+                    keyword: keyword.clone(),
+                },
+                (Some(source_id), None) => {
+                    let Some(keyword) = rest.get(1) else {
+                        return ParseOutcome::Usage(
+                            "search 需要 <source-id> <keyword>".to_string(),
+                        );
+                    };
+                    Command::Search {
+                        source_id: Some(source_id.clone()),
+                        source_file: None,
+                        keyword: keyword.clone(),
+                    }
+                }
+                (None, Some(path)) => Command::Search {
+                    source_id: None,
+                    source_file: Some(path),
+                    // 关键词可由 --url 之外的渠道给？此处要求显式关键词
+                    keyword: match url {
+                        Some(keyword) => keyword,
+                        None => {
+                            return ParseOutcome::Usage(
+                                "search 需要关键词（`search --source-file <f> <keyword>`）"
+                                    .to_string(),
+                            );
+                        }
+                    },
+                },
+                (None, None) => {
+                    return ParseOutcome::Usage(
+                        "search 需要 <source-id> <keyword> 或 --source-file <f> <keyword>"
+                            .to_string(),
+                    );
+                }
+            }
+        }
+        other => {
+            return ParseOutcome::Usage(format!(
+                "未知子命令 `{other}`（本切片只实现 source import 与 search）"
+            ));
+        }
+    };
+
+    ParseOutcome::Run { options, command }
+}
+
+/// 退出码映射（`contracts/cli.md` 的全局约定）。
+///
+/// [DONE] 错误分类 → 退出码的**唯一**落点。
+///
+/// ## 为什么"不支持能力"单独一个码（3）
+///
+/// 它不是失败，而是"此路不通"的可编程信号：脚本可以据此区分"源坏了"
+/// 与"这个能力本产品做不到"，后者不该触发重试或告警。
+pub fn exit_code_for(kind: &ErrorKind) -> i32 {
+    match kind {
+        // 0 保留给成功，故业务错误的码从 1 起
+        ErrorKind::UnsupportedCapability { .. } => 3,
+        // 其余都是"业务错误"：源失效、规则错、网络不通、内容坏、存储坏、配置错。
+        // 契约只定义了 1/2/3，故不细分——细分的粒度在**错误分类**里（stderr 的
+        // `ErrorKind` 标识），退出码只需让脚本能区分"该不该重试"这一档。
+        ErrorKind::Network
+        | ErrorKind::Proxy
+        | ErrorKind::Rule
+        | ErrorKind::Content
+        | ErrorKind::Storage
+        | ErrorKind::Configuration => 1,
+    }
+}
+
+/// 构造"不支持能力"的错误（供 CLI 对未实现的子命令使用）。
+pub fn unsupported(capability: &str) -> ErrorKind {
+    ErrorKind::unsupported_capability(ErrorCapability::new(capability))
+}
+
+/// 帮助文本。
+pub fn help_text() -> String {
+    [
+        "tome —— 书源引擎的 CLI 验证器",
+        "",
+        "用法：",
+        "  tome source import <file> [--url <u>] [--stdin]   导入书源（三渠道）",
+        "  tome search <source-id> <keyword>                  按书源搜索",
+        "  tome search --source-file <f> <keyword>            用临时书源文件搜索",
+        "",
+        "全局选项：",
+        "  --format json|human    输出格式（默认 json）",
+        "  --record <dir>         把请求/响应录进目录",
+        "  --replay <dir>         从目录回放（未命中时补抓，除非加 --offline）",
+        "  --offline              完全离线（须与 --replay 同用）",
+        "  --data-dir <path>      数据目录",
+        "  -h, --help             显示本帮助",
+        "",
+        "退出码：0 成功 / 1 业务错误 / 2 用法错误 / 3 不支持能力",
+    ]
+    .join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(items: &[&str]) -> Vec<String> {
+        items.iter().map(|item| (*item).to_string()).collect()
+    }
+
+    fn parse_ok(items: &[&str]) -> (GlobalOptions, Command) {
+        match parse(&args(items)) {
+            ParseOutcome::Run { options, command } => (options, command),
+            other => panic!("应解析成功，实际 {other:?}"),
+        }
+    }
+
+    fn parse_usage(items: &[&str]) -> String {
+        match parse(&args(items)) {
+            ParseOutcome::Usage(text) => text,
+            other => panic!("应为用法错误，实际 {other:?}"),
+        }
+    }
+
+    // ---------- 帮助 ----------
+
+    #[test]
+    fn help_被识别() {
+        for flag in ["-h", "--help"] {
+            match parse(&args(&[flag])) {
+                ParseOutcome::Help(text) => assert!(text.contains("用法")),
+                other => panic!("{flag} 应产出帮助，实际 {other:?}"),
+            }
+        }
+    }
+
+    // ---------- source import 三渠道 ----------
+
+    #[test]
+    fn 导入的文件渠道() {
+        let (_, command) = parse_ok(&["source", "import", "src.json"]);
+        assert_eq!(
+            command,
+            Command::SourceImport {
+                file: Some(PathBuf::from("src.json")),
+                url: None,
+                stdin: false,
+            }
+        );
+    }
+
+    #[test]
+    fn 导入的_url_渠道() {
+        let (_, command) = parse_ok(&["source", "import", "--url", "https://x/src.json"]);
+        assert_eq!(
+            command,
+            Command::SourceImport {
+                file: None,
+                url: Some("https://x/src.json".to_string()),
+                stdin: false,
+            }
+        );
+    }
+
+    #[test]
+    fn 导入的_stdin_渠道() {
+        let (_, command) = parse_ok(&["source", "import", "--stdin"]);
+        assert_eq!(
+            command,
+            Command::SourceImport {
+                file: None,
+                url: None,
+                stdin: true,
+            }
+        );
+    }
+
+    #[test]
+    fn 三渠道可同时给出() {
+        let (_, command) = parse_ok(&[
+            "source",
+            "import",
+            "a.json",
+            "--url",
+            "https://x",
+            "--stdin",
+        ]);
+        match command {
+            Command::SourceImport { file, url, stdin } => {
+                assert!(file.is_some());
+                assert!(url.is_some());
+                assert!(stdin);
+            }
+            other => panic!("应为导入命令，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn 未知_source_动作报用法错() {
+        let text = parse_usage(&["source", "list"]);
+        assert!(text.contains("list"), "{text}");
+    }
+
+    #[test]
+    fn source_缺动作报用法错() {
+        let text = parse_usage(&["source"]);
+        assert!(text.contains("动作"), "{text}");
+    }
+
+    // ---------- search ----------
+
+    #[test]
+    fn 按书源_id_搜索() {
+        let (_, command) = parse_ok(&["search", "https://x.com", "斗破"]);
+        assert_eq!(
+            command,
+            Command::Search {
+                source_id: Some("https://x.com".to_string()),
+                source_file: None,
+                keyword: "斗破".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn 用临时书源文件搜索() {
+        let (_, command) = parse_ok(&["search", "--source-file", "s.json", "斗破"]);
+        assert_eq!(
+            command,
+            Command::Search {
+                source_id: None,
+                source_file: Some(PathBuf::from("s.json")),
+                keyword: "斗破".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn search_缺关键词报用法错() {
+        let text = parse_usage(&["search", "https://x.com"]);
+        assert!(text.contains("keyword"), "{text}");
+    }
+
+    #[test]
+    fn 未知子命令报用法错() {
+        // 用未实现的子命令（`contracts/cli.md` 定义了它，但本切片不实现）
+        let text = parse_usage(&["verify", "x"]);
+        assert!(text.contains("verify"), "{text}");
+        assert!(text.contains("source import"), "应提示可用命令：{text}");
+    }
+
+    #[test]
+    fn 缺子命令报用法错() {
+        assert!(parse_usage(&[]).contains("子命令"));
+    }
+
+    // ---------- 全局选项 ----------
+
+    #[test]
+    fn 输出格式可切换() {
+        let (options, _) = parse_ok(&["--format", "human", "search", "s", "k"]);
+        assert_eq!(options.format, OutputFormat::Human);
+        let (options, _) = parse_ok(&["--format", "json", "search", "s", "k"]);
+        assert_eq!(options.format, OutputFormat::Json);
+    }
+
+    #[test]
+    fn 非法输出格式报用法错() {
+        let text = parse_usage(&["--format", "yaml", "search", "s", "k"]);
+        assert!(text.contains("yaml"), "{text}");
+    }
+
+    #[test]
+    fn 缺值的选项报用法错() {
+        for flag in [
+            "--format",
+            "--record",
+            "--replay",
+            "--data-dir",
+            "--url",
+            "--source-file",
+        ] {
+            let text = parse_usage(&[flag]);
+            assert!(text.contains("需要一个"), "{flag} 应报缺值：{text}");
+        }
+    }
+
+    #[test]
+    fn 未知选项报用法错() {
+        let text = parse_usage(&["--nope", "search", "s", "k"]);
+        assert!(text.contains("--nope"), "{text}");
+    }
+
+    #[test]
+    fn 数据目录可指定() {
+        let (options, _) = parse_ok(&["--data-dir", "/tmp/data", "search", "s", "k"]);
+        assert_eq!(options.data_dir, Some(PathBuf::from("/tmp/data")));
+    }
+
+    // ---------- 网络模式（T029 的开关组合） ----------
+
+    #[test]
+    fn 默认是真实联网() {
+        let (options, _) = parse_ok(&["search", "s", "k"]);
+        assert_eq!(options.network, NetworkMode::Live);
+    }
+
+    #[test]
+    fn record_接线到录制模式() {
+        let (options, _) = parse_ok(&["--record", "/tmp/cap", "search", "s", "k"]);
+        assert_eq!(
+            options.network,
+            NetworkMode::Record(PathBuf::from("/tmp/cap"))
+        );
+        let (root, mode) = options
+            .network
+            .to_executor_mode()
+            .expect("录制模式应有执行层映射");
+        assert_eq!(root, PathBuf::from("/tmp/cap"));
+        assert_eq!(mode, tome_net::ReplayMode::Record);
+    }
+
+    #[test]
+    fn replay_不带offline时未命中会补抓() {
+        // 这是"补空洞"的用法：已录好的回放、缺的真实抓取
+        let (options, _) = parse_ok(&["--replay", "/tmp/cap", "search", "s", "k"]);
+        let (_, mode) = options.network.to_executor_mode().expect("应有映射");
+        assert_eq!(mode, tome_net::ReplayMode::RecordOnce);
+    }
+
+    #[test]
+    fn replay_带offline时完全离线() {
+        // T029 的验收项："录制后可完全离线重放"
+        let (options, _) = parse_ok(&["--replay", "/tmp/cap", "--offline", "search", "s", "k"]);
+        let (_, mode) = options.network.to_executor_mode().expect("应有映射");
+        assert_eq!(
+            mode,
+            tome_net::ReplayMode::Replay,
+            "带 --offline 时必须用绝不触网的模式"
+        );
+        assert!(mode.is_offline_only());
+    }
+
+    #[test]
+    fn record与replay不能同用() {
+        let text = parse_usage(&["--record", "/a", "--replay", "/b", "search", "s", "k"]);
+        assert!(text.contains("不能同时"), "{text}");
+    }
+
+    #[test]
+    fn 单独offline报用法错() {
+        let text = parse_usage(&["--offline", "search", "s", "k"]);
+        assert!(text.contains("--replay"), "{text}");
+    }
+
+    // ---------- 退出码 ----------
+
+    #[test]
+    fn 退出码按契约映射() {
+        assert_eq!(exit_code_for(&ErrorKind::Network), 1);
+        assert_eq!(exit_code_for(&ErrorKind::Proxy), 1);
+        assert_eq!(exit_code_for(&ErrorKind::Rule), 1);
+        assert_eq!(exit_code_for(&ErrorKind::Content), 1);
+        assert_eq!(exit_code_for(&ErrorKind::Storage), 1);
+        assert_eq!(exit_code_for(&ErrorKind::Configuration), 1);
+        assert_eq!(
+            exit_code_for(&unsupported("webView")),
+            3,
+            r#"不支持能力应单独一个码（脚本据此区分「源坏了」与「本产品做不到」）"#
+        );
+    }
+
+    #[test]
+    fn 退出码不含零() {
+        for kind in [
+            ErrorKind::Network,
+            ErrorKind::Proxy,
+            ErrorKind::Rule,
+            ErrorKind::Content,
+            ErrorKind::Storage,
+            ErrorKind::Configuration,
+            unsupported("x"),
+        ] {
+            assert_ne!(exit_code_for(&kind), 0, "{kind:?} 不该映射到 0");
+        }
+    }
+}

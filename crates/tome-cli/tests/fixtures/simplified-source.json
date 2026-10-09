@@ -1,0 +1,12 @@
+{
+  "bookSourceName": "简化示例源（CSS+正则）",
+  "bookSourceUrl": "https://example.com",
+  "bookSourceGroup": "S1-1 切片样本",
+  "bookSourceComment": "仅含 CSS 与正则规则，不含 @js: / JSONPath / XPath——按 tasks.md 第 85 行的前置说明构造，用于 S1-1 最小闭环的自洽性验证。相对地址由 search 层按 bookSourceUrl 补全，故 fixture 可指向任意主机。",
+  "enabled": true,
+  "searchUrl": "/search?q={{key}}&page={{page}}",
+  "ruleSearch": "{\"bookList\": \"@css:li.item\", \"name\": \"@css:.name@text\", \"author\": \"@css:.author@text\", \"kind\": \"@css:.kind@text\", \"intro\": \"@css:.intro@text\", \"coverUrl\": \"@css:img@src\", \"bookUrl\": \"@css:.name>a@href##^/##\"}",
+  "ruleToc": "{\"chapterList\": \"@css:#list dd>a\", \"chapterName\": \"@css:#list dd>a@text\", \"chapterUrl\": \"@css:#list dd>a@href##^/##\"}",
+  "ruleContent": "{\"content\":\"@css:.articleDiv p@text##搜索.*手机访问|一秒记住.*|.*阅读下载|\"}",
+  "header": "{\"User-Agent\":\"tome/0.1 (S1-1 sample)\"}"
+}

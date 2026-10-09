@@ -1727,6 +1727,9 @@ dependencies = [
 name = "tome-cli"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
  "tome-core",
  "tome-js",
  "tome-local",

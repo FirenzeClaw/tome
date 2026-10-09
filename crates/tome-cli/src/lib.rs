@@ -19,8 +19,25 @@
 //!
 //! ## 关键入口
 //!
-//! 骨架阶段尚无 `main`，故 CLI 不是可执行目标；Phase 2 起附带二进制目标。
+//! | 模块 | 职责 |
+//! |---|---|
+//! | [`flags`] | 参数解析与退出码映射（T028/T029） |
+//! | [`commands`] | 命令实现：`source import` / `search` + 执行器装配（T028/T029） |
 //!
-//! [WIP] 本 crate 当前为空骨架，未含任何实现。
+//! 二进制入口是 `src/main.rs`（薄壳：解析 → 执行 → 写 stdout/stderr → 退出）。
+//!
+//! ## 完成度
+//!
+//! [WIP] `source import` 与 `search` 已实现（S1-1 切片）；
+//! `info` / `toc` / `content` / `run` / `verify` / `local` / `data`
+//! 属后续切片（`contracts/cli.md` 定义了它们的契约）。
 
 #![forbid(unsafe_code)]
+
+pub mod commands;
+pub mod flags;
+
+pub use commands::{build_executor, run, CommandOutcome};
+pub use flags::{
+    exit_code_for, parse, Command, GlobalOptions, NetworkMode, OutputFormat, ParseOutcome,
+};

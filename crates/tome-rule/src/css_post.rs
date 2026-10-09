@@ -173,6 +173,10 @@ fn outer_html(node: &NodeRef) -> String {
 
 /// 把一个节点序列化回 HTML 文本。
 ///
+/// 供 [`crate::xpath::eval`] 的扩展节点测试（`html()` / `outerHtml()`）复用
+/// ——同一件事不该在两个引擎里各写一份，否则 `@html` 后缀与 `html()`
+/// 节点测试的输出会分叉。
+///
 /// ## 这是本项目自带的序列化，不是"对齐 Jsoup 的输出格式"
 ///
 /// 书源规则里的 `@html` 多数只用来"拿到这段内容再交给替换链/正则处理"，
@@ -192,7 +196,7 @@ fn outer_html(node: &NodeRef) -> String {
 /// 显式栈的元素是"待处理项"：要么是一个待输出的节点，要么是一段待输出的
 /// 字面文本（元素开始/结束标签、doctype 等）。用后进先出保证文档序输出：
 /// 压栈时**逆序**压入子节点。
-fn serialize_node(node: &NodeRef, buffer: &mut String) {
+pub(crate) fn serialize_node(node: &NodeRef, buffer: &mut String) {
     let mut stack: Vec<SerializeTask> = vec![SerializeTask::Node(node.clone())];
 
     while let Some(task) = stack.pop() {

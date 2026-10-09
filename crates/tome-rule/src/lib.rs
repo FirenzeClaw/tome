@@ -50,3 +50,4 @@ pub mod jsonpath_shim;
 pub mod mainjs;
 pub mod regex;
 pub mod replace;
+pub mod xpath;

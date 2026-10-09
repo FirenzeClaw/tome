@@ -267,6 +267,15 @@ impl Document {
         html5ever::parse_document(sink, html5ever::ParseOpts::default()).one(html)
     }
 
+    /// 两份文档句柄是否共享同一个 arena。
+    ///
+    /// 供 [`crate::xpath::value`] 判定"两个节点句柄是否可比"：不同文档之间
+    /// 没有文档序可言（W3C XPath 1.0 §5 的文档序是**同一文档内**的概念），
+    /// 故排序前必须先分辨这一点，否则比较函数不满足全序。
+    pub fn same_document(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.inner, &other.inner)
+    }
+
     /// 根节点句柄。
     pub fn root(&self) -> NodeRef {
         self.handle(self.inner.root)

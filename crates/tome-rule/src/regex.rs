@@ -198,14 +198,20 @@ pub fn normalize_pattern(pattern: &str) -> String {
         }
 
         if current == '{' {
-            // `{n,m}+` 也是占有量词。先整体拷贝到 `}`，再看下一个字符是否是 `+`。
-            let close = find_class_or_group_end(&chars, index, '{', '}');
+            // `{n}` / `{n,}` / `{n,m}` 是量词，其后跟的 `+` 是占有标记。
+            //
+            // 这里**不能**用 `find_class_or_group_end` 做嵌套配对：量词的花括号
+            // 不嵌套，而那个函数从 `{` 处开始计数，永远找不到"配对的" `}`。
+            // 故直接在"看起来是量词"时找最近的 `}`。
+            let close = find_quantifier_close(&chars, index);
             match close {
                 Some(close) => {
                     let quantifier: String = chars[index..=close].iter().collect();
-                    if chars.get(close + 1).copied() == Some('+')
-                        && chars.get(close + 2).copied() != Some('+')
-                    {
+                    if chars.get(close + 1).copied() == Some('+') {
+                        // `a{2,3}++`：`+` 后又一个 `+`。语义上是"占有量词再套一个
+                        // 量词"，非法；此处按"占有量词"处理（消费第一个 `+`），
+                        // 第二个 `+` 留给下一次循环——它没有可作用的操作数，
+                        // 引擎会报错，比我们猜一个语义安全。
                         if let Some(start) = find_last_unit_start(&output) {
                             let operand = output[start..].to_string();
                             output.truncate(start);
@@ -225,6 +231,7 @@ pub fn normalize_pattern(pattern: &str) -> String {
                     continue;
                 }
                 None => {
+                    // 不是量词（如 `{` 在字符类外作为字面量）：原样输出
                     output.push(current);
                     index += 1;
                     continue;
@@ -239,23 +246,33 @@ pub fn normalize_pattern(pattern: &str) -> String {
     output
 }
 
-/// 找 `index` 处 `open` 对应的 `close`（考虑嵌套与转义）。找不到返回 `None`。
-fn find_class_or_group_end(chars: &[char], index: usize, open: char, close: char) -> Option<usize> {
-    let mut depth = 0usize;
-    let mut cursor = index;
+/// 找 `index` 处 `{` 对应的量词闭合 `}`。只在内容形如 `{n}` / `{n,}` / `{n,m}` 时返回。
+///
+/// ## 为什么不能复用 `find_class_or_group_end`
+///
+/// 那个函数按"嵌套计数"配对，而量词的花括号**不嵌套**（`{2}` 里没有内层花括号）。
+/// 从 `{` 处开始计数会让它永远找不到"配对的" `}`（深度从 1 加到末尾都不归零）。
+///
+/// ## 为什么要校验内容
+///
+/// `{` 在正则里也可能是字面量（如 `a{b`，`regex` 会把不成对的花括号当字面量）。
+/// 只有内容全部是数字与逗号时才认定为量词——否则原样输出交给引擎判断。
+fn find_quantifier_close(chars: &[char], index: usize) -> Option<usize> {
+    let body_start = index + 1;
+    let mut cursor = body_start;
+    let mut seen_digit = false;
+    let mut seen_comma = false;
+
     while cursor < chars.len() {
-        let current = chars[cursor];
-        if current == '\\' {
-            cursor += 2;
-            continue;
-        }
-        if current == open {
-            depth += 1;
-        } else if current == close {
-            depth -= 1;
-            if depth == 0 {
-                return Some(cursor);
+        match chars[cursor] {
+            '}' => {
+                // 至少要有数字；`{,3}` 与 `{2,}` 都合法（前者是 `regex` 的扩展写法）
+                return seen_digit.then_some(cursor);
             }
+            character if character.is_ascii_digit() => seen_digit = true,
+            ',' if !seen_comma => seen_comma = true,
+            // 出现其它字符：不是量词
+            _ => return None,
         }
         cursor += 1;
     }
@@ -273,6 +290,23 @@ fn find_last_unit_start(output: &str) -> Option<usize> {
     }
 
     let last = *bytes.last()?;
+
+    // 尾部若是一个**量词字符**（`*` / `+` / `?`），它本身不是可重复单元——
+    // 真正的操作数在它之前。典型输入 `a+++`：处理第二个 `+` 时尾部是 `a+`，
+    // 而 `a+` 里的 `+` 是量词，操作数应是 `a`。
+    // 只有 `?` 也可能是分组修饰的一部分（如 `(?:`），故用"前一个字符不是 `(`"
+    // 来排除——那种情况本函数返回的起点会落在 `(` 上，交给分组分支处理。
+    if matches!(last, b'*' | b'+') {
+        let head = output.floor_char_boundary(output.len() - 1);
+        return find_last_unit_start(&output[..head]);
+    }
+    if last == b'?' {
+        let head = output.floor_char_boundary(output.len() - 1);
+        // `(?` 是分组前缀而不是量词——不从它回退
+        if !output[..head].ends_with('(') {
+            return find_last_unit_start(&output[..head]);
+        }
+    }
     // 字符类：从尾部找未转义的 `[`
     if last == b']' {
         return find_open_backwards(output, b'[', b']');
@@ -764,6 +798,28 @@ mod tests {
     fn 多字符单元只回退一个单元() {
         // `abc++` 里占有量词作用于 `c`（前一个可重复单元），不是 `abc`
         assert_eq!(normalize_pattern("abc++"), "ab(?>c+)");
+    }
+
+    #[test]
+    fn 花括号量词的占有形态被改写() {
+        // `{n,}` 与 `{n,m}` 的占有形态都要转成原子组。
+        // 回归背景：首版用"嵌套配对"找闭合 `}`，而量词花括号不嵌套，
+        // 导致 `{2,}` 永远找不到闭合——规范化静默失效（产出 `a{2,(?>}+)`）。
+        assert_eq!(normalize_pattern("a{2,}+"), "(?>a{2,})");
+        assert_eq!(normalize_pattern("a{2,3}+"), "(?>a{2,3})");
+        assert_eq!(normalize_pattern("a{2}+"), "(?>a{2})");
+        assert_eq!(normalize_pattern("a{2}"), "a{2}");
+        // 非量词的花括号按字面处理（不成对即字面量）
+        assert_eq!(normalize_pattern("a{b"), "a{b");
+        assert_eq!(normalize_pattern("a{2,}"), "a{2,}");
+    }
+
+    #[test]
+    fn 占有量词作用于分组而非量词字符() {
+        // `(?:x)++` 的操作数是整个分组 `(?:x)`，不是单字符
+        assert_eq!(normalize_pattern("(?:x)++"), "(?>(?:x)+)");
+        // `(?P<n>x)*+` 同理（命名组）
+        assert_eq!(normalize_pattern("(?P<n>x)*+"), "(?>(?P<n>x)*)");
     }
 
     #[test]

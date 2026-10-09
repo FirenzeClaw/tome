@@ -38,4 +38,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod css;
 pub mod dom;
+pub mod error;
+pub mod regex;

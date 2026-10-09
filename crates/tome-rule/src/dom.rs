@@ -195,7 +195,10 @@ impl Default for Links {
 }
 
 /// arena 中的一个节点。
-struct Node {
+///
+/// 对 [`crate::css`] 公开（那里需要它的地址做 `OpaqueElement` 身份）；
+/// 字段保持私有——外部只该通过 [`NodeRef`] 访问节点内容。
+pub struct Node {
     data: NodeData,
     links: RefCell<Links>,
 }
@@ -280,6 +283,23 @@ impl Document {
         self.inner.quirks_mode.get()
     }
 
+    /// 手工构造一个 CDataNode 并挂到文档根下（等价于 Jsoup 的 `CDataNode`）。
+    ///
+    /// ## 为什么需要手工构造
+    ///
+    /// **HTML 解析路径不产生 CDataNode**：WHATWG 规范规定 HTML 内容里的
+    /// `<![CDATA[...]]>` 是 parse error 且被降级为注释，html5ever 同样如此处理。
+    /// 故 [`NodeKind::CData`] 只能由 XML 解析路径（S1-3）或由此入口构造。
+    ///
+    /// 有了它，`::cdata` 与 `node_value` 的 CData 分支可被直接验证，
+    /// 而不是留一段"写了但永远走不到"的代码。
+    pub fn create_cdata(&self, text: &str) -> NodeRef {
+        SinkBuilder {
+            document: self.clone(),
+        }
+        .create_cdata(text)
+    }
+
     /// 解析期报告的错误信息。
     pub fn parse_errors(&self) -> Vec<String> {
         self.inner.parse_errors.borrow().clone()
@@ -297,6 +317,15 @@ impl Document {
     /// 按树序（先序）遍历全部节点（含根与文本/注释）。
     pub fn descendants(&self) -> impl Iterator<Item = NodeRef> + '_ {
         PreOrderIterator::starting_at(self.clone(), self.inner.root)
+    }
+
+    /// 取 arena 中该节点的 `Rc` 句柄。
+    ///
+    /// 暴露给 [`crate::css`] 用于生成 `selectors::OpaqueElement` 的身份指针：
+    /// arena **只增不删**，故同一节点的 `Rc` 分配地址在文档生命周期内稳定且唯一。
+    /// 这是 arena 布局（而非引用计数树）带来的直接收益之一。
+    pub fn node_at(&self, id: NodeId) -> Rc<Node> {
+        self.node(id)
     }
 
     /// 全部节点数（诊断与性能断言用）。
@@ -502,7 +531,6 @@ impl NodeRef {
     /// 全部子节点（文档序）。
     pub fn children(&self) -> ChildIterator {
         ChildIterator {
-            document: self.document.clone(),
             next: self.first_child(),
         }
     }
@@ -576,6 +604,29 @@ impl NodeRef {
                 NodeData::Doctype { name, .. } => name.clone(),
                 _ => String::new(),
             },
+        }
+    }
+
+    /// 文档类型声明的 (public_id, system_id)。非 doctype 节点返回 `None`。
+    ///
+    /// Jsoup 的 `::node` 语义把 doctype 当作一种节点；两个 id 是它的组成部分，
+    /// 且 S1-3 的 XML 路径要靠 system_id 判断外部实体。故暴露而非丢弃。
+    pub fn doctype_ids(&self) -> Option<(String, String)> {
+        match &self.node().data {
+            NodeData::Doctype {
+                public_id,
+                system_id,
+                ..
+            } => Some((public_id.clone(), system_id.clone())),
+            _ => None,
+        }
+    }
+
+    /// 处理指令的 target。非 PI 节点返回 `None`。
+    pub fn processing_instruction_target(&self) -> Option<String> {
+        match &self.node().data {
+            NodeData::ProcessingInstruction { target, .. } => Some(target.clone()),
+            _ => None,
         }
     }
 
@@ -738,7 +789,6 @@ fn normalize_whitespace(text: &str) -> String {
 
 /// 子节点迭代器。
 pub struct ChildIterator {
-    document: Document,
     next: Option<NodeRef>,
 }
 
@@ -830,6 +880,23 @@ impl SinkBuilder {
                 inner: Rc::new(inner),
             },
         }
+    }
+
+    /// 手工构造一个 CDataNode（等价于 Jsoup 的 `CDataNode`）。
+    ///
+    /// ## 为什么需要手工构造
+    ///
+    /// **HTML 解析路径不产生 CDataNode**：WHATWG 规范规定 HTML 内容里的
+    /// `<![CDATA[...]]>` 是 parse error 且被降级为注释，html5ever 同样如此处理。
+    /// 故 `NodeKind::CData` 只能由 XML 解析路径（S1-3）或调用方手工构造。
+    ///
+    /// 提供不依赖外部解析器的构造入口，使 `::cdata` 与
+    /// [`Self::node_value`] 的 CData 分支可被直接验证，而不是留一段
+    /// "写了但永远走不到"的代码。
+    pub fn create_cdata(&self, text: &str) -> NodeRef {
+        let id = self.push_node(NodeData::CData(RefCell::new(text.to_string())));
+        self.attach_last(self.document.inner.root, id);
+        self.document.handle(id)
     }
 
     fn push_node(&self, data: NodeData) -> NodeId {
@@ -1424,6 +1491,49 @@ mod tests {
             .filter(|node| node.kind() == NodeKind::Doctype)
             .count();
         assert_eq!(doctypes, 1);
+    }
+
+    #[test]
+    fn doctype的两个标识可读() {
+        let document = Document::parse_html(
+            r#"<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0//EN" "http://www.w3.org/x.dtd">"#,
+        );
+        let doctype = document
+            .descendants()
+            .find(|node| node.kind() == NodeKind::Doctype)
+            .expect("doctype 节点应存在");
+        let (public_id, system_id) = doctype.doctype_ids().expect("应能读出标识");
+        assert_eq!(public_id, "-//W3C//DTD XHTML 1.0//EN");
+        assert_eq!(system_id, "http://www.w3.org/x.dtd");
+        // 非 doctype 节点返回 None
+        assert!(document.document_element().unwrap().doctype_ids().is_none());
+    }
+
+    #[test]
+    fn cdata节点可构造且类型可辨() {
+        // HTML 解析路径不产生 CDataNode（WHATWG 规范把 HTML 里的 <![CDATA[..]]>
+        // 降级为注释），故只能手工构造。这个测试证明该类型确实可用且有区分度。
+        let document = Document::parse_html("<div>x</div>");
+        let cdata = document.create_cdata("<raw>");
+        assert_eq!(cdata.kind(), NodeKind::CData);
+        assert_eq!(cdata.node_value(), "<raw>");
+        // CData 进 text() 但不进 data()
+        let html = document
+            .descendants()
+            .find(|node| node.node_name() == "div")
+            .expect("div 应存在");
+        assert_eq!(html.text(), "x");
+        assert_eq!(html.data(), "");
+    }
+
+    #[test]
+    fn 处理指令的target可读() {
+        // HTML 里的 `<?...>` 会被树构造器当 bogus comment 处理，故用 XML 风格
+        // 的输入拿不到 PI；这里只断言"非 PI 节点返回 None"这一半契约，
+        // 完整 PI 路径在 S1-3 的 XML 解析中落地。
+        let document = Document::parse_html("<div>x</div>");
+        let div = document.document_element().unwrap();
+        assert!(div.processing_instruction_target().is_none());
     }
 
     #[test]

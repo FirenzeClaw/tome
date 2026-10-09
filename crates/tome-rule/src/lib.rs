@@ -43,5 +43,6 @@ pub mod css_post;
 pub mod dispatch;
 pub mod dom;
 pub mod error;
+pub mod js_bridge;
 pub mod regex;
 pub mod replace;

@@ -239,23 +239,42 @@ pub fn dispatch_prefix(rule: &str) -> RuleSegment {
     }
 }
 
-/// 某类规则在本阶段（S1-1）的可求值性。
+/// 某类规则在当前阶段的可求值性。
 ///
-/// [WIP] `JsonPath` 在 S1-2 就绪，`XPath` 在 S1-3 就绪——届时应改这里的返回值，
-/// 分派逻辑本身不动。
+/// # 变更记录
+///
+/// - S1-1：`@js:` 与 `@json:` / `@XPath:` 都是 `NotYet`。
+/// - **S1-2（本切片）**：`JavaScript` 转为 `Yes`——沙箱（T030）与桥
+///   （T043）已落地，`@js:` 片段经 `tome_js` 求值。
+/// - S1-3：`JsonPath` 与 `XPath` 将转为 `Yes`（本切片不动）。
 fn readiness(kind: RuleKind) -> Ready {
     match kind {
         RuleKind::Default | RuleKind::ExplicitDefault => Ready::Yes,
         RuleKind::Css => Ready::Yes,
         RuleKind::RegexAllInOne => Ready::Yes,
-        RuleKind::JsonPath | RuleKind::XPath | RuleKind::JavaScript => Ready::NotYet,
+        RuleKind::JavaScript => Ready::Yes,
+        RuleKind::JsonPath | RuleKind::XPath => Ready::NotYet,
     }
 }
 
 /// 大小写不敏感的前缀剥离（`@XPath:` 与 `@xpath:` 都接受）。
+///
+/// # 为什么不能直接按字节切
+///
+/// `prefix.len()` 是**字节**长度（`@css:` 是 5），而规则正文里完全可能
+/// 在第 5 个字节处落着一个多字节字符——`@css:中文` 的 `:` 之后就是
+/// 三字节的汉字，切在第 5 字节会落在字符中间。
+///
+/// 直接切会 panic（"byte index is not a char boundary"）。那是**输入
+/// 触发的进程崩溃**：任何一条以非 ASCII 开头的规则都能让引擎挂掉，
+/// 而书源来自第三方（不可信输入）。
+///
+/// 故先用 `get(..prefix.len())` 做边界检查——它在越界时返回 `None`
+/// 而不是 panic。
 fn strip_prefix_ignore_ascii_case<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
-    if text.len() >= prefix.len() && text[..prefix.len()].eq_ignore_ascii_case(prefix) {
-        return Some(&text[prefix.len()..]);
+    let head = text.get(..prefix.len())?;
+    if head.eq_ignore_ascii_case(prefix) {
+        return text.get(prefix.len()..);
     }
     None
 }
@@ -553,12 +572,13 @@ mod tests {
 
     #[test]
     fn 未实现的类型标为notyet() {
+        // S1-2 起 `@js:` 已就绪（沙箱 + 桥落地），故只剩 JSONPath 与 XPath。
+        // 它们的 NotYet 是**真**的"待后续切片"（S1-3），而不是"永远不做"。
         for (input, expected_capability) in [
             ("@json:$.a", "jsonPath"),
             ("$.a", "jsonPath"),
             ("@XPath://a", "xpath"),
             ("//a", "xpath"),
-            ("@js:1+1", "js"),
         ] {
             let segment = dispatch_prefix(input);
             assert_eq!(segment.ready, Ready::NotYet, "输入 {input}");
@@ -584,7 +604,7 @@ mod tests {
 
     #[test]
     fn 已实现的类型不产出未就绪错误() {
-        for input in ["@css:.a", "div.a@text", "@@div", ":regex"] {
+        for input in ["@css:.a", "div.a@text", "@@div", ":regex", "@js:1+1"] {
             assert!(
                 dispatch_prefix(input).not_ready_error("rule").is_none(),
                 "输入 {input} 本阶段应可求值"
@@ -752,11 +772,28 @@ mod tests {
     fn 含未实现类型的组合规则能被定位() {
         // 公开文档说组合符"只能在同种规则间使用"，但书源实际会混用。
         // 无论是否合规，分派器都要能指出**是哪一段**未就绪（FR-006 的可观测性）。
-        let combined = parse_rule("@css:.a@text||@js:java.ajax('x')");
+        //
+        // S1-2 起 `@js:` 已就绪，故用 `@json:` 作为"未就绪段"的例子
+        // （它确实要到 S1-3）。
+        let combined = parse_rule("@css:.a@text||@json:$.data");
         assert_eq!(combined.segments.len(), 2);
         let not_ready = combined.first_not_ready().expect("应有未就绪的段");
-        assert_eq!(not_ready.kind, RuleKind::JavaScript);
-        assert_eq!(not_ready.capability_id(), "js");
+        assert_eq!(not_ready.kind, RuleKind::JsonPath);
+        assert_eq!(not_ready.capability_id(), "jsonPath");
+    }
+
+    #[test]
+    fn js_类型自_s12_起已就绪() {
+        // 这条测试记录 S1-2 的状态变更：`@js:` 从 NotYet 变 Yes。
+        // 若哪天有人误改回去，这里会失败并提醒他那不是笔误而是回归。
+        for input in ["@js:1+1", "@Js:1+1"] {
+            let segment = dispatch_prefix(input);
+            assert_eq!(segment.ready, Ready::Yes, "输入 {input}");
+            assert!(
+                segment.not_ready_error("rule").is_none(),
+                "已就绪的类型不该产出未就绪错误（输入 {input}）"
+            );
+        }
     }
 
     // ---------- 结果合并 ----------

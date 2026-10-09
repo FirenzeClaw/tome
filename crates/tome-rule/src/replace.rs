@@ -252,14 +252,15 @@ pub struct Placeholder {
 }
 
 impl Placeholder {
-    /// 该占位在本阶段是否可求值。
+    /// 该占位在当前阶段是否可求值。
     ///
-    /// `{{}}` 里**默认是 js**（公开文档原文），故无前缀的表达式一律按 js 处理，
-    /// 本阶段不可求值。
+    /// `{{}}` 里**默认是 js**（公开文档原文），故无前缀的表达式一律按 js
+    /// 处理。S1-2 起 JS 已就绪（沙箱 + 桥），故 js 类占位可求值；
+    /// `jsonPath` / `xpath` 仍待 S1-3。
     pub fn is_ready(&self) -> bool {
         matches!(
             self.kind,
-            RuleKind::Css | RuleKind::Default | RuleKind::ExplicitDefault
+            RuleKind::Css | RuleKind::Default | RuleKind::ExplicitDefault | RuleKind::JavaScript
         )
     }
 
@@ -736,20 +737,47 @@ mod tests {
         let interpolation = parse_interpolation("{{@css:.a@text}}");
         assert!(interpolation.placeholders[0].is_ready());
         assert!(interpolation.first_not_ready().is_none());
+    }
 
-        // 无前缀在 `{{}}` 里是 js，故未就绪
+    #[test]
+    fn js_类占位自_s12_起已就绪() {
+        // S1-2 的状态变更：`{{}}` 里默认是 js 的占位从 NotYet 变 Yes
+        // （沙箱 + 桥已落地）。这条测试记录那个变更。
         let interpolation = parse_interpolation("{{key}}");
-        assert!(!interpolation.placeholders[0].is_ready());
-        let error = interpolation
-            .first_not_ready()
-            .expect("应有未就绪占位")
-            .not_ready_error()
-            .expect("应产出错误");
-        match error.to_error_kind() {
-            tome_core::ErrorKind::UnsupportedCapability { capability } => {
-                assert_eq!(capability.capability_id(), "js");
+        assert_eq!(interpolation.placeholders[0].kind, RuleKind::JavaScript);
+        assert!(interpolation.placeholders[0].is_ready());
+        assert!(interpolation.first_not_ready().is_none());
+    }
+
+    #[test]
+    fn jsonpath_类占位仍未就绪() {
+        // JSONPath 与 XPath 确实要到 S1-3——它们的"未就绪"是**真**的
+        // 待后续切片，而不是"永远不做"。故仍产出 FR-006 的结构化错误。
+        for input in [
+            "{{$.data.name}}",
+            "{{@json:$.a}}",
+            "{{@xpath://a}}",
+            "{{//a}}",
+        ] {
+            let interpolation = parse_interpolation(input);
+            let placeholder = &interpolation.placeholders[0];
+            assert!(!placeholder.is_ready(), "输入 {input}");
+            let error = interpolation
+                .first_not_ready()
+                .expect("应有未就绪占位")
+                .not_ready_error()
+                .expect("应产出错误");
+            let expected = match placeholder.kind {
+                RuleKind::JsonPath => "jsonPath",
+                RuleKind::XPath => "xpath",
+                other => panic!("输入 {input} 的实际类型是 {other:?}"),
+            };
+            match error.to_error_kind() {
+                tome_core::ErrorKind::UnsupportedCapability { capability } => {
+                    assert_eq!(capability.capability_id(), expected, "输入 {input}");
+                }
+                other => panic!("应产出 UnsupportedCapability，实际 {other:?}（输入 {input}）"),
             }
-            other => panic!("应产出 UnsupportedCapability，实际 {other:?}"),
         }
     }
 
@@ -822,7 +850,10 @@ mod tests {
     }
 
     #[test]
-    fn 桥接对js占位产出结构化错误() {
+    fn 桥接对js占位分出到_evaluate_js() {
+        // S1-2 起 js 占位**可求值**，故 `evaluate` 应把它交给
+        // `evaluate_js`（而不再产出"未就绪"错误）。
+        // 这里用桩的"永远返回 Unsupported"来证明**路由发生了**。
         let document = crate::dom::Document::parse_html("<p>x</p>");
         let bridge = StubBridge {
             document: &document,
@@ -830,8 +861,10 @@ mod tests {
         let interpolation = parse_interpolation("/search?q={{key}}");
         let error = interpolation
             .evaluate(&bridge)
-            .expect_err("js 占位本阶段应报错");
+            .expect_err("桩会报错（它模拟的是未实现的环境）");
         match error.to_error_kind() {
+            // 桩的 `evaluate_js` 返回 `unsupported("js", ..)`，能力标识
+            // 与占位类型一致——这说明路由走对了。
             tome_core::ErrorKind::UnsupportedCapability { capability } => {
                 assert_eq!(capability.capability_id(), "js");
             }

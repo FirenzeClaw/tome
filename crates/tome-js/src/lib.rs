@@ -56,7 +56,11 @@ pub mod testdouble;
 
 pub use api::{register_all_unsupported, UnsupportedCapability};
 pub use bridge::{host_bridge, require_bridge, throw_host_error, HostBridge, JsContext};
+// 重导出 `Ctx`/`Object`/`Function`：`tome-rule` 等上层需要它们来注册宿主函数，
+// 而它们不必直接依赖 `rquickjs`（那会让版本约束散布到多个 crate）。
+// 这也让"沙箱的引擎是什么"成为一个可替换的实现细节。
 pub use prelude::PRELUDE_JS;
+pub use rquickjs::{Ctx, Function, Object, Value};
 pub use runtime::{CancelToken, JsValue, Limits, LimitsError, Sandbox, SandboxError};
 pub use sandbox_error::JsError;
 pub use testdouble::{MemoryCryptoHost, MemoryStoreHost};

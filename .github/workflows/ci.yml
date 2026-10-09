@@ -63,6 +63,121 @@ jobs:
         run: bash scripts/check-rquickjs-features.sh
 
   # ---------------------------------------------------------------------------
+  # S0 spike（tasks.md T006-T008）—— 独立 job，独立 crate
+  #
+  # ## 为什么要独立成 job 而不是并进 build
+  #
+  # `spikes/s0/` 刻意脱离主 workspace（它是 eframe 图形依赖，绝不能进引擎的
+  # 依赖图，否则违反 FR-036「引擎不得依赖图形环境」）。它的构建失败**不应**
+  # 拖垮主 workspace 的 CI——那是"可行性门"的结论，不是主产品的回归。
+  # 拆开让两者在 CI 界面上一眼可辨。
+  #
+  # ## 为什么也能跑 headless
+  #
+  # Linux runner 无 X11/Wayland，开窗口必失败。spike 的 `--headless` 路径
+  # 只验证存储与脚本（不开窗口），故能在 CI 上产出"三平台编译通过"的证据。
+  # 窗口验证留待有图形环境的机器（已在本机 Windows 实测，见 BASELINE.md）。
+  # ---------------------------------------------------------------------------
+  s0-spike:
+    name: S0 spike (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-gnu
+            os: windows-latest
+            target: x86_64-pc-windows-gnu
+          - name: macos
+            os: macos-latest
+            target: aarch64-apple-darwin
+          - name: linux
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装工具链（${{ matrix.target }}）
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+        env:
+          RUSTUP_TOOLCHAIN: stable-${{ matrix.target }}
+
+      # Linux 上 eframe 需要窗口系统与图形库的开发头文件才能编译
+      # （winit 的后端在编译期链接 x11/wayland 的客户端库）。
+      # 只装构建依赖，不装完整桌面环境——headless 路径不需要能开窗口。
+      - name: 安装 Linux 图形构建依赖
+        if: matrix.name == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
+            libwayland-dev libxkbcommon-dev libgl1-mesa-dev
+
+      - name: spike 构建（默认臂：无 rquickjs）
+        run: cargo build --release --manifest-path spikes/s0/Cargo.toml --target ${{ matrix.target }}
+        env:
+          RUSTUP_TOOLCHAIN: stable-${{ matrix.target }}
+
+      - name: spike 构建（spike-js 臂：含 rquickjs）
+        run: cargo build --release --features spike-js --manifest-path spikes/s0/Cargo.toml --target ${{ matrix.target }}
+        env:
+          RUSTUP_TOOLCHAIN: stable-${{ matrix.target }}
+
+      - name: spike 单测
+        run: cargo test --manifest-path spikes/s0/Cargo.toml --target ${{ matrix.target }}
+        env:
+          RUSTUP_TOOLCHAIN: stable-${{ matrix.target }}
+
+      # headless 路径验证存储 + 脚本沙箱，并断言"无网络外发"。
+      # 该子命令不含任何 HTTP 调用（HTTP 走独立的 --http，需用户显式触发），
+      # 故它的存在本身就是 FR-041/SC-012 的可执行证据。
+      - name: spike headless 验证（含 rquickjs）
+        run: cargo run --release --features spike-js --manifest-path spikes/s0/Cargo.toml --target ${{ matrix.target }} -- --headless
+        env:
+          RUSTUP_TOOLCHAIN: stable-${{ matrix.target }}
+
+      - name: 记录 spike 产物体积
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p size-report
+          {
+            echo "# S0 spike 产物体积（${{ matrix.name }}）"
+            echo
+            echo "- commit: \`${GITHUB_SHA}\`"
+            echo "- target: \`${{ matrix.target }}\`"
+            echo
+            echo '```'
+          } > size-report/s0-spike-size-${{ matrix.name }}.txt
+
+          # 三平台可执行文件后缀不同：Windows 是 .exe，其余无后缀
+          binary="spikes/s0/target/${{ matrix.target }}/release/tome-s0-spike"
+          if [ "${{ matrix.name }}" = "windows-gnu" ]; then
+            binary="${binary}.exe"
+          fi
+
+          if [ -f "$binary" ]; then
+            size_bytes=$(wc -c < "$binary")
+            printf '%s  %s bytes (%s KiB)\n' "$binary" "$size_bytes" "$(( size_bytes / 1024 ))"
+          else
+            echo "未找到产物 $binary"
+            exit 1
+          fi
+          echo '```' >> size-report/s0-spike-size-${{ matrix.name }}.txt
+          cat size-report/s0-spike-size-${{ matrix.name }}.txt
+
+      - name: 上传 spike 体积记录
+        uses: actions/upload-artifact@v4
+        with:
+          name: s0-spike-size-${{ matrix.name }}
+          path: size-report/
+          overwrite: false
+          retention-days: 90
+
+  # ---------------------------------------------------------------------------
   # 三平台构建 + 测试 + 体积基线
   # ---------------------------------------------------------------------------
   build:

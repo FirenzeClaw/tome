@@ -8,8 +8,25 @@
 .codegraph/
 
 # Rust 构建产物（workspace 落地后生效）
+#
+# `/target/` 只匹配**仓库根**的 target。spikes/s0 是独立 crate（刻意脱离主
+# workspace，见其 Cargo.toml 说明），它有**自己的** target/（实测 2.8 GB），
+# 故必须单独排除——否则一次 `git add spikes/` 会把几个 GB 的构建产物
+# 塞进仓库。
 /target/
+/spikes/*/target/
 **/*.rs.bk
+
+# S0 spike 的 Java 对照工具产物（T008）
+#
+# .class 是编译产物；lib/*.jar 是第三方二进制（Jsoup），两者都不入仓库——
+# 获取方式见 spikes/s0/tools/README.md。
+*.class
+/spikes/s0/tools/lib/
+
+# S0 spike 的 DOM 导出中间产物（由 Java 侧生成，可随时重新产出）
+/spikes/s0/corpus/*.jsoup.txt
+/spikes/s0/corpus/*.jsoup.stats.txt
 
 # 本地环境与覆盖配置
 .env

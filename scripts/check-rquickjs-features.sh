@@ -26,7 +26,7 @@
 #
 # ## 用法
 #
-#   scripts/check-rquickjs-features.sh            # 检查当前 workspace
+#   scripts/check-rquickjs-features.sh            # 检查 workspace + S0 spike
 #   scripts/check-rquickjs-features.sh --self-test # 自检守卫自身有效性
 #
 # 退出码：0 = 通过；1 = 发现违规；2 = 脚本自身/环境错误
@@ -69,8 +69,36 @@ version_ge() {
 
 # 取 feature 图。失败时返回非零，由调用方转成 EXIT_ERROR——
 # 网络不可达或 Cargo.lock 缺失会让 cargo tree 失败，那种情况必须报错而非放行。
-feature_tree() {
+#
+# ## 为什么要覆盖 S0 spike（T006 要求）
+#
+# `spikes/s0/` 刻意脱离主 workspace（它是图形依赖，不进引擎的依赖图）。
+# 但它**同样使用 rquickjs**，故主 workspace 的检查对它无效——若只查 workspace，
+# 会出现"守卫全绿而 spike 里悄悄开了 rust-alloc"的盲区。而 spike 正是
+# 首个实际编译 QuickJS 的地方，也是最先能暴露该问题的位置。
+#
+# 用 `-p` 指定包名而非路径：命令在仓库根执行，与调用者 cwd 无关。
+feature_tree_workspace() {
     cargo tree -e features --workspace 2>&1
+}
+
+feature_tree_spike() {
+    # 必须带 --features spike-js：spike 的 rquickjs 是可选依赖（见其 Cargo.toml
+    # 的 [features] 注释），不开这个 feature 时依赖图里根本没有 rquickjs。
+    # 若不带，本检查会误报"未引入"从而放过违规。
+    cargo tree -e features --manifest-path spikes/s0/Cargo.toml --features spike-js 2>&1
+}
+
+# 对一棵依赖树施加全部检查。返回 0 全过 / 1 有违规。
+check_tree() {
+    local label="$1"
+    local tree="$2"
+    local failed=0
+
+    log_info "── 检查 ${label} ──"
+    check_forbidden_features "$tree" || failed=1
+    check_min_version "$tree" || failed=1
+    return "$failed"
 }
 
 # ---------- 检查 1：禁止的 feature ----------
@@ -128,16 +156,29 @@ check_min_version() {
 main() {
     log_info "检查 rquickjs 依赖约束（禁 ${FORBIDDEN_FEATURES[*]}；版本 >= ${MIN_RQUICKJS_VERSION}）"
 
-    local tree
-    if ! tree="$(feature_tree)"; then
-        log_error "cargo tree -e features 执行失败，无法判定依赖约束（不放行）"
-        printf '%s\n' "$tree" >&2
+    local failed=0
+
+    local workspace_tree
+    if ! workspace_tree="$(feature_tree_workspace)"; then
+        log_error "cargo tree -e features --workspace 执行失败，无法判定依赖约束（不放行）"
+        printf '%s\n' "$workspace_tree" >&2
         return "$EXIT_ERROR"
     fi
+    check_tree "主 workspace" "$workspace_tree" || failed=1
 
-    local failed=0
-    check_forbidden_features "$tree" || failed=1
-    check_min_version "$tree" || failed=1
+    # S0 spike：独立 crate，其 rquickjs 不在 workspace 的依赖图里。
+    # 仅当该目录存在时检查——spike 是一次性验证产物，日后清理掉不应让守卫报错。
+    if [[ -f spikes/s0/Cargo.toml ]]; then
+        local spike_tree
+        if ! spike_tree="$(feature_tree_spike)"; then
+            log_error "cargo tree（spikes/s0）执行失败，无法判定依赖约束（不放行）"
+            printf '%s\n' "$spike_tree" >&2
+            return "$EXIT_ERROR"
+        fi
+        check_tree "S0 spike" "$spike_tree" || failed=1
+    else
+        log_info "未发现 spikes/s0/Cargo.toml，跳过 spike 检查（一次性产物，可能已清理）"
+    fi
 
     if (( failed )); then
         log_fail "存在违规，构建被阻断"

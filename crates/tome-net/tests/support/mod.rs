@@ -28,6 +28,14 @@
     clippy::expect_used,
     reason = "测试夹具无法构造时应立即失败，错误传播只会给每个调用点加噪音"
 )]
+// 本模块被**多个**集成测试二进制共用（`net_integration.rs` / `host_wiring.rs`），
+// 每个二进制独立编译它一遍，于是"对某个二进制而言未使用"的项会被 dead_code
+// 点名。那些项对另一个二进制是必需的（如 `Reply::HangFor` 只在超时测试里用）。
+// 为迁就单个二进制的可见性而删掉它们，等于让另一个测试失去覆盖手段。
+#![expect(
+    dead_code,
+    reason = "共享夹具：各项由不同测试二进制分别使用，汇合后全部有用"
+)]
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};

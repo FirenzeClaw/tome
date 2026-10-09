@@ -161,6 +161,12 @@ pub enum JsoupPseudoClass {
     ContainsWholeOwnText(String),
     /// `:matches(regex)` —— 后代文本匹配正则（空白归一化）
     Matches(String),
+    /// `:matchesOwn(regex)` —— **自身**文本匹配正则（不含后代）
+    ///
+    /// 依据 Jsoup 公开文档 `Selector` 一节的伪类表（`:matches` 的自身版）。
+    /// 与 [`Self::MatchesWholeOwnText`] 的区别在**空白归一化**：本变体归一化，
+    /// 那个不归一化。
+    MatchesOwn(String),
     /// `:matchesWholeText(regex)` —— 后代文本匹配正则（不归一化）
     MatchesWholeText(String),
     /// `:matchesWholeOwnText(regex)` —— 自身文本匹配正则（不归一化）
@@ -200,6 +206,7 @@ impl ToCss for JsoupPseudoClass {
             Self::ContainsWholeText(text) => write!(dest, ":containsWholeText({text})"),
             Self::ContainsWholeOwnText(text) => write!(dest, ":containsWholeOwnText({text})"),
             Self::Matches(text) => write!(dest, ":matches({text})"),
+            Self::MatchesOwn(text) => write!(dest, ":matchesOwn({text})"),
             Self::MatchesWholeText(text) => write!(dest, ":matchesWholeText({text})"),
             Self::MatchesWholeOwnText(text) => write!(dest, ":matchesWholeOwnText({text})"),
             Self::Eq(index) => write!(dest, ":eq({index})"),
@@ -368,6 +375,8 @@ impl<'i> Parser<'i> for JsoupSelectorParser {
                 read_text_argument(parser)?,
             )),
             "matches" => Ok(JsoupPseudoClass::Matches(read_text_argument(parser)?)),
+            // 公开文档伪类表列了 `:matchesOwn(regex)`（`:matches` 的自身版）
+            "matchesOwn" => Ok(JsoupPseudoClass::MatchesOwn(read_text_argument(parser)?)),
             "matchesWholeText" => Ok(JsoupPseudoClass::MatchesWholeText(read_text_argument(
                 parser,
             )?)),
@@ -1047,6 +1056,8 @@ impl Element for NodeRef {
             // 公开文档：`:matches(regex)` —— "elements containing whitespace normalized
             // text that matches the specified regular expression."
             JsoupPseudoClass::Matches(source) => matches_regex_source(&self.text(), source),
+            // `:matchesOwn` 只看**自身**文本（同 `:matches` 的归一化口径）
+            JsoupPseudoClass::MatchesOwn(source) => matches_regex_source(&self.own_text(), source),
             JsoupPseudoClass::MatchesWholeText(source) => {
                 matches_regex_source(&self.whole_text(), source)
             }

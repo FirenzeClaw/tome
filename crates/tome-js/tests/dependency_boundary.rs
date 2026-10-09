@@ -106,6 +106,9 @@ fn tome_js_只依赖_tome_core() {
         "rsa",
         // RSA 的 PKCS#1 v1.5 填充需要随机数（纯计算，无 I/O）
         "rand",
+        // 结构化数据：JSON 解析/序列化（纯计算）
+        // 与 tome-store 的 SQLite 无关——不引入任何 I/O 能力
+        "serde_json",
     ];
     let unexpected: Vec<&String> = names
         .iter()

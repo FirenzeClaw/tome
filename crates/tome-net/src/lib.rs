@@ -1,5 +1,4 @@
 //! # tome-net —— 网络层
-//!
 //! 负责一切对外 HTTP 通信：请求执行、Cookie 管理、代理配置、按书源声明的限速、
 //! 响应字符集探测与解码，并提供 `RequestSpec` 的**回放 adapter**（录制→回放，
 //! 使规则引擎的测试无需真实联网）。
@@ -17,8 +16,42 @@
 //!
 //! ## 关键入口
 //!
-//! 骨架阶段尚无公开 API；Phase 2 起按 `contracts/seams.md` 落地。
+//! | 模块 | 职责 |
+//! |---|---|
+//! | [`client`] | HTTP 客户端 + 阻塞外观（T013） |
+//! | [`executor`] | `RequestSpec` 执行器，实现 `NetHost`（T014） |
+//! | [`charset`] | 字符集嗅探/检测/容错解码（T015 / FR-009） |
+//! | [`cookie`] | 按源隔离的 Cookie jar（T016 / FR-008） |
+//! | [`proxy`] | 代理路线归约：系统代理 + 按源覆盖（T017 / FR-008） |
+//! | [`ratelimit`] | 按 `rate_limit_key` 独立的限速调度（T018 / FR-008） |
+//! | [`replay`] | 录制/离线回放，差分测试的确定性来源（T019） |
+//! | [`error`] | 本 crate 的错误类型与 `ErrorKind` 映射 |
 //!
-//! [WIP] 本 crate 当前为空骨架，未含任何实现。
+//! 起步用 [`executor::RequestExecutor`]：它是组合起来的那一个入口。
+//!
+//! ## 已知缺口（已上报 PM 裁决，本 crate 不擅自改 tome-core）
+//!
+//! 1. `ErrorKind` 没有 Proxy 类目，故"代理故障"借 `Configuration` 承载
+//!    （见 [`error::NetError::to_error_kind`] 的 `[WORKAROUND]` 注释）。
+//! 2. `RequestSpec` 没有请求间隔字段（FR-008 要求书源可声明），
+//!    故间隔由执行器侧注入（见 [`ratelimit`] 的模块文档）。
 
 #![forbid(unsafe_code)]
+
+pub mod charset;
+pub mod client;
+pub mod cookie;
+pub mod error;
+pub mod executor;
+pub mod proxy;
+pub mod ratelimit;
+pub mod replay;
+
+pub use charset::{decode_body, sniff_declared_charset, DecodedBody};
+pub use client::{BlockingClient, HttpClient};
+pub use cookie::{Cookie, CookieJar};
+pub use error::NetError;
+pub use executor::{ExecutionPolicy, RequestExecutor, RequestExecutorBuilder};
+pub use proxy::{DefaultProxyPolicy, ProxyRoute};
+pub use ratelimit::RateLimiter;
+pub use replay::{ReplayMode, ReplayRecord, ReplayStore};

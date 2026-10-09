@@ -9,5 +9,35 @@ license.workspace = true
 [dependencies]
 tome-core = { workspace = true }
 
+# HTTP 客户端。TLS 走 rustls + rustls-platform-verifier（tasks.md T013）：
+# reqwest 0.13 的 `default-tls` 即 `rustls` 特性，内含 rustls-platform-verifier，
+# 故**不显式启用 native-tls**——系统证书校验由平台验证器完成，不引入 OpenSSL。
+# 压缩特性（gzip/brotli/deflate/zstd）对应 FR-009 的"压缩传输"要求。
+reqwest = { version = "0.13.5", default-features = false, features = [
+    "rustls",
+    "http2",
+    "charset",
+    "system-proxy",
+    "gzip",
+    "brotli",
+    "deflate",
+    "zstd",
+] }
+
+# 阻塞外观（T013）自持一个 runtime 并 `block_on` 异步客户端——
+# 用 reqwest 的 `blocking` 特性会得到**第二个**客户端实例（配置需重复维护），
+# 故这里直接依赖 tokio 承载那个 runtime。
+tokio = { version = "1", default-features = false, features = [
+    "rt-multi-thread",
+    "time",
+] }
+
+# 字符集检测与解码（T015 / FR-009）
+encoding_rs = "0.8.42"
+chardetng = "1.0.0"
+
+# 网络层自身错误类型（AGENTS.md：每个 crate 拥有自己的错误类型，接缝处映射为 ErrorKind）
+thiserror = "2.0.21"
+
 [lints]
 workspace = true

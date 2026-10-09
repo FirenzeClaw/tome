@@ -181,20 +181,42 @@ fn outer_html(node: &NodeRef) -> String {
 ///
 /// [UNCERTAIN] 属性引号风格、自闭合标签写法（`<br>` vs `<br/>`）、实体转义
 /// 范围这三处与 Jsoup 的差异未逐项对照。S1-6 的差分基线会给出实测差异率。
+///
+/// ## 为什么用显式栈而不是递归
+///
+/// DOM 深度由外部 HTML 决定，而书源抓到的畸形页面深度可达数千。递归版本
+/// 在 3000 层嵌套上**实测栈溢出**（`STATUS_STACK_OVERFLOW`，进程直接死），
+/// 而解析层与遍历层都刻意用了显式栈（`dom::PreOrderIterator`）——序列化层
+/// 漏了这一条。AGENTS.md 的生产级护栏要求引擎不得因输入崩溃。
+///
+/// 显式栈的元素是"待处理项"：要么是一个待输出的节点，要么是一段待输出的
+/// 字面文本（元素开始/结束标签、doctype 等）。用后进先出保证文档序输出：
+/// 压栈时**逆序**压入子节点。
 fn serialize_node(node: &NodeRef, buffer: &mut String) {
+    let mut stack: Vec<SerializeTask> = vec![SerializeTask::Node(node.clone())];
+
+    while let Some(task) = stack.pop() {
+        match task {
+            SerializeTask::Literal(text) => buffer.push_str(&text),
+            SerializeTask::Node(current) => {
+                serialize_one(&current, buffer, &mut stack);
+            }
+        }
+    }
+}
+
+/// 输出单个节点的"自身部分"，并把其子节点以**逆序**压栈（保证文档序弹出）。
+fn serialize_one(node: &NodeRef, buffer: &mut String, stack: &mut Vec<SerializeTask>) {
     use crate::dom::NodeKind;
 
     match node.kind() {
-        NodeKind::Document => {
-            for child in node.children() {
-                serialize_node(&child, buffer);
-            }
-        }
+        // 文档/片段节点自身无输出，只需把子节点逆序压栈
+        NodeKind::Document => push_children_reversed(node, stack),
         NodeKind::Doctype => {
             let name = node.node_value();
+            buffer.push_str("<!DOCTYPE ");
+            buffer.push_str(&name);
             if let Some((public_id, system_id)) = node.doctype_ids() {
-                buffer.push_str("<!DOCTYPE ");
-                buffer.push_str(&name);
                 if !public_id.is_empty() {
                     buffer.push_str(" PUBLIC \"");
                     buffer.push_str(&public_id);
@@ -205,12 +227,8 @@ fn serialize_node(node: &NodeRef, buffer: &mut String) {
                     buffer.push_str(&system_id);
                     buffer.push('"');
                 }
-                buffer.push('>');
-            } else {
-                buffer.push_str("<!DOCTYPE ");
-                buffer.push_str(&name);
-                buffer.push('>');
             }
+            buffer.push('>');
         }
         NodeKind::Comment => {
             buffer.push_str("<!--");
@@ -227,11 +245,27 @@ fn serialize_node(node: &NodeRef, buffer: &mut String) {
         // Data 与 CData 的内容按原样输出（rawtext 元素的正文不该被转义）
         NodeKind::Data | NodeKind::CData => buffer.push_str(&node.node_value()),
         NodeKind::Text => escape_text(&node.node_value(), buffer),
-        NodeKind::Element => serialize_element(node, buffer),
+        NodeKind::Element => serialize_element(node, buffer, stack),
     }
 }
 
-fn serialize_element(node: &NodeRef, buffer: &mut String) {
+/// 序列化任务的显式栈元素。
+enum SerializeTask {
+    /// 待输出的节点
+    Node(NodeRef),
+    /// 待输出的字面文本
+    Literal(String),
+}
+
+/// 把子节点以逆序压栈（配合 `Vec::pop` 得到文档序）。
+fn push_children_reversed(node: &NodeRef, stack: &mut Vec<SerializeTask>) {
+    let children: Vec<NodeRef> = node.children().collect();
+    for child in children.into_iter().rev() {
+        stack.push(SerializeTask::Node(child));
+    }
+}
+
+fn serialize_element(node: &NodeRef, buffer: &mut String, stack: &mut Vec<SerializeTask>) {
     buffer.push('<');
     buffer.push_str(&node.qualified_name());
     for (name, value) in node.attributes() {
@@ -243,16 +277,18 @@ fn serialize_element(node: &NodeRef, buffer: &mut String) {
     }
     buffer.push('>');
 
-    for child in node.children() {
-        serialize_node(&child, buffer);
+    // 空元素（void element）不写结束标签。清单取自 WHATWG 规范 "void elements"。
+    if is_void_element(&node.node_name()) {
+        push_children_reversed(node, stack);
+        return;
     }
 
-    // 空元素（void element）不写结束标签。清单取自 WHATWG 规范 "void elements"。
-    if !is_void_element(&node.node_name()) {
-        buffer.push_str("</");
-        buffer.push_str(&node.qualified_name());
-        buffer.push('>');
-    }
+    // 结束标签必须在全部子节点**之后**输出，故先压它（后进先出 → 最后弹出）
+    let mut closing = String::from("</");
+    closing.push_str(&node.qualified_name());
+    closing.push('>');
+    stack.push(SerializeTask::Literal(closing));
+    push_children_reversed(node, stack);
 }
 
 /// WHATWG 规范定义的 void elements（不自闭合、无结束标签）。
@@ -826,6 +862,47 @@ mod tests {
             RuleSuffix::All.evaluate(&div),
             vec![r#"<div><p class="a">x</p></div>"#]
         );
+    }
+
+    #[test]
+    fn 深嵌套的html序列化不爆栈() {
+        // 回归测试：首版 `serialize_node` 用递归，3000 层嵌套下**实测栈溢出**
+        // （STATUS_STACK_OVERFLOW，进程直接死）。而解析层与遍历层都刻意用了
+        // 显式栈，序列化层漏了——AGENTS.md 的生产级护栏要求引擎不得因输入崩溃，
+        // 而 DOM 深度由外部 HTML 决定，畸形页面深度可达数千。
+        //
+        // 深度取 3000：与 dom 模块的 `深嵌套不爆栈` 用同一个量级，
+        // 该深度已实测能正常解析。
+        let depth = 3000;
+        let mut html = String::with_capacity(depth * 20);
+        for _ in 0..depth {
+            html.push_str("<div>");
+        }
+        html.push_str("deep");
+        for _ in 0..depth {
+            html.push_str("</div>");
+        }
+        let document = Document::parse_html(&html);
+
+        // `div@html` 对**每一个** div 各产出一份内部 HTML（3000 个 div → 3000 项）。
+        // 爆栈发生在序列化**最深子树**时，即最外层 div 的那一项——
+        // 它是唯一需要下探 2999 层的调用，故用它做断言。
+        let values = evaluate_rule(&document, "div@html").expect("应求值成功");
+        assert_eq!(values.len(), depth, "每个 div 各产出一项");
+
+        let outermost = &values[0];
+        assert!(
+            outermost.contains("deep"),
+            "最外层序列化应含最内层文本（长度 {}）",
+            outermost.len()
+        );
+        assert_eq!(
+            outermost.matches("<div>").count(),
+            depth - 1,
+            "最外层序列化应含全部内层 div"
+        );
+        // 递归版本在这里会 STATUS_STACK_OVERFLOW；能跑到这条断言即证明改动生效
+        assert!(outermost.ends_with("</div>"));
     }
 
     #[test]

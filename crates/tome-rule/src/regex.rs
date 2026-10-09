@@ -284,6 +284,50 @@ fn find_quantifier_close(chars: &[char], index: usize) -> Option<usize> {
 /// 三种形态（见 [`normalize_pattern`] 的表格）：字符类 `[...]`、分组 `(...)`、
 /// 单个字面量或转义序列。返回 `None` 表示尾部没有可识别的单元。
 fn find_last_unit_start(output: &str) -> Option<usize> {
+    // ## 为什么用循环而不是递归
+    //
+    // 递归的两处回退（尾部量词字符）可以连续发生很多次——`a++++...` 这种
+    // 病态输入每退一个字符就递归一层。实测 1000 层尚可，**10000 层栈溢出**
+    // （`STATUS_STACK_OVERFLOW`）。模式串来自书源规则，长度不受本引擎控制，
+    // 故必须能承受任意长度。
+    //
+    // 循环版把"回退"变成改一个切片变量，空间复杂度 O(1)。
+    let mut cursor_end: usize = output.len();
+
+    loop {
+        let view = &output[..cursor_end];
+        let bytes = view.as_bytes();
+        if bytes.is_empty() {
+            return None;
+        }
+
+        let last = *bytes.last()?;
+
+        // 尾部若是一个**量词字符**（`*` / `+` / `?`），它本身不是可重复单元——
+        // 真正的操作数在它之前。典型输入 `a+++`：处理第二个 `+` 时尾部是 `a+`，
+        // 而 `a+` 里的 `+` 是量词，操作数应是 `a`。
+        // 只有 `?` 也可能是分组修饰的一部分（如 `(?:`），故用"前一个字符不是 `(`"
+        // 来排除——那种情况本函数返回的起点会落在 `(` 上，交给分组分支处理。
+        if matches!(last, b'*' | b'+') {
+            cursor_end = view.floor_char_boundary(view.len() - 1);
+            continue;
+        }
+        if last == b'?' {
+            let head = view.floor_char_boundary(view.len() - 1);
+            // `(?` 是分组前缀而不是量词——不从它回退
+            if !view[..head].ends_with('(') {
+                cursor_end = head;
+                continue;
+            }
+        }
+
+        return find_last_unit_start_at(view);
+    }
+}
+
+/// [`find_last_unit_start`] 的"不回退"部分：给定视图中尾部已是最终单元时，
+/// 定位该单元的起始下标。
+fn find_last_unit_start_at(output: &str) -> Option<usize> {
     let bytes = output.as_bytes();
     if bytes.is_empty() {
         return None;
@@ -291,22 +335,6 @@ fn find_last_unit_start(output: &str) -> Option<usize> {
 
     let last = *bytes.last()?;
 
-    // 尾部若是一个**量词字符**（`*` / `+` / `?`），它本身不是可重复单元——
-    // 真正的操作数在它之前。典型输入 `a+++`：处理第二个 `+` 时尾部是 `a+`，
-    // 而 `a+` 里的 `+` 是量词，操作数应是 `a`。
-    // 只有 `?` 也可能是分组修饰的一部分（如 `(?:`），故用"前一个字符不是 `(`"
-    // 来排除——那种情况本函数返回的起点会落在 `(` 上，交给分组分支处理。
-    if matches!(last, b'*' | b'+') {
-        let head = output.floor_char_boundary(output.len() - 1);
-        return find_last_unit_start(&output[..head]);
-    }
-    if last == b'?' {
-        let head = output.floor_char_boundary(output.len() - 1);
-        // `(?` 是分组前缀而不是量词——不从它回退
-        if !output[..head].ends_with('(') {
-            return find_last_unit_start(&output[..head]);
-        }
-    }
     // 字符类：从尾部找未转义的 `[`
     if last == b']' {
         return find_open_backwards(output, b'[', b']');
@@ -820,6 +848,21 @@ mod tests {
         assert_eq!(normalize_pattern("(?:x)++"), "(?>(?:x)+)");
         // `(?P<n>x)*+` 同理（命名组）
         assert_eq!(normalize_pattern("(?P<n>x)*+"), "(?>(?P<n>x)*)");
+    }
+
+    #[test]
+    fn 病态长模式的规范化不爆栈() {
+        // 回归测试：首版 `find_last_unit_start` 用递归做"尾部量词回退"，
+        // 每退一个字符递归一层。实测 1000 层尚可、**10000 层栈溢出**
+        // （STATUS_STACK_OVERFLOW）。模式串来自书源规则，长度不受引擎控制，
+        // 故必须能承受任意长度——改为循环后空间复杂度 O(1)。
+        for count in [1_000usize, 10_000, 50_000] {
+            let pattern = format!("a{}", "+".repeat(count));
+            let normalized = normalize_pattern(&pattern);
+            assert!(!normalized.is_empty(), "{count} 个量词字符的模式应能规范化");
+            // 结果里应含原子组（说明规范化确实生效，没有被跳过）
+            assert!(normalized.contains("(?>"), "{count} 个量词字符应产出原子组");
+        }
     }
 
     #[test]

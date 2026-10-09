@@ -75,6 +75,48 @@ enum Engine {
     Fancy(Box<fancy_regex::Regex>),
 }
 
+/// 一个匹配结果的**字符**区间（`[start, end)` 半开）。
+///
+/// # 为什么单独一个类型而不是 `(usize, usize)`
+///
+/// 元组会让"这个数字是字节还是字符"变成纯约定——而本文件的全部
+/// 复杂度来源恰恰是这两者会混淆（引擎给字节、FR-028 要字符）。
+/// 用一个带字段名的类型把单位写进代码里。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CharRange {
+    /// 起始**字符**下标（含）
+    pub start_char: usize,
+    /// 结束**字符**下标（不含）
+    pub end_char: usize,
+}
+
+impl CharRange {
+    /// 区间长度（字符数）。
+    pub fn char_len(&self) -> usize {
+        self.end_char.saturating_sub(self.start_char)
+    }
+
+    /// 是否为零宽区间。
+    pub fn is_empty(&self) -> bool {
+        self.end_char <= self.start_char
+    }
+}
+
+/// 把字节偏移换算成字符下标。
+///
+/// # 越界与非法边界
+///
+/// 匹配结果来自引擎，其偏移必然落在字符边界上（`regex` 的匹配不会切开
+/// 多字节字符），故这里的 `get(..index)` 正常情况总成功。为不引入 panic
+/// 路径，越界时返回**字符总数**（把位置夹到末尾）——那比 panic 好：
+/// 它让上层拿到一个"高亮到文末"的结果而不是进程崩溃。
+fn byte_to_char_index(haystack: &str, byte_index: usize) -> usize {
+    match haystack.get(..byte_index) {
+        Some(prefix) => prefix.chars().count(),
+        None => haystack.chars().count(),
+    }
+}
+
 /// 资源上界（防灾难性回溯与超长输入，R5）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RegexLimits {
@@ -576,6 +618,58 @@ impl CompiledRegex {
                 Ok(matched.map(|matched| matched.as_str().to_string()))
             }
         }
+    }
+
+    /// 找出**全部**匹配的**字符区间**（供高亮规则求值，FR-015）。
+    ///
+    /// # 为什么返回字符下标而不是字节下标
+    ///
+    /// 两个引擎的 `Match::start()/end()` 都是**字节**偏移，而 FR-028 要求
+    /// 阅读痕迹以**字符区间**表达（改字号不错位的前提，且"字符"才是用户
+    /// 看到的位置）。把换算放在本层而不是调用方，是为了让"什么算一个
+    /// 字符位置"只有一个定义处——否则每个消费者都要自己换算，迟早分叉。
+    ///
+    /// # 区间是 [start, end) 半开
+    ///
+    /// 与 Rust 的切片约定一致，也与 `data-model.md` 的
+    /// `highlight(char_offset, length)` 吻合（`length == end - start`）。
+    ///
+    /// # 空匹配会被保留
+    ///
+    /// `x*` 这类模式会产生零宽匹配。本函数**照实返回**（不做过滤）——
+    /// 过滤与否是调用方的语义决策（加工链里会被过滤掉，因为零宽高亮在
+    /// 排版上无意义），引擎层替它决定会丢失信息。
+    pub fn find_iter(
+        &self,
+        haystack: &str,
+        limits: RegexLimits,
+    ) -> Result<Vec<CharRange>, RuleError> {
+        check_input_length(haystack, limits)?;
+
+        // 先把字节偏移收齐（两个引擎的遍历接口不同），再统一换算成字符——
+        // 换算只需要做一次，且两引擎因此共用同一份换算逻辑。
+        let byte_ranges: Vec<(usize, usize)> = match &self.engine {
+            Engine::Fast(compiled) => compiled
+                .find_iter(haystack)
+                .map(|matched| (matched.start(), matched.end()))
+                .collect(),
+            Engine::Fancy(compiled) => compiled
+                .find_iter(haystack)
+                .map(|matched| {
+                    matched
+                        .map(|matched| (matched.start(), matched.end()))
+                        .map_err(|error| RuleError::limit(format!("回溯超限：{error}")))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        };
+
+        Ok(byte_ranges
+            .into_iter()
+            .map(|(start, end)| CharRange {
+                start_char: byte_to_char_index(haystack, start),
+                end_char: byte_to_char_index(haystack, end),
+            })
+            .collect())
     }
 
     /// 替换**全部**匹配。

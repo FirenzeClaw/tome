@@ -719,15 +719,57 @@ fn matching_open_bracket(text: &str) -> Option<usize> {
 
 /// 便捷：把一条规则应用到一组节点上，产出字符串列表。
 ///
-/// 接受两种输入形态（都要支持）：
+/// 接受完整的书源规则形态（都要支持）：
 ///
 /// - 裸选择器：`div.a@text`
 /// - 带 `@css:` 前缀：`@css:div.a@text`（书源规则的常见写法）
+/// - **带替换链**：`@css:.name>a@href##^##https://example.com`
 ///
-/// 故先按 [`crate::dispatch::dispatch_prefix`] 剥掉类型前缀。**只接受 CSS 与
-/// Default 两类**——其余类型（JSONPath/XPath/JS）在此产出结构化「不支持能力」
-/// 错误（FR-006），而不是把 `$.a` 当 CSS 选择器去解析后报一个无关的语法错。
+/// 第三项出自公开文档（「如需要正则替换在最后加上 `##正则表达式##替换内容`」），
+/// 且**极其常用**——把相对地址补成绝对地址就是这么写的。故本函数负责把
+/// T022（后缀/切片）与 T025（替换链）串起来，调用方不必自己先切 `##`。
+///
+/// **只接受 CSS 与 Default 两类**——其余类型（JSONPath/XPath/JS）在此产出
+/// 结构化「不支持能力」错误（FR-006），而不是把 `$.a` 当 CSS 选择器去解析后
+/// 报一个无关的语法错。
 pub fn evaluate_rule(
+    document: &Document,
+    rule: &str,
+) -> Result<Vec<String>, crate::error::RuleError> {
+    let (subject, chain) = split_chain(rule);
+    let values = evaluate_rule_subject(document, &subject)?;
+    Ok(apply_chain(values, &chain))
+}
+
+/// 切出替换链：`主体##正则##替换##…` → `(主体, 链)`。
+///
+/// 复用 [`crate::replace::parse_replace_chain`]——它已实现 `##` 边界的
+/// 引号/转义/括号感知（T025），此处不重复一遍切分逻辑。
+fn split_chain(rule: &str) -> (String, crate::replace::ReplaceChain) {
+    let chain = crate::replace::parse_replace_chain(rule);
+    let subject = chain.subject.clone();
+    (subject, chain)
+}
+
+/// 把替换链作用到规则产出的**每个值**上。
+///
+/// ## 为什么逐个值而不是拼接后再替换
+///
+/// 替换的典型用途是"给每个 URL 补前缀"（`##^##https://…`）。拼接后再替换
+/// 会让两份结果之间的边界也参与匹配——`^` 锚点会只在整串开头命中，于是只有
+/// 第一个 URL 被补上前缀。逐个应用才对。
+fn apply_chain(values: Vec<String>, chain: &crate::replace::ReplaceChain) -> Vec<String> {
+    if chain.is_empty() {
+        return values;
+    }
+    values
+        .into_iter()
+        .map(|value| chain.apply(&value, crate::regex::RegexLimits::DEFAULT))
+        .collect()
+}
+
+/// [`evaluate_rule`] 的**主体部分**（调用方已剥掉替换链）。
+pub fn evaluate_rule_subject(
     document: &Document,
     rule: &str,
 ) -> Result<Vec<String>, crate::error::RuleError> {
@@ -838,6 +880,16 @@ pub fn select_nodes(
 /// 与 [`evaluate_rule`] 的区别仅在于求值起点——它从文档根起，本函数从
 /// `root` 起。语义上等价于"在这个子树里跑同一条规则"。
 pub fn evaluate_rule_in(
+    root: &crate::dom::NodeRef,
+    rule: &str,
+) -> Result<Vec<String>, crate::error::RuleError> {
+    let (subject, chain) = split_chain(rule);
+    let values = evaluate_rule_subject_in(root, &subject)?;
+    Ok(apply_chain(values, &chain))
+}
+
+/// [`evaluate_rule_in`] 的**主体部分**（调用方已剥掉替换链）。
+pub fn evaluate_rule_subject_in(
     root: &crate::dom::NodeRef,
     rule: &str,
 ) -> Result<Vec<String>, crate::error::RuleError> {
@@ -1331,6 +1383,73 @@ mod tests {
                 .len(),
             3
         );
+    }
+
+    #[test]
+    fn 规则可带替换链() {
+        // 公开文档：「如需要正则替换在最后加上 ##正则表达式##替换内容」
+        // 最典型的用法是把相对地址补成绝对地址。
+        let document = Document::parse_html(
+            r#"<ul><li><a href="/book/1">一</a></li><li><a href="/book/2">二</a></li></ul>"#,
+        );
+        assert_eq!(
+            evaluate_rule(&document, r#"li>a@href##^##https://x.com"#).expect("应求值成功"),
+            vec!["https://x.com/book/1", "https://x.com/book/2"],
+            "替换应作用在**每个值**上——拼接后再替换会让 `^` 只命中整串开头"
+        );
+    }
+
+    #[test]
+    fn 替换链可叠加() {
+        // 两条替换：`--` → `X`，然后 `-` → `Y`。按序生效，故
+        // "a--b-c" 先变 "aXb-c" 再变 "aXbYc"。
+        // 顺序反了会得到 "a--bYc"（单 `-` 先被换掉，`--` 就匹配不上了）。
+        let document = Document::parse_html("<p>a--b-c</p>");
+        assert_eq!(
+            evaluate_rule(&document, "p@text##-{2}##X##-##Y").expect("应求值成功"),
+            vec!["aXbYc"],
+            "多条替换按出现顺序生效"
+        );
+
+        // 顺序反过来（先 - 后 --）确实得到不同结果——证明"按序"不是巧合
+        assert_eq!(
+            evaluate_rule(&document, "p@text##-##Y##-{2}##X").expect("应求值成功"),
+            vec!["aYYbYc"],
+            "顺序不同结果不同"
+        );
+    }
+
+    #[test]
+    fn 无替换链时行为不变() {
+        let document = Document::parse_html("<p>x</p>");
+        assert_eq!(
+            evaluate_rule(&document, "p@text").expect("应求值成功"),
+            vec!["x"]
+        );
+        // 与主体入口等价
+        assert_eq!(
+            evaluate_rule(&document, "p@text").expect("应求值成功"),
+            evaluate_rule_subject(&document, "p@text").expect("应求值成功")
+        );
+    }
+
+    #[test]
+    fn 子树内的规则也支持替换链() {
+        let document = Document::parse_html(r#"<div class="book"><a href="/b/1">x</a></div>"#);
+        let book = tome_rule_css_first(&document, "div.book");
+        assert_eq!(
+            evaluate_rule_in(&book, r"a@href##^##https://y.com").expect("应求值成功"),
+            vec!["https://y.com/b/1"]
+        );
+    }
+
+    /// 取文档里第一个匹配的元素（测试辅助）。
+    fn tome_rule_css_first(document: &Document, selector: &str) -> crate::dom::NodeRef {
+        let compiled = crate::css::compile(selector).expect("选择器应可编译");
+        crate::css::select_in_document(document, &compiled)
+            .into_iter()
+            .next()
+            .expect("应至少命中一个元素")
     }
 
     #[test]

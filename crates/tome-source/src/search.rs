@@ -396,7 +396,7 @@ pub fn parse_search_result(source: &Source, html: &str) -> Result<Vec<SearchHit>
 
     let mut hits = Vec::with_capacity(book_nodes.len());
     for node in &book_nodes {
-        let name = evaluate_field_in(node, &rules, search_rule_keys::NAME).unwrap_or_default();
+        let name = evaluate_field_in(node, &rules, search_rule_keys::NAME)?.unwrap_or_default();
         // 书名为空的结果无法呈现，跳过——它是"选择器没命中"的典型表现，
         // 留在结果里会让用户看到一堆空条目。
         if name.trim().is_empty() {
@@ -404,7 +404,7 @@ pub fn parse_search_result(source: &Source, html: &str) -> Result<Vec<SearchHit>
         }
 
         let book_url =
-            evaluate_field_in(node, &rules, search_rule_keys::BOOK_URL).unwrap_or_default();
+            evaluate_field_in(node, &rules, search_rule_keys::BOOK_URL)?.unwrap_or_default();
         if book_url.trim().is_empty() {
             // 没有详情页地址的结果无法进入后续动作（详情/目录/正文全都
             // 以 `bookUrl` 为入口），故跳过并在调用方可见的层面体现为
@@ -414,20 +414,24 @@ pub fn parse_search_result(source: &Source, html: &str) -> Result<Vec<SearchHit>
 
         hits.push(SearchHit {
             name: name.trim().to_string(),
-            author: non_empty(evaluate_field_in(node, &rules, search_rule_keys::AUTHOR)),
-            cover_url: non_empty(evaluate_field_in(node, &rules, search_rule_keys::COVER_URL)),
-            intro: non_empty(evaluate_field_in(node, &rules, search_rule_keys::INTRO)),
-            kind: non_empty(evaluate_field_in(node, &rules, search_rule_keys::KIND)),
+            author: non_empty(evaluate_field_in(node, &rules, search_rule_keys::AUTHOR)?),
+            cover_url: non_empty(evaluate_field_in(
+                node,
+                &rules,
+                search_rule_keys::COVER_URL,
+            )?),
+            intro: non_empty(evaluate_field_in(node, &rules, search_rule_keys::INTRO)?),
+            kind: non_empty(evaluate_field_in(node, &rules, search_rule_keys::KIND)?),
             word_count: non_empty(evaluate_field_in(
                 node,
                 &rules,
                 search_rule_keys::WORD_COUNT,
-            )),
+            )?),
             last_chapter: non_empty(evaluate_field_in(
                 node,
                 &rules,
                 search_rule_keys::LAST_CHAPTER,
-            )),
+            )?),
             book_url: resolve_relative(&source.id, book_url.trim()),
         });
     }
@@ -443,12 +447,17 @@ fn evaluate_field_in(
     node: &tome_rule::dom::NodeRef,
     rules: &BTreeMap<String, String>,
     key: &str,
-) -> Option<String> {
-    let rule = rules.get(key)?;
-    let values = tome_rule::css_post::evaluate_rule_in(node, rule).ok()?;
+) -> Result<Option<String>, SourceError> {
+    let Some(rule) = rules.get(key) else {
+        // 规则没写是一个合法状态（作者省略了这个字段），返回 `None` 而非空串，
+        // 让调用方区分"没写规则"与"写了但没命中"。
+        return Ok(None);
+    };
+    let values = tome_rule::css_post::evaluate_rule_in(node, rule)
+        .map_err(|error| SourceError::rule_eval(&error, &format!("字段 `{key}`")))?;
     // 多值时取第一个：搜索结果的每个字段是单值（`@textNodes` 那种多值后缀
     // 在搜索规则里罕见，真出现时取首个与"每本书一个书名"的语义一致）。
-    values.into_iter().next()
+    Ok(values.into_iter().next())
 }
 
 /// 空串（或纯空白）归一为 `None`。
@@ -896,6 +905,32 @@ mod tests {
         let parsed = parse_sources(text).expect("应解析").sources.remove(0);
         let error = parse_search_result(&parsed.source, "<p>x</p>").expect_err("应报错");
         assert_eq!(error.to_error_kind(), ErrorKind::Rule);
+    }
+
+    #[test]
+    fn 含不支持能力的字段规则报结构化错误() {
+        // FR-006：`@js:` 属 S1-2，本阶段必须**报出来**而不是静默产出空值——
+        // "没有结果"与"能力不可用"的排查方向完全不同。
+        let text = r#"{
+          "bookSourceName": "含js字段源",
+          "bookSourceUrl": "https://x.com",
+          "searchUrl": "/s?q={{key}}",
+          "ruleSearch": "{\"bookList\":\"@css:li\",\"name\":\"@js:java.ajax('x')\",\"bookUrl\":\"@css:a@href\"}"
+        }"#;
+        let parsed = parse_sources(text).expect("应解析").sources.remove(0);
+        let html = r#"<ul><li><a href="/b">x</a></li></ul>"#;
+        let error = parse_search_result(&parsed.source, html).expect_err("应报错");
+        let kind = error.to_error_kind();
+        assert!(
+            matches!(kind, ErrorKind::UnsupportedCapability { .. }),
+            "应是不支持能力类，实际 {kind:?}"
+        );
+        match kind {
+            ErrorKind::UnsupportedCapability { capability } => {
+                assert_eq!(capability.capability_id(), "js");
+            }
+            other => panic!("应为能力错误，实际 {other:?}"),
+        }
     }
 
     #[test]

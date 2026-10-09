@@ -28,3 +28,22 @@ type-complexity-threshold = 300
 # 例外：闭包参数与循环变量由 Clippy 自身的 allow-* 系列单独豁免，
 # 不在此放宽，以免把"故意的短名"也放过去。
 min-ident-chars-threshold = 3
+
+# ---------------------------------------------------------------------------
+# 测试代码豁免（AGENTS.md「禁止**生产路径上**的 unwrap()/expect()/panic!()」）
+# ---------------------------------------------------------------------------
+#
+# 这三项让 Clippy 只在**非测试**目标上报告 unwrap/expect/panic。
+#
+# 为什么必须有：测试里断言失败**本就应当** panic——那是测试框架报告失败的
+# 唯一机制。若测试也被禁，写出的就不是测试而是"永不失败的测试"。
+#
+# 为什么放在这里而不在 [workspace.lints]：后者是 crate 级设置，无法区分
+# 测试与生产目标；本文件的这三项是 Clippy 为此提供的标准机制。
+#
+# 覆盖范围：`#[cfg(test)]` 模块与 `tests/` 目录下的集成测试。**不覆盖**
+# `#[test]` 之外的辅助函数（如 tests/ 里的公共夹具）——若夹具需要 unwrap，
+# 应改用 `#[expect(...)]` 并注明理由。
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

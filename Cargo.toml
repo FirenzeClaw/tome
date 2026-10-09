@@ -46,8 +46,14 @@ unsafe_code = "warn"
 
 [workspace.lints.clippy]
 # 与 AGENTS.md「禁止生产路径上的 unwrap()/expect()/panic!()」对齐。
-# 取 warn 而非 deny：Phase 2 起测试代码允许使用 unwrap，deny 会让测试无法编写；
-# CI 侧统一用 `cargo clippy -- -D warnings` 把 warn 升级为错误，效果等价且更灵活。
+#
+# 注意**这里不能豁免测试**：`[workspace.lints]` 是 crate 级设置，对生产代码与
+# 测试代码一视同仁。而 AGENTS.md 禁的是"**生产路径上**的 unwrap/expect/panic"，
+# 测试里断言失败本就该 panic（否则测试框架无从报告失败）。
+#
+# 实现该区分的是 `.clippy.toml` 的 `allow-unwrap-in-tests` / `allow-expect-in-tests`
+# / `allow-panic-in-tests`——Clipy 据此只在**非测试**目标上报告这三条 lint。
+# 故此处保持 warn，测试豁免交给 clippy.toml，单一职责、不会两处打架。
 unwrap_used = "warn"
 expect_used = "warn"
 panic = "warn"

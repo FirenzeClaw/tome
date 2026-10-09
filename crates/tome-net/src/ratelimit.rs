@@ -149,6 +149,40 @@ impl RateLimiter {
     }
 
     /// 查询某 key 当前生效的间隔。不登记 key。
+    /// 应用**书源声明的**请求间隔（`RequestSpec.request_interval_ms`，R2）。
+    ///
+    /// ## 三态语义（与 `RequestSpec` 的字段文档一一对应）
+    ///
+    /// | 传入 | 含义 | 行为 |
+    /// |---|---|---|
+    /// | `Some(interval)` | 书源显式声明 | 覆盖该 key 的生效间隔（含 `Some(0)`） |
+    /// | `None` | 书源未声明 | 不动任何状态，回落到该 key 的配置值或默认值 |
+    ///
+    /// ## 为什么书源声明优先于本机默认
+    ///
+    /// 声明是书源作者**针对该站点**的明确要求（站点风控写在它的文档里，
+    /// 作者据此填数），而默认值只是本机的通用兜底。把默认值放在声明之上
+    /// 会让"作者按要求填了 3 秒"被本机的 1 秒静默覆盖——那是引擎在替作者
+    /// 决定，且方向是"更激进"，与宪法原则 V"不得绕过限速"的取向相反。
+    ///
+    /// 声明**更短**时同样生效：若那构成"绕过限速"，责任在书源而非引擎——
+    /// 引擎的职责是"尊重声明的间隔"，不是"审查声明是否够保守"。
+    ///
+    /// 标 `[DONE]`：这是 R2 的落点，被 [`Self::plan`] 消费。
+    pub fn set_declared_interval(&self, key: &str, interval: Option<Duration>) {
+        // `None` 不动状态：语义是"书源没说话"，而非"书源要求零间隔"。
+        // 若这里把 None 当作零去写，会让"未声明的 key"意外获得零间隔，
+        // 从而绕过本机配置的默认限速。
+        let Some(interval) = interval else {
+            return;
+        };
+        self.set_interval(key, interval);
+    }
+
+    /// 该 key 当前生效的间隔。
+    ///
+    /// 解析次序：该 key 的显式设置（可能来自 [`Self::set_interval`] 或
+    /// [`Self::set_declared_interval`]）→ 默认间隔。
     pub fn interval_for(&self, key: &str) -> Duration {
         let state = self.lock_state();
         state
@@ -386,6 +420,88 @@ mod tests {
         assert!(
             elapsed < Duration::from_millis(150),
             "交错耗时 {elapsed:?} 表明两个源被串成了一列"
+        );
+    }
+
+    /// 已有 key 的**请求级**间隔覆盖：书源声明的间隔优先于默认值。
+    #[test]
+    fn spec_declared_interval_overrides_default() {
+        // R2（PM 仲裁）：`RequestSpec.request_interval_ms` 是书源可声明的请求间隔。
+        // 语义：**书源声明优先于限速器的默认值**——声明是书源作者对该站点的
+        // 明确要求（站点风控写在文档里，作者据此填），默认值只是本机的通用兜底。
+        let limiter = RateLimiter::with_default_interval(Duration::ZERO);
+        limiter.set_interval("src", Duration::from_millis(50));
+
+        // 声明更长的间隔：应生效
+        limiter.set_declared_interval("src", Some(Duration::from_millis(80)));
+        assert_eq!(
+            limiter.interval_for("src"),
+            Duration::from_millis(80),
+            "书源声明的间隔应覆盖已配置值"
+        );
+
+        // 声明更短的间隔：同样应生效（书源知道自己在做什么；
+        // 若这正是"绕过限速"的场景，责任在书源而非引擎——
+        // 引擎的职责是"尊重声明的间隔"，见宪法原则 V 的原文）
+        limiter.set_declared_interval("src", Some(Duration::from_millis(20)));
+        assert_eq!(limiter.interval_for("src"), Duration::from_millis(20));
+    }
+
+    /// `None` 表示"书源未声明"，此时应回落到既有的按 key 配置或默认值。
+    #[test]
+    fn undeclared_interval_falls_back_to_configured_default() {
+        let limiter = RateLimiter::with_default_interval(Duration::from_millis(30));
+        limiter.set_interval("configured", Duration::from_millis(70));
+
+        // 未声明：用该 key 已配置的间隔
+        limiter.set_declared_interval("configured", None);
+        assert_eq!(
+            limiter.interval_for("configured"),
+            Duration::from_millis(70)
+        );
+
+        // 未声明且该 key 无配置：用默认值
+        limiter.set_declared_interval("fresh", None);
+        assert_eq!(limiter.interval_for("fresh"), Duration::from_millis(30));
+    }
+
+    /// `Some(0)` 与 `None` 语义不同：前者是"显式声明不要间隔"，
+    /// 应覆盖默认值（否则书源无法表达"这个站点不需要间隔"）。
+    #[test]
+    fn explicit_zero_interval_overrides_default() {
+        let limiter = RateLimiter::with_default_interval(Duration::from_millis(100));
+        limiter.set_declared_interval("no-delay", Some(Duration::ZERO));
+        assert_eq!(
+            limiter.interval_for("no-delay"),
+            Duration::ZERO,
+            r#"Some(0) 是显式声明"不要间隔"，应覆盖默认值"#
+        );
+    }
+
+    /// 声明只影响自己的 key。
+    #[test]
+    fn declared_interval_is_per_key() {
+        let limiter = RateLimiter::new();
+        limiter.set_declared_interval("slow", Some(Duration::from_millis(100)));
+        limiter.set_declared_interval("fast", Some(Duration::from_millis(5)));
+
+        assert_eq!(limiter.interval_for("slow"), Duration::from_millis(100));
+        assert_eq!(limiter.interval_for("fast"), Duration::from_millis(5));
+        // 未声明的 key 不受影响
+        assert_eq!(limiter.interval_for("untouched"), Duration::ZERO);
+    }
+
+    /// 声明对**后续**的 `plan` 立即生效，且不影响已排定的时隙序列的连续性。
+    #[test]
+    fn declared_interval_takes_effect_for_subsequent_planning() {
+        let limiter = RateLimiter::new();
+        limiter.set_declared_interval("src", Some(Duration::from_millis(30)));
+        let first = limiter.plan("src");
+        let second = limiter.plan("src");
+        assert!(
+            second.duration_since(first) >= Duration::from_millis(30),
+            "相邻时隙间隔应不少于声明的 30ms，实际 {:?}",
+            second.duration_since(first)
         );
     }
 

@@ -322,10 +322,14 @@ fn 能力错误可被识别并用于降级() {
 // T012：RequestSpec / Response 与宿主 trait
 // ---------------------------------------------------------------------------
 
-/// FR-008：`RequestSpec` 必须含**全部**九个维度。
+/// FR-008：`RequestSpec` 必须含**全部**请求定制维度。
 ///
 /// 这条测试的价值在于：任一字段被删掉，此处**编译失败**——
 /// 比断言某个 getter 更早、更硬。
+///
+/// （`request_interval_ms` 是 2026-10-10 PM 仲裁 R2 补入的——FR-008 的
+/// "请求间隔"原先只有 `rate_limit_key` 表达"按源限速"，没有表达
+/// "该源要求多大间隔"的字段。）
 #[test]
 fn 请求规格含_fr008_全字段() {
     let spec = RequestSpec {
@@ -340,6 +344,7 @@ fn 请求规格含_fr008_全字段() {
         charset: Some("GBK".to_owned()),
         proxy_override: Some(ProxyOverride::Direct),
         rate_limit_key: "source-a".to_owned(),
+        request_interval_ms: Some(2_000),
         timeout_ms: 15_000,
         retry: RetryPolicy::new(2, 500),
     };
@@ -353,6 +358,7 @@ fn 请求规格含_fr008_全字段() {
     assert_eq!(spec.charset.as_deref(), Some("GBK"));
     assert_eq!(spec.proxy_override, Some(ProxyOverride::Direct));
     assert_eq!(spec.rate_limit_key, "source-a");
+    assert_eq!(spec.request_interval_ms, Some(2_000));
     assert_eq!(spec.timeout_ms, 15_000);
     assert_eq!(spec.retry.max_retries, 2);
     assert_eq!(spec.retry.backoff_ms, 500);

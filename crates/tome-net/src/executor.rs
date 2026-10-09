@@ -178,6 +178,11 @@ impl RequestExecutor {
         }
 
         // 2. 限速等待（按 rate_limit_key 独立）。
+        //
+        // 先应用书源声明的间隔（R2），再预约时隙——顺序不可换：
+        // 反过来会让**本次**请求用的是旧间隔，声明的效果延后一次才生效。
+        self.limiter
+            .set_declared_interval(&spec.rate_limit_key, declared_interval(spec));
         self.wait_for_rate_limit(&spec.rate_limit_key).await;
 
         // 3. 代理选择（决定用哪个客户端/连接池）。
@@ -402,6 +407,16 @@ impl NetHost for RequestExecutor {
 /// 从 `Result<Result<T, E>, E>` 里取出内层结果（两层的错误类型相同，故可直接合并）。
 fn identity<T>(outcome: Result<T, NetError>) -> Result<T, NetError> {
     outcome
+}
+
+/// 取 `RequestSpec` 声明的请求间隔（FR-008，R2 修订新增的字段）。
+///
+/// `None` 表示书源未声明——此时**不返回 `Some(ZERO)`**，否则"未声明"
+/// 会被限速器当成"显式要求零间隔"，从而覆盖本机配置的默认限速。
+/// 这个区别是字段的三态语义，见 [`RequestSpec::request_interval_ms`] 的文档。
+fn declared_interval(spec: &RequestSpec) -> Option<Duration> {
+    spec.request_interval_ms
+        .map(|millis| Duration::from_millis(u64::from(millis)))
 }
 
 /// 给响应补上 `detected_charset`（FR-009）。

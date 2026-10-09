@@ -199,6 +199,15 @@ pub struct RequestSpec {
     pub proxy_override: Option<ProxyOverride>,
     /// 限速键：同键共享一个令牌桶，不同键互不影响（FR-008）
     pub rate_limit_key: String,
+    /// 请求间隔：同 `rate_limit_key` 下两次请求之间的**最小**间隔毫秒数。
+    ///
+    /// `None` 表示不额外约束（由限速器的默认间隔决定，见 `tome-net` 的
+    /// [`RateLimiter`]）。`Some(0)` 与 `None` 语义相近但不同：
+    /// `Some(0)` 是书源**显式声明**"不要间隔"，`None` 是"未声明"——
+    /// 二者在"限速器配了默认间隔"时的行为不同（前者应覆盖默认值）。
+    ///
+    /// FR-008 把"请求间隔"列为书源可声明的请求定制项之一。
+    pub request_interval_ms: Option<u32>,
     /// 超时毫秒数
     pub timeout_ms: u64,
     /// 重试策略
@@ -219,6 +228,9 @@ impl RequestSpec {
             charset: None,
             proxy_override: None,
             rate_limit_key: rate_limit_key.into(),
+            // 默认"未声明"而非 Some(0)：未声明与显式声明"不要间隔"在
+            // 限速器配了默认间隔时行为不同（见字段文档）。
+            request_interval_ms: None,
             timeout_ms: DEFAULT_TIMEOUT_MS,
             retry: RetryPolicy::NONE,
         }

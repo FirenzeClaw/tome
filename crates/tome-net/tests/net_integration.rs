@@ -540,6 +540,82 @@ fn rate_limit_does_not_delay_other_sources() {
 }
 
 // ---------------------------------------------------------------------------
+// R2（PM 仲裁）：RequestSpec.request_interval_ms 在真实执行路径上生效
+// ---------------------------------------------------------------------------
+
+/// 书源声明 `request_interval_ms` 后，同源相邻请求必须被拉开到该间隔。
+///
+/// 这是 R2 的端到端验收点：字段不是"存了就好"，而是执行器真的按它限速。
+#[test]
+fn spec_declared_interval_is_honored_on_the_execution_path() {
+    let server = TestServer::start(vec![Reply::text("ok")]);
+
+    let declared = 60u32;
+    // 限速器本身**不配置任何间隔**——一切来自 RequestSpec 的声明。
+    let executor = RequestExecutor::new().expect("应能构造");
+
+    let mut spec = RequestSpec::get(server.url("/"), "declared-src");
+    spec.request_interval_ms = Some(declared);
+
+    let started = Instant::now();
+    for _ in 0..3 {
+        let _ = run(executor.execute_once(&spec)).expect("应成功");
+    }
+    let elapsed = started.elapsed();
+
+    assert!(
+        elapsed >= Duration::from_millis(u64::from(declared)) * 2,
+        "3 次请求耗时 {elapsed:?} 小于 2×{declared}ms，声明书的间隔未生效"
+    );
+    assert_eq!(server.request_count(), 3);
+}
+
+/// 未声明（`None`）时不引入任何额外等待——回落到限速器的默认值（此处为零）。
+#[test]
+fn undeclared_interval_does_not_throttle() {
+    let server = TestServer::start(vec![Reply::text("ok")]);
+    let executor = RequestExecutor::new().expect("应能构造");
+
+    let spec = RequestSpec::get(server.url("/"), "undeclared-src");
+    assert_eq!(spec.request_interval_ms, None, "默认应为未声明");
+
+    let started = Instant::now();
+    for _ in 0..5 {
+        let _ = run(executor.execute_once(&spec)).expect("应成功");
+    }
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < Duration::from_millis(200),
+        "未声明间隔的源耗时 {elapsed:?}，不该被限速"
+    );
+}
+
+/// 声明只影响自己的 key：慢源不拖累快源。
+#[test]
+fn declared_interval_does_not_leak_across_sources() {
+    let server = TestServer::start(vec![Reply::text("ok")]);
+    let executor = RequestExecutor::new().expect("应能构造");
+
+    let mut slow = RequestSpec::get(server.url("/"), "slow-src");
+    slow.request_interval_ms = Some(300);
+
+    // 先让慢源处于"需要等待"的状态。
+    let _ = run(executor.execute_once(&slow)).expect("应成功");
+
+    // 快源（未声明）连续 3 次应立即完成。
+    let started = Instant::now();
+    for _ in 0..3 {
+        let fast = RequestSpec::get(server.url("/"), "fast-src");
+        let _ = run(executor.execute_once(&fast)).expect("应成功");
+    }
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < Duration::from_millis(100),
+        "未声明的源耗时 {elapsed:?}，受慢源 300ms 间隔影响"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // T019：回放（离线）
 // ---------------------------------------------------------------------------
 

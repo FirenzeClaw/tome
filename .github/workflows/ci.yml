@@ -1,0 +1,191 @@
+name: CI
+
+# 三平台 CI（tasks.md T004/T005）。触发范围只覆盖真正影响构建的事件，
+# 避免无意义的 runner 消耗。
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # 允许手动重跑（排查 flaky 或验证环境变化）
+  workflow_dispatch:
+
+# 同一分支的新推送取消上一次未完成的运行——CI 的价值在于最新的那次结果，
+# 让排队中的旧运行跑完只是浪费 runner。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# 最小权限：CI 只需读仓库内容。体积 artifact 用 actions/upload-artifact
+# 上传，不需要写 token 权限。
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # 让编译输出携带更多诊断信息，便于排查 CI 独有失败
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Lint：与平台无关，只跑一次（放 ubuntu 上最省额度）。
+  # 拆成独立 job 是为了让"格式/静态检查失败"与"平台构建失败"在 CI 界面上
+  # 一眼可辨，而不是埋在同一堆日志里。
+  # ---------------------------------------------------------------------------
+  lint:
+    name: fmt + clippy + 依赖守卫
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装工具链（含 rustfmt/clippy 组件）
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: 缓存 cargo 构建产物
+        uses: Swatinem/rust-cache@v2
+
+      # 格式化检查独立成步：失败时无需再等 clippy 跑完
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # 守卫脚本自身的有效性先自检。理由：守卫失效是静默的，
+      # 若它因正则/输出格式变化而"永远通过"，CI 会一直绿着却毫无防护。
+      # 故先证明守卫能抓到违规，再用它检查真实依赖。
+      - name: 守卫脚本自检（证明守卫有效）
+        run: bash scripts/check-rquickjs-features.sh --self-test
+
+      - name: rquickjs 依赖约束守卫
+        run: bash scripts/check-rquickjs-features.sh
+
+  # ---------------------------------------------------------------------------
+  # 三平台构建 + 测试 + 体积基线
+  # ---------------------------------------------------------------------------
+  build:
+    name: build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # 一个平台失败不应取消另外两个——同时看到三平台的真实结果，
+      # 比省几个 runner 分钟更重要（三平台一致性是本项目的承诺）。
+      fail-fast: false
+      matrix:
+        include:
+          # Windows 用 gnu 而非 msvc：rquickjs 对 Windows-msvc 标 experimental
+          # （research.md R1 缓解 3），且项目工具链为 stable-gnu + WinLibs MinGW。
+          - name: windows-gnu
+            os: windows-latest
+            target: x86_64-pc-windows-gnu
+          - name: macos
+            os: macos-latest
+            target: aarch64-apple-darwin
+          - name: linux
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 显式指定本平台工具链。原因：仓库根的 rust-toolchain.toml 钉的是
+      # stable-x86_64-pc-windows-gnu（为钉住 Windows 开发者的 ABI 选择），
+      # 该三元组在 macos/ubuntu runner 上不存在，不覆盖会让 rustup 报错。
+      # RUSTUP_TOOLCHAIN 优先级高于 toolchain 文件，是官方的覆盖机制。
+      - name: 安装工具链（${{ matrix.target }}）
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+        env:
+          RUSTUP_TOOLCHAIN: stable-${{ matrix.target }}
+
+      - name: 缓存 cargo 构建产物
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.name }}
+
+      - name: cargo build
+        run: cargo build --workspace --all-targets --target ${{ matrix.target }}
+        env:
+          RUSTUP_TOOLCHAIN: stable-${{ matrix.target }}
+
+      - name: cargo test
+        run: cargo test --workspace --target ${{ matrix.target }}
+        env:
+          RUSTUP_TOOLCHAIN: stable-${{ matrix.target }}
+
+      # 依赖约束在三平台各查一次：feature 解析可能因目标平台的条件依赖
+      # （[target.'cfg(...)'.dependencies]）而不同，只在 ubuntu 查会漏掉
+      # Windows/macOS 特有的 feature 引入路径。
+      - name: rquickjs 依赖约束守卫（${{ matrix.name }}）
+        shell: bash
+        run: bash scripts/check-rquickjs-features.sh
+        env:
+          RUSTUP_TOOLCHAIN: stable-${{ matrix.target }}
+
+      # -----------------------------------------------------------------------
+      # 体积基线记录（T004 验收项）
+      #
+      # 为什么现在就记录：体积纪律要求"不引入与功能无关的体积膨胀"，
+      # 而膨胀通常在某个不起眼的提交里悄悄发生。没有基线就没有"变大了"的
+      # 判定依据。骨架阶段产物体积虽小且尚无二进制，但基线要**从第一天开始**，
+      # 否则第一次可比较的数据点要等到很久以后。
+      # -----------------------------------------------------------------------
+      - name: 记录体积基线
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p size-report
+          {
+            echo "# 产物体积基线（${{ matrix.name }}）"
+            echo
+            echo "- commit: \`${GITHUB_SHA}\`"
+            echo "- target: \`${{ matrix.target }}\`"
+            echo "- 生成时间: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            echo
+            echo '```'
+          } > size-report/size-${{ matrix.name }}.txt
+
+          # 骨架阶段尚无二进制目标（tome-cli 只有 lib.rs，main 在 Phase 2 加入），
+          # 故此处统计已产出的可执行文件；没有时明确记录"本阶段无二进制"，
+          # 而不是留空——留空会让后续无法区分"没有产物"和"步骤失败"。
+          found=0
+          target_dir="target/${{ matrix.target }}/release"
+          if [ -d "$target_dir" ]; then
+            while IFS= read -r artifact; do
+              [ -z "$artifact" ] && continue
+              found=1
+              size_bytes=$(wc -c < "$artifact")
+              size_kib=$(( size_bytes / 1024 ))
+              printf '%s  %s bytes (%s KiB)\n' "$artifact" "$size_bytes" "$size_kib"
+            done < <(find "$target_dir" -maxdepth 1 -type f \( -name '*.exe' -o -perm -u+x \) ! -name '*.d' ! -name '*.rlib' 2>/dev/null | sort)
+          fi
+
+          if [ "$found" -eq 0 ]; then
+            echo "（骨架阶段：本平台暂无二进制产物；二进制目标在 Phase 2 随 tome-cli 的 main 引入）"
+          fi
+
+          echo '```' >> size-report/size-${{ matrix.name }}.txt
+          echo "--- 体积基线内容 ---"
+          cat size-report/size-${{ matrix.name }}.txt
+
+      - name: 上传体积基线 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: size-baseline-${{ matrix.name }}
+          path: size-report/
+          # 体积记录是长期观测数据，不应因 CI 重跑而互相覆盖
+          overwrite: false
+          retention-days: 90
+
+      # 仅在失败时上传：成功路径无需留存
+      - name: 失败时上传 debug 日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-logs-${{ matrix.name }}
+          path: |
+            target/**/*.log
+          if-no-files-found: ignore
+          retention-days: 7

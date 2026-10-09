@@ -1733,6 +1733,7 @@ dependencies = [
  "cssparser",
  "fancy-regex",
  "html5ever",
+ "precomputed-hash",
  "regex",
  "selectors",
  "thiserror",

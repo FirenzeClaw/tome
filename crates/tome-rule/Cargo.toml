@@ -16,6 +16,9 @@ html5ever = "0.40.1"
 # servo selectors + cssparser 跑在自建 DOM 上（T021）
 selectors = "0.41.0"
 cssparser = "0.38.0"
+# selectors 的 SelectorImpl 要求标识符类型实现 PrecomputedHash（Bloom 过滤器用）。
+# 这是 selectors 自身的公开依赖，不是新引入的能力。
+precomputed-hash = "0.1.1"
 
 # 双正则引擎（T024 / research R5）：默认 regex 线性快路径，含 fancy 特性路由 fancy-regex
 regex = "1.13.1"

@@ -35,6 +35,11 @@ jobs:
   lint:
     name: fmt + clippy + 依赖守卫
     runs-on: ubuntu-latest
+    env:
+      # 覆盖仓库根 rust-toolchain.toml 钉的 stable-x86_64-pc-windows-gnu
+      # （该三元组在 ubuntu runner 上不存在，不覆盖则 rustup 报错——
+      # build/s0-spike job 已用同款 RUSTUP_TOOLCHAIN 机制，见各自步骤注释）
+      RUSTUP_TOOLCHAIN: stable-x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v4
 

@@ -74,7 +74,8 @@ add_book / remove_book / update_book
 get_progress(book) / save_progress(book, anchor)
 bookmarks / highlights / memos (CRUD, 字符区间)
 rules (replace/highlight/dict/toc CRUD)
-import_sources(file | url | text) → Result<ImportReport>   -- 三渠道（FR-001）
+import_sources(channel: SourceImportChannel) → Result<ImportReport>   -- 三渠道 file|url|text（FR-001）；url 渠道的拉取与解析在接缝实现侧完成（A2 唯一发请求处），不得退化为"上层解析好再传 Source"
+import_parsed_sources(sources: &[Source]) → Result<ImportReport>      -- 已解析书源的快路径落库；与 import_sources 共用"同 id 即更新"语义
 export_all() → Result<BackupJson>                           -- 全部阅读数据（FR-033）
 import_backup(json) → Result<ImportReport>
 read_records(book, range) → Result<Vec<ReadRecord>>         -- FR-026b

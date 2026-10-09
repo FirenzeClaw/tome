@@ -1,4 +1,4 @@
-//! `tome` 二进制入口（tasks.md T028 / `contracts/cli.md`）。
+//! [DONE] `tome` 二进制入口（tasks.md T028 / `contracts/cli.md`）。
 //!
 //! # 薄壳：一切逻辑在库侧
 //!

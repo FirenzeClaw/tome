@@ -107,7 +107,8 @@ pub fn run_child_case(case: &str) -> i32 {
         Err(SandboxError::Interrupted { .. })
         | Err(SandboxError::Script { .. })
         | Err(SandboxError::MemoryLimit { .. })
-        | Err(SandboxError::Poisoned { .. }) => {
+        | Err(SandboxError::Poisoned { .. })
+        | Err(SandboxError::UnsupportedCapability { .. }) => {
             // 期望路径：沙箱把失控脚本收成了一个**错误值**，进程完好。
             //
             // 再跑一次以证明沙箱对象状态仍然自洽（未污染时可用、

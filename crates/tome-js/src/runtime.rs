@@ -208,6 +208,22 @@ pub enum SandboxError {
         /// 生效的上限
         limit: usize,
     },
+    /// 脚本使用了系统**架构上不提供**的能力（FR-006）。
+    ///
+    /// ## 为什么它是一个独立的变体而不是 `Script` 的一种
+    ///
+    /// FR-006 要求它是**可编程信号**（"此路不通，请改道"）而非普通失败。
+    /// 书源的 `try/catch` 降级逻辑靠能力标识选备选路径——若把它压进
+    /// `Script { message }`，标识就变成了消息文本里的一段字符串，
+    /// 书源只能靠字符串匹配来判断（而措辞一改就失效）。
+    ///
+    /// 这个变体的存在让"能力错误"在 Rust 侧也是**有载荷的结构化数据**，
+    /// 从而能一路传到 CLI 的退出码（3）与书源的降级分支。
+    #[error("不支持的能力：{capability}")]
+    UnsupportedCapability {
+        /// 能力标识（书源生态的通用叫法，如 `webView`）
+        capability: String,
+    },
     /// 沙箱已废弃（曾触发 OOM，见 [`Sandbox::is_poisoned`]）。
     #[error("沙箱已废弃，不得复用（曾触发内存耗尽）")]
     Poisoned {
@@ -237,6 +253,13 @@ impl SandboxError {
             | Self::Script { .. }
             | Self::MemoryLimit { .. }
             | Self::Poisoned { .. } => tome_core::ErrorKind::Rule,
+            // 能力错误保它的分类与载荷（FR-006 的关键：上层据此给退出码 3
+            // 或让书源降级，而不是当成普通规则错）
+            Self::UnsupportedCapability { capability } => {
+                tome_core::ErrorKind::unsupported_capability(tome_core::ErrorCapability::new(
+                    capability.clone(),
+                ))
+            }
             Self::Limits(_) | Self::Setup { .. } => tome_core::ErrorKind::Configuration,
         }
     }
@@ -655,13 +678,33 @@ impl Sandbox {
     /// 成立即判为 [`SandboxError::MemoryLimit`]。这比只信消息文本稳健——
     /// 文本会随 QuickJS 版本变化，而内存用量不会。
     fn classify_exception(&self, collected: Collected) -> SandboxError {
-        let Collected::JsException { name, message } = collected else {
+        let Collected::JsException {
+            name,
+            message,
+            capability,
+        } = collected
+        else {
             // 引擎级错误（非 JS 异常）：没有可分类的 JS 侧信息。
             let Collected::Engine(message) = collected else {
                 unreachable!("`Collected` 只有两个变体，上面已排除其一")
             };
             return SandboxError::Script { message };
         };
+
+        // 判据零（优先）：能力错误（FR-006）
+        //
+        // ## 为什么它必须最先判
+        //
+        // 能力错误的语义是"此路不通，请改道"——那些书源的 `try/catch`
+        // 降级逻辑**依赖这个标识**来选备选路径。若它被后面的判据
+        // （如"消息里含 out of memory"）抢先归类，标识就丢了，
+        // 而书源会据此走错分支。
+        //
+        // 能力标识存在即说明这是宿主函数显式标的能力错误（见
+        // `Collected::JsException::capability` 的说明），无需再判其它。
+        if let Some(capability) = capability {
+            return SandboxError::UnsupportedCapability { capability };
+        }
 
         // 判据一：QuickJS 的中断字面量（见 `JS_ThrowInterrupted`）
         if name == "InternalError" && message.contains("interrupted") {
@@ -786,12 +829,24 @@ impl InterruptState {
 /// 借用释放之后。
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Collected {
-    /// JS 侧抛出的异常（已读出 `name` 与 `message`）
+    /// JS 侧抛出的异常（已读出 `name` / `message` / `capability`）
     JsException {
         /// 异常的 `name`（`TypeError` / `InternalError` …；非 Error 对象时为空）
         name: String,
         /// 可读消息
         message: String,
+        /// 能力标识（FR-006 的载荷）。
+        ///
+        /// `Some(_)` 表示这是"不支持的能力"信号而非普通失败——书源的
+        /// `try/catch` 靠它判断该降级还是该重试（见 `tome_js::JsError`）。
+        ///
+        /// ## 为什么必须在这里读出来
+        ///
+        /// 能力错误在 JS 侧是**异常对象的属性**（`e.capability`），
+        /// 而异常经过沙箱边界后变成 Rust 的结构化错误。若不在这道边界上
+        /// 读它，标识就丢了——表现是"能力错误被压成一个普通的规则错"，
+        /// 而书源的降级逻辑从此失效（FR-006 名存实亡）。
+        capability: Option<String>,
     },
     /// 引擎级错误（非 JS 异常）
     Engine(String),
@@ -822,7 +877,30 @@ fn collect_exception<'js>(ctx: &Ctx<'js>) -> Collected {
         })
         .unwrap_or_else(|| "<无法读取的异常值>".to_string());
 
-    Collected::JsException { name, message }
+    // ## 能力标识必须在这里读出来（FR-006 的载荷）
+    //
+    // 宿主函数抛的能力错误带 `capability` 属性（见 `crate::bridge`）。
+    // 它在 JS 侧是异常对象的属性，而**过了这道边界就变成 Rust 的结构化
+    // 错误**——不在这里读，标识就永久丢失，书源的降级逻辑随之失效。
+    //
+    // 只有显式标了 `isUnsupportedCapability` 的异常才算能力错误：
+    // 普通异常也可能恰好带一个叫 `capability` 的属性（书源自己写的），
+    // 仅凭属性名判定会把它们误当能力错误。
+    let capability = exception
+        .as_object()
+        .filter(|object| {
+            object
+                .get::<_, bool>("isUnsupportedCapability")
+                .unwrap_or(false)
+        })
+        .and_then(|object| object.get::<_, String>("capability").ok())
+        .filter(|text| !text.is_empty());
+
+    Collected::JsException {
+        name,
+        message,
+        capability,
+    }
 }
 
 /// 把一个 JS 值转成与借期无关的 [`JsValue`]。

@@ -98,6 +98,20 @@ pub enum Command {
         /// 搜索关键词
         keyword: String,
     },
+    /// `run <source-id> --action <search|info|toc|content> [--input <s>]`
+    ///
+    /// `contracts/cli.md` 定义的通用执行入口。S1-2 阶段实现 `search`
+    /// （与 `search` 子命令等价，但走 `--action` 形态以便脚本化），
+    /// 其余动作属后续切片（它们的规则求值路径相同，但需要详情/目录/
+    /// 正文的 DTO 映射，那在 S1-1 未落地）。
+    Run {
+        /// 书源 id
+        source_id: String,
+        /// 动作（`search` / `info` / `toc` / `content`）
+        action: String,
+        /// 动作的输入（`search` 时是关键词）
+        input: Option<String>,
+    },
 }
 
 /// 全局选项。
@@ -140,6 +154,8 @@ pub fn parse(args: &[String]) -> ParseOutcome {
     let mut url: Option<String> = None;
     let mut stdin = false;
     let mut source_file: Option<PathBuf> = None;
+    let mut action: Option<String> = None;
+    let mut input: Option<String> = None;
 
     // ## 迭代协议：每个分支返回"消费了几个参数"，循环统一推进
     //
@@ -206,6 +222,22 @@ pub fn parse(args: &[String]) -> ParseOutcome {
             "--stdin" => {
                 stdin = true;
                 1
+            }
+            "--action" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value.as_str(),
+                    None => return ParseOutcome::Usage("--action 需要一个值".to_string()),
+                };
+                action = Some(value.to_string());
+                2
+            }
+            "--input" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value.as_str(),
+                    None => return ParseOutcome::Usage("--input 需要一个值".to_string()),
+                };
+                input = Some(value.to_string());
+                2
             }
             "--source-file" => {
                 let value = match args.get(index + 1) {
@@ -313,9 +345,27 @@ pub fn parse(args: &[String]) -> ParseOutcome {
                 }
             }
         }
+        "run" => {
+            let Some(source_id) = rest.first() else {
+                return ParseOutcome::Usage(
+                    "run 需要 <source-id>（用法：run <source-id> --action search --input <关键词>）"
+                        .to_string(),
+                );
+            };
+            let Some(action) = action else {
+                return ParseOutcome::Usage(
+                    "run 需要 --action <search|info|toc|content>".to_string(),
+                );
+            };
+            Command::Run {
+                source_id: source_id.clone(),
+                action,
+                input,
+            }
+        }
         other => {
             return ParseOutcome::Usage(format!(
-                "未知子命令 `{other}`（本切片只实现 source import 与 search）"
+                "未知子命令 `{other}`（本切片实现 source import / search / run）"
             ));
         }
     };
@@ -361,6 +411,7 @@ pub fn help_text() -> String {
         "  tome source import <file> [--url <u>] [--stdin]   导入书源（三渠道）",
         "  tome search <source-id> <keyword>                  按书源搜索",
         "  tome search --source-file <f> <keyword>            用临时书源文件搜索",
+        "  tome run <source-id> --action <a> [--input <s>]     通用执行（--action search）",
         "",
         "全局选项：",
         "  --format json|human    输出格式（默认 json）",

@@ -14,7 +14,7 @@
 
 use std::io::Write;
 
-use tome_cli::commands::run;
+use tome_cli::commands::run_with_js;
 use tome_cli::flags::{parse, ParseOutcome};
 
 fn main() {
@@ -51,8 +51,21 @@ fn dispatch(args: &[String]) -> i32 {
                 }
             };
 
+            // 组合根：把执行器以 `Arc` 形式一并交给 JS 沙箱
+            // （含 JS 的书源需要把宿主能力传进沙箱，而 `&dyn NetHost`
+            // 借不出 `Arc`——见 `run_with_js` 的说明）。
+            let shared: std::sync::Arc<std::sync::Arc<dyn tome_core::NetHost>> =
+                std::sync::Arc::new(std::sync::Arc::new(executor));
+            let executor_ref: &dyn tome_core::NetHost = shared.as_ref().as_ref();
+
             let mut stdin = std::io::stdin().lock();
-            let outcome = run(&options, &command, &executor, &mut stdin);
+            let outcome = run_with_js(
+                &options,
+                &command,
+                executor_ref,
+                Some(shared.as_ref().clone()),
+                &mut stdin,
+            );
 
             if !outcome.stdout.is_empty() {
                 print!("{}", outcome.stdout);

@@ -155,6 +155,34 @@ pub fn parse_search_spec(
     keyword: &str,
     page: u32,
 ) -> Result<SearchRequestPlan, SourceError> {
+    parse_search_spec_with_js(parsed, keyword, page, None)
+}
+
+/// 构造搜索请求，**带可选的 JS 求值能力**（T043 的接线点）。
+///
+/// # 与不带 JS 版本的关系
+///
+/// [`parse_search_spec`] 是它的 `js = None` 特例。分开两个入口而不是
+/// 把 `Option` 塞进原签名，是为了让"不需要 JS 的源"（绝大多数）的调用点
+/// 保持简洁——而那些调用点不该被迫关心沙箱的存在。
+///
+/// # JS 求值在哪里发生
+///
+/// `searchUrl` 里的占位符分两类：
+///
+/// | 占位符 | 处理 | 为什么 |
+/// |---|---|---|
+/// | `{{key}}` / `{{page}}` | 管线直接替换（含 URL 编码） | 它们是**值占位符**，不需要脚本 |
+/// | 其余 `{{...}}` | 经 [`crate::js::SourceJsEngine`] 求值 | 公开文档：「在 `{{}}` 里只能使用 js」 |
+///
+/// 第二类走 `tome_rule::replace` 的插值实现——那是 T025 已写好的
+/// 解析 + T043 已接好的桥，此处不重复实现。
+pub fn parse_search_spec_with_js(
+    parsed: &ParsedSource,
+    keyword: &str,
+    page: u32,
+    js: Option<&crate::js::SourceJsEngine>,
+) -> Result<SearchRequestPlan, SourceError> {
     let id = &parsed.source.id;
     let template = parsed
         .source
@@ -163,15 +191,41 @@ pub fn parse_search_spec(
         .ok_or_else(|| SourceError::incomplete(id.clone(), "缺少 searchUrl（搜索地址）"))?;
 
     let (url, unrecognized) = substitute_url(template, keyword, page);
-    if !unrecognized.is_empty() {
-        // 未被识别的占位符意味着这条源依赖 S1-2 的 JS 插值（T043）。
-        // 报出来而不是"尽力而为"：产出半成品 URL 会让请求打到错误的地址，
-        // 而错误的表现是"没有结果"，排查方向完全被带偏。
-        return Err(SourceError::rule(format!(
-            "搜索 URL 含暂不支持的占位符 {:?}（`{{{{}}}}` 内的 JS 求值属 S1-2 / T043）",
-            unrecognized
-        )));
-    }
+    let url = if unrecognized.is_empty() {
+        url
+    } else {
+        // ## 需要 JS 时才要求引擎
+        //
+        // 未被识别的占位符意味着这条源依赖 JS 插值。若引擎未提供
+        // （组合根没接上，或调用点用了旧入口），报出**可归因**的错误而不是
+        // 产出半成品 URL——后者会让请求打到错误地址，而表现是"没有结果"。
+        let Some(engine) = js else {
+            return Err(SourceError::rule(format!(
+                "搜索 URL 含需要 JS 求值的占位符 {:?}，但本次调用未提供 JS 引擎；\
+                 组合根应为含 JS 的书源建立 SourceJsEngine",
+                unrecognized
+            )));
+        };
+
+        // ## 为什么把基础占位符也交给 JS 插值
+        //
+        // 一旦这条 URL 里有任意一个 JS 占位符，整条 URL 就必须走插值器
+        // （否则要写一个"部分替换"的混合逻辑）。而插值器里的 `key`/`page`
+        // 是**变量**——故先把它们的值注入沙箱的全局，再交给插值器。
+        //
+        // 这样 `{{key}}` 在两条路径上的编码行为可能不同（管线做 URL 编码、
+        // JS 插值不做）——故注入的是**已编码**的值，保持与快路径一致。
+        let encoded_keyword = encode_query_component(keyword);
+        engine
+            .eval(&format!(
+                "var key = {}; var page = {};",
+                js_string_literal(&encoded_keyword),
+                page
+            ))
+            .map_err(|error| SourceError::rule(format!("注入搜索变量失败：{error}")))?;
+
+        evaluate_template(engine, template)?
+    };
 
     // 相对 URL 补全：公开文档说搜索地址"支持相对 URL"。
     let absolute = resolve_relative(&parsed.source.id, &url);
@@ -188,6 +242,41 @@ pub fn parse_search_spec(
     spec.timeout_ms = SEARCH_TIMEOUT_MS;
 
     Ok(SearchRequestPlan { spec })
+}
+
+/// 用 JS 引擎求值一个含占位符的模板。
+///
+/// 经 `tome_rule` 的插值实现（T025 的解析 + T043 的桥）——本模块不重复
+/// 那套解析逻辑。
+fn evaluate_template(
+    engine: &crate::js::SourceJsEngine,
+    template: &str,
+) -> Result<String, SourceError> {
+    // 插值的一个 js 类占位需要一个文档参数（规则类占位要用），
+    // 而搜索 URL 里不会有规则类占位——故给一个空文档。
+    let document = tome_rule::dom::Document::parse_html("");
+    let interpolation = tome_rule::replace::parse_interpolation(template);
+    let bridge = tome_rule::js_bridge::JsPlaceholderBridge::new(engine.runtime(), &document);
+    interpolation.evaluate(&bridge).map_err(|error| {
+        // ## 必须用 `rule_eval` 而不是 `rule`（FR-006 的关键）
+        //
+        // 两者的区别正在于**是否保留错误的分类载荷**：
+        //
+        // | 构造 | 结果 |
+        // |---|---|
+        // | `SourceError::rule(...)` | 一律成为 `Rule`——能力标识丢失 |
+        // | `SourceError::rule_eval(&error, ..)` | 保留 `RuleError` 的分类（含能力标识） |
+        //
+        // 用前者会让 `java.webView(...)` 的上抛变成 `error.rule`，
+        // 而 CLI 的退出码本该是 3（"本产品做不到"）而不是 1——
+        // 书源的降级逻辑与脚本的后续处置都会走错分支。
+        SourceError::rule_eval(&error, "搜索 URL 的 JS 插值")
+    })
+}
+
+/// 把一个 Rust 字符串编成 JS 字符串字面量。
+fn js_string_literal(value: &str) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
 }
 
 /// 搜索的单请求超时。
@@ -492,8 +581,30 @@ pub fn search_one_source(
     page: u32,
     host: &dyn NetHost,
 ) -> Result<Vec<SearchHit>, SourceError> {
+    search_one_source_with_js(parsed, keyword, page, host, None)
+}
+
+/// 单源搜索，**带可选的 JS 求值能力**（T043/T044 的接缝）。
+///
+/// # 与不带 JS 版本的关系
+///
+/// [`search_one_source`] 是它的 `js = None` 特例。含 `@js:` 或非基础
+/// `{{}}` 占位符的源必须经本函数走——否则会报"需要 JS 引擎"的错误。
+///
+/// # 为什么引擎是 `Option` 而不是必填
+///
+/// 绝大多数书源（纯 CSS/正则）用不到沙箱，给它们也建 runtime 是浪费
+/// （QuickJS 初始化有实打实的开销）。调用方先用
+/// [`crate::js::source_needs_javascript`] 判断，只在需要时才建。
+pub fn search_one_source_with_js(
+    parsed: &ParsedSource,
+    keyword: &str,
+    page: u32,
+    host: &dyn NetHost,
+    js: Option<&crate::js::SourceJsEngine>,
+) -> Result<Vec<SearchHit>, SourceError> {
     // 第一步：规则求值（不发请求）
-    let plan = parse_search_spec(parsed, keyword, page)?;
+    let plan = parse_search_spec_with_js(parsed, keyword, page, js)?;
 
     // 第二步：执行（唯一发请求处）
     let response = host
@@ -538,12 +649,55 @@ fn decode_search_body(response: &tome_core::Response) -> String {
 pub struct SearchEngine<'a> {
     sources: &'a [ParsedSource],
     host: &'a dyn NetHost,
+    /// JS 引擎工厂（`None` 表示本次搜索不支持 JS 源）。
+    ///
+    /// 用工厂而非实例：见 [`SearchEngine::with_js`] 的说明。
+    js_factory: Option<JsEngineFactory<'a>>,
 }
 
+/// JS 引擎工厂：给定书源，建一个该源专属的引擎。
+///
+/// 返回 `Result` 而不是直接给实例：建 runtime 可能失败（资源不足），
+/// 而那是"这个源这次跑不动"的错误，不是"整个搜索失败"。
+/// 用 `Arc` 而非 `Box`：流可能被多次取用（一个 `SearchEngine` 产出多个流），
+/// 而工厂本身是无状态的构造逻辑，共享没有语义问题。
+///
+/// `Send + Sync`：`SearchStream` 的契约允许流被移到别的线程（A6 的取消
+/// 令牌就是这么用的），故工厂也必须可跨线程。
+pub type JsEngineFactory<'f> = std::sync::Arc<
+    dyn Fn(&tome_core::Source) -> Result<crate::js::SourceJsEngine, SourceError> + Send + Sync + 'f,
+>;
+
 impl<'a> SearchEngine<'a> {
-    /// 新建搜索执行器。
+    /// 新建搜索执行器（不带 JS 能力——纯 CSS/正则的源足够）。
     pub fn new(sources: &'a [ParsedSource], host: &'a dyn NetHost) -> Self {
-        Self { sources, host }
+        Self {
+            sources,
+            host,
+            js_factory: None,
+        }
+    }
+
+    /// 新建搜索执行器，**带 JS 引擎工厂**（T043/T044 的接线）。
+    ///
+    /// # 为什么是"工厂"而不是"一个引擎实例"
+    ///
+    /// 隔离粒度是"每个书源脚本一个 runtime"（A1/R1）：宿主函数在 JS 侧
+    /// 同步阻塞，共享 runtime 会让一个源发请求时所有源停摆；且书源脚本
+    /// 常有模块级状态（token/配置），共享会互相污染。
+    ///
+    /// 故给的是"怎么建一个新引擎"而不是"一个引擎"——每个源在需要时
+    /// 现建（且只对含 JS 的源建，见 [`crate::js::source_needs_javascript`]）。
+    pub fn with_js(
+        sources: &'a [ParsedSource],
+        host: &'a dyn NetHost,
+        js_factory: JsEngineFactory<'a>,
+    ) -> Self {
+        Self {
+            sources,
+            host,
+            js_factory: Some(js_factory),
+        }
     }
 
     /// 多源搜索，返回**流**（A6：增量呈现、单源失败不终止、可取消）。
@@ -560,6 +714,7 @@ impl<'a> SearchEngine<'a> {
             pending: selected,
             keyword: keyword.to_string(),
             host: self.host,
+            js_factory: self.js_factory.clone(),
             token: CancelToken::new(),
         })
     }
@@ -582,6 +737,8 @@ struct SourceSearchStream<'a> {
     pending: Vec<&'a ParsedSource>,
     keyword: String,
     host: &'a dyn NetHost,
+    /// JS 引擎工厂（见 [`SearchEngine::with_js`]）
+    js_factory: Option<JsEngineFactory<'a>>,
     token: CancelToken,
 }
 
@@ -599,7 +756,28 @@ impl SearchStream for SourceSearchStream<'_> {
         let parsed = self.pending.remove(0);
         let source_id = parsed.source.id.clone();
 
-        match search_one_source(parsed, &self.keyword, 1, self.host) {
+        // ## 只为需要 JS 的源建引擎
+        //
+        // 纯 CSS/正则的源（绝大多数）不该承担建沙箱的开销。
+        // 判定见 `crate::js::source_needs_javascript`。
+        let engine = match (
+            &self.js_factory,
+            crate::js::source_needs_javascript(&parsed.source),
+        ) {
+            (Some(factory), true) => match factory(&parsed.source) {
+                Ok(engine) => Some(engine),
+                // 建引擎失败：该源作为流内失败条目（A6：单源失败不终止）
+                Err(error) => {
+                    return Some(SearchResultItem::SourceFailed {
+                        source_id,
+                        error: error.to_error_kind(),
+                    })
+                }
+            },
+            _ => None,
+        };
+
+        match search_one_source_with_js(parsed, &self.keyword, 1, self.host, engine.as_ref()) {
             Ok(hits) => {
                 let books: Vec<Book> = hits.iter().map(|hit| hit.to_book(&source_id)).collect();
                 // 单源成功也产出（即使为空列表）：空列表表示"源在线但无匹配"，
@@ -785,7 +963,14 @@ mod tests {
     }
 
     #[test]
-    fn 含_js_占位符的搜索地址明确报未支持() {
+    fn 含_js_占位符的搜索地址需要_js_引擎() {
+        // S1-2 起 JS 插值已实现（T043），故"报未支持"变成"需要引擎"。
+        //
+        // ## 这里验证的是**快路径的行为**
+        //
+        // `parse_search_spec`（不带 JS）遇到 JS 占位符时必须报**可归因**的
+        // 错误，而不是产出半成品 URL——后者会让请求打到错误地址，
+        // 而表现是"没有结果"，排查方向被完全带偏。
         let text = r#"{
           "bookSourceName": "JS地址源",
           "bookSourceUrl": "https://x.com",
@@ -796,8 +981,56 @@ mod tests {
         let error = parse_search_spec(&parsed, "k", 1).expect_err("应报错");
         let rendered = format!("{error}");
         assert!(
-            rendered.contains("S1-2") || rendered.contains("T043"),
-            "错误应指明这是后续切片的能力：{rendered}"
+            rendered.contains("JS") || rendered.contains("js"),
+            "错误应指明需要 JS 引擎：{rendered}"
+        );
+        assert!(
+            rendered.contains("SourceJsEngine"),
+            "错误应指明该怎么做（建立 SourceJsEngine）：{rendered}"
+        );
+    }
+
+    #[test]
+    fn 带_js_引擎时_js_占位符被求值() {
+        // T043 接线的端到端验证：同一条源，给了引擎就能求出真实 URL。
+        let text = r#"{
+          "bookSourceName": "JS地址源",
+          "bookSourceUrl": "https://x.com",
+          "searchUrl": "/s?q={{java.base64Encode(key)}}&p={{1+1}}",
+          "ruleSearch": "{\"bookList\":\"@css:li\"}"
+        }"#;
+        let parsed = parse_sources(text).expect("应解析").sources.remove(0);
+        let engine =
+            crate::js::SourceJsEngine::for_source(&parsed.source.id, &parsed.source, None, None)
+                .expect("应能建引擎");
+
+        // 装配宿主函数（`java.*` 是 prelude 的桩之外的真实实现）
+        engine
+            .with_context(|ctx| {
+                let java = tome_js::Object::new(ctx.clone())
+                    .map_err(|error| format!("建 java 失败：{error}"))?;
+                tome_js::api::text::register(&ctx, &java)
+                    .map_err(|error| format!("注册失败：{error:?}"))?;
+                ctx.globals()
+                    .set("java", java)
+                    .map_err(|error| format!("设置全局失败：{error}"))?;
+                Ok(())
+            })
+            .expect("应能装配");
+
+        let plan =
+            parse_search_spec_with_js(&parsed, "斗破", 1, Some(&engine)).expect("给了引擎应能求值");
+        // `key` 被注入了**已 URL 编码**的值（与快路径一致），
+        // 而 `java.base64Encode` 对它再做 base64。
+        assert!(
+            plan.spec.url.contains("p=2"),
+            "`{{{{1+1}}}}` 应被求值为 2：{}",
+            plan.spec.url
+        );
+        assert!(
+            !plan.spec.url.contains("{{"),
+            "不应残留未求值的占位符：{}",
+            plan.spec.url
         );
     }
 

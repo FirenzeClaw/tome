@@ -224,6 +224,19 @@ pub fn wrap_inline_script(fragment: &str) -> String {
   try {{
     return (function(){{ return eval({fragment_literal}); }})();
   }} catch (__tome_expr_error) {{
+    // ## 能力错误必须原样上抛，不得被这个兜底捕获吃掉
+    //
+    // 能力错误是 FR-006 的可编程信号，书源的 try/catch 靠它选备选路径。
+    // 若在这里被"当成表达式求值失败"吞掉并重试语句形态，那个标识就丢了
+    // ——表现是能力错误被压成一个与真实原因无关的语法错，
+    // 而 CLI 的退出码会从 3（本产品做不到）变成 1（源坏了）。
+    //
+    // 判据用 `isUnsupportedCapability`（宿主函数抛的能力错误会打这个标，
+    // 见 `tome_js::bridge`）而不是 `capability`：后者是书源也可能
+    // 恰好用到的普通属性名。
+    if (__tome_expr_error && __tome_expr_error.isUnsupportedCapability) {{
+      throw __tome_expr_error;
+    }}
     return (function(){{ {fragment} }})();
   }}
 }})();"#,
@@ -316,6 +329,14 @@ pub trait SandboxErrorExt {
 impl SandboxErrorExt for SandboxError {
     fn into_rule_error(self) -> RuleError {
         match &self {
+            // ## 能力错误必须**保载荷**地转过去（FR-006）
+            //
+            // `RuleError::Unsupported` 携带能力标识，而书源的降级逻辑
+            // 正是靠它选备选路径。若把它压成 `Syntax`，标识就只剩消息
+            // 文本可用——书源只能字符串匹配，措辞一改即失效。
+            SandboxError::UnsupportedCapability { capability } => {
+                RuleError::unsupported(capability.clone(), "js")
+            }
             // 内存上限与超时属"引擎保护"而非"规则写错"，但它们在
             // `RuleError` 里没有更贴切的分类（`Limit` 是"超出处理上界"，
             // 语义最接近）。细节放 detail 里。

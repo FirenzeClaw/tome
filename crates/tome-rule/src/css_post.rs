@@ -775,6 +775,18 @@ pub fn evaluate_rule_subject(
 ) -> Result<Vec<String>, crate::error::RuleError> {
     use crate::dispatch::{dispatch_prefix, RuleKind};
 
+    // ## `@webjs:` 必须先判（T043）
+    //
+    // 它不是 `dispatch_prefix` 认得的类型前缀，故会落到 `Default` 并被当成
+    // CSS 选择器去解析——结果是"选择器语法错"，而真实原因是"这段脚本
+    // 需要内嵌浏览器"。那个错误信息会让作者去反复检查选择器。
+    //
+    // 故在此显式拦截并抛**结构化能力错误**（FR-006），让书源的 try/catch
+    // 能据此降级到纯 HTTP 路径。
+    if crate::js_bridge::is_webjs_prefix(rule) {
+        return Err(crate::js_bridge::webjs_unsupported_error("rule"));
+    }
+
     let dispatched = dispatch_prefix(rule);
     match dispatched.kind {
         // 可求值的三类：`dispatched.body` 已剥掉类型前缀（`@css:` / `@@`），
@@ -841,6 +853,13 @@ pub fn select_nodes(
 ) -> Result<Vec<crate::dom::NodeRef>, crate::error::RuleError> {
     use crate::dispatch::{dispatch_prefix, RuleKind};
 
+    // `@webjs:` 必须显式拦截（见 `evaluate_rule_subject` 的同款说明）：
+    // 若不拦，它会被当成 CSS 选择器并报"选择器语法错"，
+    // 而真实原因是"这段脚本需要内嵌浏览器"。
+    if crate::js_bridge::is_webjs_prefix(rule) {
+        return Err(crate::js_bridge::webjs_unsupported_error("rule"));
+    }
+
     // 先剥类型前缀——`bookList` 常写作 `@css:li.item`，直接把整串交给
     // CSS 解析器会报 `EmptySelector`（`@css:` 不是合法选择器）。
     let dispatched = dispatch_prefix(rule);
@@ -894,6 +913,11 @@ pub fn evaluate_rule_subject_in(
     rule: &str,
 ) -> Result<Vec<String>, crate::error::RuleError> {
     use crate::dispatch::{dispatch_prefix, RuleKind};
+
+    // 同 `evaluate_rule_subject`：`@webjs:` 要抛能力错误而非语法错。
+    if crate::js_bridge::is_webjs_prefix(rule) {
+        return Err(crate::js_bridge::webjs_unsupported_error("rule"));
+    }
 
     let dispatched = dispatch_prefix(rule);
     match dispatched.kind {

@@ -85,13 +85,30 @@ pub enum UnsupportedCapability {
     ///
     /// 沙箱是安全边界：让书源脚本执行任意系统命令会完全破坏它。
     Exec,
+    /// `webView` 家族里未逐个列举的成员（`webViewGetSource` 等）。
+    ///
+    /// ## 为什么需要一个"家族"条目
+    ///
+    /// 书源生态里 `webView*` 的方法名有十几个（`webView`、`webViewGetSource`、
+    /// `webViewGetRedirectUrl`、`webViewGetUrl`…），且不同版本还在增补。
+    /// 逐个列举必然漏——而漏掉的后果是 `TypeError: xxx is not a function`，
+    /// 书源作者看到那个信息会以为是自己拼错了方法名。
+    ///
+    /// 故前导脚本对**任何**未注册的 `webView*` 名字都返回本能力错误。
+    /// 标识仍用 `webView`（生态通用叫法），让书源的
+    /// `if (e.capability === "webView")` 判据对所有成员都成立。
+    ///
+    /// `[WARN]` 本变体与 [`Self::WebView`] 的 `capability_id` **相同**，
+    /// 故它不进 [`Self::ALL`]（那会让"标识互不重复"的断言失败）。
+    /// 两者是"具体成员"与"家族兜底"的关系，不是两个独立能力。
+    WebViewFamily,
 }
 
 impl UnsupportedCapability {
     /// 书源生态的**通用叫法**（兼容性关键，见模块文档）。
     pub fn capability_id(self) -> &'static str {
         match self {
-            Self::WebView => "webView",
+            Self::WebView | Self::WebViewFamily => "webView",
             Self::StartBrowserAwait => "startBrowserAwait",
             Self::VerificationCode => "getVerificationCode",
             Self::OpenVideoPlayer => "openVideoPlayer",
@@ -107,7 +124,7 @@ impl UnsupportedCapability {
     /// 写"为什么不支持"而不是"暂未实现"：用户据此判断该换源还是该等更新。
     pub fn reason(self) -> &'static str {
         match self {
-            Self::WebView => {
+            Self::WebView | Self::WebViewFamily => {
                 "桌面原生实现不含浏览器内核（体积与跨平台考虑）；依赖内嵌浏览器的书源需改用纯 HTTP 规则"
             }
             Self::StartBrowserAwait => {
@@ -151,6 +168,10 @@ impl UnsupportedCapability {
     ///
     /// **[WARN]** 新增变体时必须同步加进这里，否则它不会出现在覆盖矩阵里。
     /// 有一个测试专门断言"清单长度与变体数一致"来守这件事。
+    /// ## 为什么 `WebViewFamily` 不在其中
+    ///
+    /// 它与 `Self::WebView` 的 `capability_id` 相同（见该变体的文档），
+    /// 放进清单会让"标识互不重复"的断言失败。它是**兜底**而非独立能力。
     pub const ALL: &'static [Self] = &[
         Self::WebView,
         Self::StartBrowserAwait,
@@ -204,6 +225,70 @@ pub fn register_unsupported<'js>(
         .map_err(|error| JsError::new(format!("设置 `java.{name}` 失败：{error}")))
 }
 
+/// `webView` 家族的实际方法名（生态里出现过的）。
+///
+/// ## 为什么这份清单是"已知的"而不是穷举的
+///
+/// 它是**已知成员**的列表，用于把常见名字都挂上桩。未知的成员由
+/// [`install_java_trap`] 的 Proxy 兜底——两层合起来才覆盖"书源用到的
+/// 任何 `webView*` 名字"。
+const WEBVIEW_FAMILY_METHODS: &[&str] = &[
+    "webView",
+    "webViewGetSource",
+    "webViewGetUrl",
+    "webViewGetRedirectUrl",
+    "webViewGetContent",
+    "webViewAwait",
+    "webViewGetSourceAwait",
+];
+
+/// 把 `webView` 家族的全部已知方法挂成能力桩。
+pub fn register_webview_family<'js>(
+    ctx: &Ctx<'js>,
+    java_object: &Object<'js>,
+) -> Result<usize, JsError> {
+    let mut registered = 0usize;
+    for name in WEBVIEW_FAMILY_METHODS {
+        register_named_unsupported(ctx, java_object, name, UnsupportedCapability::WebView)?;
+        registered += 1;
+    }
+    Ok(registered)
+}
+
+/// 按**名字**注册一个能力桩（名字不一定是枚举的标准标识）。
+///
+/// 供 [`register_webview_family`] 这类"家族成员"使用：它们的名字各异，
+/// 但报出的能力标识统一（生态通用叫法），以便书源的判据成立。
+pub fn register_named_unsupported<'js>(
+    ctx: &Ctx<'js>,
+    java_object: &Object<'js>,
+    method_name: &str,
+    capability: UnsupportedCapability,
+) -> Result<(), JsError> {
+    let exception_holder = capability;
+    let method = method_name.to_string();
+    let throwing = rquickjs::Function::new(
+        ctx.clone(),
+        move |ctx: Ctx<'js>| -> Result<rquickjs::Value<'js>, rquickjs::Error> {
+            // 消息里带上**实际的方法名**：书源作者需要知道自己用的是哪个
+            // `webView*`（家族很长），而能力标识统一是 `webView`。
+            let error = JsError::unsupported(
+                exception_holder.capability_id(),
+                format!(
+                    "{}（调用了 `java.{method}`）",
+                    exception_holder.description()
+                ),
+            );
+            Err(throw_host_error(&ctx, &error))
+        },
+    )
+    .map_err(|error| JsError::new(format!("注册能力桩 `java.{method_name}` 失败：{error}")))?;
+
+    java_object
+        .set(method_name, throwing)
+        .map_err(|error| JsError::new(format!("设置 `java.{method_name}` 失败：{error}")))
+}
+
 /// 一次性把全部不支持能力挂到 `java` 对象上。
 ///
 /// 返回成功注册的数量——调用方可据此断言"能力集完整"。
@@ -222,6 +307,8 @@ pub fn register_all_unsupported<'js>(
         register_unsupported(ctx, java_object, *capability)?;
         registered += 1;
     }
+    // `webView` 家族的实际成员名（见 `WEBVIEW_FAMILY_METHODS`）
+    registered += register_webview_family(ctx, java_object)?;
     Ok(registered)
 }
 

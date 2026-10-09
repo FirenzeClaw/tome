@@ -39,6 +39,7 @@
 #![forbid(unsafe_code)]
 
 pub mod error;
+pub mod js;
 pub mod registry;
 
 pub use error::SourceError;

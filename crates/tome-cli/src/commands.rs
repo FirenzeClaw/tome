@@ -31,7 +31,7 @@ use tome_source::registry::SourceRegistry;
 use tome_source::source::{load_from_channel, LoadOutcome, ParsedSource};
 use tome_source::{search, SourceError};
 
-use crate::flags::{exit_code_for, Command, GlobalOptions, NetworkMode, OutputFormat};
+use crate::flags::{exit_code_for, unsupported, Command, GlobalOptions, NetworkMode, OutputFormat};
 
 /// 一次命令执行的结果：退出码 + 标准输出 + 标准错误。
 ///
@@ -79,6 +79,27 @@ pub fn run(
     host: &dyn NetHost,
     stdin_reader: &mut dyn Read,
 ) -> CommandOutcome {
+    run_with_js(options, command, host, None, stdin_reader)
+}
+
+/// 与 [`run`] 相同，但额外接受一个**可共享的**网络宿主句柄。
+///
+/// # 为什么需要它
+///
+/// 含 JS 的书源需要把宿主能力交给 JS 引擎，而
+/// [`tome_core::NetHost`] 在 JS 侧以 `Arc<dyn NetHost>` 持有。
+/// `&dyn NetHost` 借不出一个 `Arc`，故由组合根（`main.rs`）把执行器
+/// 以 `Arc` 形式传进来。
+///
+/// 不传时（`None`）含 JS 的源会得到**结构化能力错误**——而不是
+/// "静默跑不起来"。那让"忘了传"这件事在第一次运行时就暴露。
+pub fn run_with_js(
+    options: &GlobalOptions,
+    command: &Command,
+    host: &dyn NetHost,
+    js_host: Option<std::sync::Arc<dyn NetHost>>,
+    stdin_reader: &mut dyn Read,
+) -> CommandOutcome {
     match command {
         Command::SourceImport { file, url, stdin } => run_import(
             options,
@@ -98,7 +119,65 @@ pub fn run(
             source_file.as_deref(),
             keyword,
             host,
+            js_host,
         ),
+        Command::Run {
+            source_id,
+            action,
+            input,
+        } => run_action(options, source_id, action, input.as_deref(), host, js_host),
+    }
+}
+
+/// `run <source-id> --action <a> [--input <s>]`：通用执行入口。
+///
+/// # 本阶段实现的动作
+///
+/// 只有 `search`（与 `search` 子命令等价，但走 `--action` 形态便于脚本化）。
+/// `info`/`toc`/`content` 的规则求值路径相同，但需要详情/目录/正文的
+/// DTO 映射——那属后续切片（`contracts/cli.md` 定义了它们的契约）。
+///
+/// 不支持的动作返回**用法错误**（退出码 2）而不是"业务错误"（1）：
+/// 前者是"你调的方式不对"，后者是"源坏了"。两者对脚本的后续处置不同。
+fn run_action(
+    options: &GlobalOptions,
+    source_id: &str,
+    action: &str,
+    input: Option<&str>,
+    host: &dyn NetHost,
+    js_host: Option<std::sync::Arc<dyn NetHost>>,
+) -> CommandOutcome {
+    match action {
+        "search" => {
+            let Some(keyword) = input else {
+                return CommandOutcome {
+                    exit_code: 2,
+                    stdout: String::new(),
+                    stderr: "用法错误：`--action search` 需要 `--input <关键词>`
+".to_string(),
+                };
+            };
+            run_search(options, Some(source_id), None, keyword, host, js_host)
+        }
+        // ## 后续切片的动作：报**能力错误**（退出码 3）而不是用法错误
+        //
+        // 它们是本产品**将要**支持的（契约里定义了），故不该说"你调错了"；
+        // 但当前也做不到，故是 `UnsupportedCapability`。
+        // 这个区别让脚本能据此判断"等版本更新"与"改调用方式"。
+        other @ ("info" | "toc" | "content") => CommandOutcome::failure(
+            &unsupported(other),
+            &format!(
+                "error.unsupported_capability 动作 `{other}` 属后续切片（contracts/cli.md 已定义契约，本切片实现 search）"
+            ),
+        ),
+        other => CommandOutcome {
+            exit_code: 2,
+            stdout: String::new(),
+            stderr: format!(
+                "用法错误：未知动作 `{other}`（可用：search；info/toc/content 属后续切片）
+"
+            ),
+        },
     }
 }
 
@@ -184,6 +263,7 @@ fn run_search(
     source_file: Option<&Path>,
     keyword: &str,
     host: &dyn NetHost,
+    js_host: Option<std::sync::Arc<dyn NetHost>>,
 ) -> CommandOutcome {
     // 载入书源：S1-1 阶段从文件读（存储落地在后续切片，见模块文档）。
     let sources = match load_sources_for_search(options, source_id, source_file, host) {
@@ -191,7 +271,27 @@ fn run_search(
         Err(outcome) => return outcome,
     };
 
-    let engine = search::SearchEngine::new(&sources, host);
+    // ## 组合根的职责：为含 JS 的源准备引擎工厂
+    //
+    // 只有 `source_needs_javascript` 为真的源才会真的建 runtime
+    // （见 `SearchEngine::with_js` 的说明）——纯 CSS/正则的源走快路径。
+    //
+    // ## 为什么需要 `Arc<dyn NetHost>`
+    //
+    // JS 引擎要持有宿主能力（`HostBridge` 里的字段是 `Arc<dyn NetHost>`），
+    // 而 `&dyn NetHost` 无法克隆成 `Arc`。故调用方需在能给出 `Arc` 时
+    // 经 `run_with_js` 传入；给不出时（测试里的借入宿主）JS 引擎没有
+    // 网络能力——那时含 JS 的源会得到**结构化能力错误**，而不是静默失败。
+    let engine = match js_host {
+        Some(js_host) => {
+            let js_host = js_host.clone();
+            let factory: search::JsEngineFactory<'_> = std::sync::Arc::new(move |source| {
+                crate::js_host::build_source_engine(source, Some(js_host.clone()))
+            });
+            search::SearchEngine::with_js(&sources, host, factory)
+        }
+        None => search::SearchEngine::new(&sources, host),
+    };
     let filter: Vec<String> = source_id.map(|id| vec![id.to_string()]).unwrap_or_default();
     let (successes, failures) = search::collect_search(engine.search(keyword, &filter));
 

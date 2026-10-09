@@ -335,6 +335,8 @@ pub struct Sandbox {
     /// 与 handler 共享同一个 `Arc`——两处各建一个会让 handler 永远读到
     /// `None`（见 `Sandbox::new` 里的说明）。
     deadline: Arc<std::sync::Mutex<Option<Instant>>>,
+    /// 是否已发生过求值（用于拒绝"求值之后才注入桥"这类配置错误）
+    evaluated: AtomicBool,
 }
 
 impl Sandbox {
@@ -397,6 +399,7 @@ impl Sandbox {
             poisoned,
             poison_reason: std::sync::Mutex::new(None),
             deadline,
+            evaluated: AtomicBool::new(false),
         })
     }
 
@@ -421,6 +424,57 @@ impl Sandbox {
     /// 不用赌引擎的内部状态。
     pub fn is_poisoned(&self) -> bool {
         self.poisoned.load(Ordering::SeqCst)
+    }
+
+    /// 注入宿主桥（A1：宿主能力由组合根注入）。
+    ///
+    /// # 为什么必须在 eval 之前
+    ///
+    /// 宿主桥经 `Ctx::userdata` 存放，宿主函数在运行期取它。之后注入
+    /// 会让"之前那次求值里的函数拿不到桥"——而那种失败表现为运行时的
+    /// "宿主桥未注入"，归因困难。故本方法在已有求值发生过时**拒绝**注入，
+    /// 把问题挡在配置阶段。
+    ///
+    /// # 为什么用 `Ctx::userdata` 而不是闭包捕获
+    ///
+    /// 见 `crate::bridge` 的模块文档：闭包捕获会掉进 rquickjs 的嵌套
+    /// 可变借用（宿主函数内再碰 `ctx` 就 panic）。
+    pub fn install_host_bridge(
+        &self,
+        bridge: crate::bridge::HostBridge,
+    ) -> Result<(), SandboxError> {
+        if self.evaluated.load(Ordering::SeqCst) {
+            return Err(SandboxError::Setup {
+                reason: "宿主桥必须在首次求值之前注入（之后的注入对已注册的宿主函数无效）"
+                    .to_string(),
+            });
+        }
+        let outcome = self.context.with(|ctx: Ctx<'_>| -> Result<(), String> {
+            // `store_userdata` 返回**被替换掉的旧值**（若有）。重复注入时
+            // 静默替换会让"两次注入不同配置"的问题不可见，故第二次注入
+            // 直接拒绝——配置应当只有一次。
+            match ctx.store_userdata(bridge) {
+                Ok(None) => Ok(()),
+                Ok(Some(_previous)) => Err(
+                    "宿主桥已注入过；重复注入会让部分宿主函数持有旧桥（配置应只做一次）"
+                        .to_string(),
+                ),
+                Err(error) => Err(format!("store_userdata 失败：{error}")),
+            }
+        });
+        outcome.map_err(|reason| SandboxError::Setup { reason })
+    }
+
+    /// 注入兼容前导脚本（T035）。
+    ///
+    /// 由 [`Self::new`] 之外单独调用而不是内置在 `new` 里，是为了让
+    /// "要不要注入"成为组合根的显式决定——某些场景（如跑一段纯计算脚本）
+    /// 不需要补丁层，少注入一次就少一份可能与脚本自身定义冲突的表面。
+    ///
+    /// `[UNCERTAIN]`：目前没有发现"prelude 与书源脚本冲突"的真实案例，
+    /// 若始终不出现，这个开关可以收敛掉（直接内置进 `new`）。
+    pub fn install_prelude(&self) -> Result<(), SandboxError> {
+        self.eval(crate::prelude::PRELUDE_JS).map(|_| ())
     }
 
     /// 求值一段脚本，返回其值。
@@ -465,6 +519,9 @@ impl Sandbox {
 
         // 设定本次求值的截止时刻（中断 handler 读它判超时）。
         self.set_deadline();
+        // 标记"已求值过"：让"求值之后才注入宿主桥"被挡在配置阶段
+        // （见 `install_host_bridge` 的说明）。
+        self.evaluated.store(true, Ordering::SeqCst);
 
         // ## `with` 作用域内的三条硬约束
         //
@@ -699,7 +756,7 @@ fn collect_exception<'js>(ctx: &Ctx<'js>) -> Collected {
 /// 必须显式写成 `<'js>` 让编译器知道它们是同一份运行时数据的两个视图。
 ///
 /// 转换规则及其理由见 [`JsValue::text`] 的文档。
-fn describe_value<'js>(ctx: &Ctx<'js>, value: &rquickjs::Value<'js>) -> JsValue {
+pub(crate) fn describe_value<'js>(ctx: &Ctx<'js>, value: &rquickjs::Value<'js>) -> JsValue {
     use rquickjs::Type;
 
     let kind = match value.type_of() {

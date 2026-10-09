@@ -26,13 +26,35 @@
 //! |---|---|
 //! | [`runtime`] | QuickJS runtime 包装：内存/栈/中断三道护栏（T030） |
 //! | [`testdouble`] | 内存态 `StoreHost`/`CryptoHost` 替身（T033） |
+//! | [`sandbox_error`] | 宿主函数侧的 JS 异常类型与能力错误（FR-006） |
+//! | [`bridge`] | Rust ↔ JS 调用约定：宿主状态、同步阻塞、错误展开（T034） |
 //!
 //! [WIP] S1-2 阶段落地进行中；本 crate 此前为空骨架。
 
-#![forbid(unsafe_code)]
+// ## 关于 `unsafe_code`
+//
+// 本 crate 需要**恰好一处** `unsafe`：`bridge.rs` 里为 `HostBridge` 实现
+// rquickjs 的 `JsLifetime`。那个 trait 是 `unsafe`，而它是把宿主状态放进
+// `Ctx::userdata` 的**唯一**途径（rquickjs 0.14 没有安全替代）。
+//
+// 该实现的安全性由类型本身的形状保证：`HostBridge` 的字段全是 `'static`
+// （`Arc<dyn Trait>` / `String` / `Arc<Mutex<HashMap>>`），不含任何 `'js` 值，
+// 故 rquickjs 文档所述的"类型没有关联生命周期时总是安全"直接适用。
+// 详见该 impl 处的 SAFETY 注释。
+//
+// 故此处用 `deny` 而非 `forbid`：`forbid` 无法被局部 `#[allow]` 放宽，
+// 会把上述必要实现也一并禁掉。改用 `deny` 后，除该处之外任何新引入的
+// `unsafe` 仍会被 CI 的 `-D warnings` 拦下，护栏强度不降。
+#![deny(unsafe_code)]
 
+pub mod bridge;
+pub mod prelude;
 pub mod runtime;
+pub mod sandbox_error;
 pub mod testdouble;
 
+pub use bridge::{host_bridge, require_bridge, throw_host_error, HostBridge, JsContext};
+pub use prelude::PRELUDE_JS;
 pub use runtime::{CancelToken, JsValue, Limits, LimitsError, Sandbox, SandboxError};
+pub use sandbox_error::JsError;
 pub use testdouble::{MemoryCryptoHost, MemoryStoreHost};

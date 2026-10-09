@@ -31,7 +31,7 @@ pub const MAX_RETRY_AFTER: Duration = Duration::from_secs(60);
 /// 网络层错误。
 ///
 /// 变体划分的依据是"**上层能据此做什么**"，而不是"底层库报了什么"——
-/// 这正是 [`Self::to_error_kind`] 能把十三种变体压回六类 [`ErrorKind`] 的前提。
+/// 这正是 [`Self::to_error_kind`] 能把多种变体压回七类 [`ErrorKind`] 的前提。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum NetError {
     /// URL 非法或 scheme 不被允许（安全红线：外部通信一律 https，仅回环允许 http）
@@ -283,24 +283,24 @@ impl NetError {
     ///
     /// | 本层 | 接缝 | 理由 |
     /// |---|---|---|
-    /// | `Url` / `Proxy` / `Setup` / `ReplayMiss` / `Corrupt` | `Configuration` | 本机配置或本地资产问题 |
+    /// | `Url` / `Setup` | `Configuration` | 本机配置问题（接入点地址、数据目录等） |
+    /// | `Proxy` | `Proxy` | 代理链路问题——与目标站故障**必须**分类可分（FR-008） |
+    /// | `ReplayMiss` / `Corrupt` | `Configuration` | 本地资产没准备好（录制语料缺失/损坏） |
     /// | `Request` | `Rule` | 请求描述来自规则引擎，构造失败即规则给出的值非法 |
     /// | `Timeout` / `Connect` / `Tls` / `Redirect` / `Status` / `Io` / `BlockingContext` | `Network` | 取数没成功 |
     pub fn to_error_kind(&self) -> ErrorKind {
         match self {
             Self::Request { .. } => ErrorKind::Rule,
 
-            // [WORKAROUND] FR-008 要求"代理故障与目标站故障可区分"，但 ErrorKind
-            // 的六类里没有 Proxy 类目（无法改 tome-core，缺口已上报 PM 裁决）。
-            // 借 `Configuration`（代理属**本机配置**关切）承载"代理故障"，
-            // "目标站故障"走 `Network`——两类在接缝处据此仍可区分：
-            // `Configuration` = 改本机设置，`Network` = 目标站/链路问题。
-            // 代价：本层其余归 `Configuration` 的错误（非法 URL、回放未命中）
-            // 与代理故障在接缝上同类，上层若需细分只能看诊断细节。
-            Self::Proxy { .. } => ErrorKind::Configuration,
+            // 代理故障走专用的 `ErrorKind::Proxy`（2026-10-10 PM 仲裁新增）。
+            // FR-008 的边缘情况要求它与目标站故障可区分，而"可区分"必须在
+            // **分类层**成立——借 `Configuration` 承载会让它与"非法 URL"
+            // "回放未命中"同类，上层要细分只能下探诊断细节。
+            Self::Proxy { .. } => ErrorKind::Proxy,
 
-            // [WORKAROUND] 同上：回放语料是"本次运行所依赖的本地配置资产"，
-            // 缺失即配置不完整，故也借 `Configuration` 承载。
+            // 回放语料是"本次运行所依赖的本地配置资产"，缺失即配置不完整，
+            // 故归 `Configuration`。与代理故障不是一回事：一个是"资产没准备"，
+            // 一个是"链路走不通"。
             Self::ReplayMiss { .. } => ErrorKind::Configuration,
             Self::Corrupt { .. } => ErrorKind::Configuration,
 
@@ -464,8 +464,37 @@ mod tests {
             reason: "connection refused".to_string(),
         };
         assert_ne!(proxy.to_error_kind(), target.to_error_kind());
-        assert_eq!(proxy.to_error_kind(), ErrorKind::Configuration);
         assert_eq!(target.to_error_kind(), ErrorKind::Network);
+    }
+
+    /// 三类在接缝处必须**互不相同**：代理故障、目标站故障、本机配置错。
+    ///
+    /// 背景：R1 修订前 `ErrorKind` 只有六类，代理故障借 `Configuration` 承载，
+    /// 于是它与"非法 URL""回放未命中"在接缝上同类——上层要区分就只能下探诊断细节。
+    /// 新增 `ErrorKind::Proxy` 后三者必须在分类层就分开。
+    #[test]
+    fn proxy_network_and_configuration_are_three_distinct_kinds() {
+        let proxy = NetError::Proxy {
+            url: "https://target.example/".to_string(),
+            route: "custom http://127.0.0.1:1".to_string(),
+            reason: "connection refused".to_string(),
+        };
+        let target = NetError::Connect {
+            url: "https://target.example/".to_string(),
+            reason: "connection refused".to_string(),
+        };
+        let configuration = NetError::Url {
+            url: "http://insecure.example/".to_string(),
+            reason: "only https allowed".to_string(),
+        };
+
+        let proxy_kind = proxy.to_error_kind();
+        let target_kind = target.to_error_kind();
+        let configuration_kind = configuration.to_error_kind();
+
+        assert_ne!(proxy_kind, target_kind, "代理故障 ≠ 目标站故障");
+        assert_ne!(proxy_kind, configuration_kind, "代理故障 ≠ 本机配置错");
+        assert_ne!(target_kind, configuration_kind, "目标站故障 ≠ 本机配置错");
     }
 
     #[test]

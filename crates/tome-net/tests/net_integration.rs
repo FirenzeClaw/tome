@@ -455,8 +455,8 @@ fn proxy_failure_is_distinguishable_from_target_failure() {
     );
     assert_eq!(
         proxy_error.to_error_kind(),
-        ErrorKind::Configuration,
-        "代理故障属本机配置问题（借 Configuration 承载，见 NetError 文档）"
+        ErrorKind::Proxy,
+        "代理故障有专用分类（FR-008 要求与目标站故障可分，2026-10-10 PM 仲裁新增该类目）"
     );
 
     // 两类的分类必须不同——这是 FR-008 边缘情况的验收点。

@@ -876,7 +876,7 @@ mod tests {
             reason: "connection refused".to_string(),
         };
         assert_ne!(proxy.to_error_kind(), target.to_error_kind());
-        assert_eq!(proxy.to_error_kind(), ErrorKind::Configuration);
+        assert_eq!(proxy.to_error_kind(), ErrorKind::Proxy);
         assert_eq!(target.to_error_kind(), ErrorKind::Network);
     }
 }

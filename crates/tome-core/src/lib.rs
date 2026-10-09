@@ -27,7 +27,7 @@
 //! ## 关键入口
 //!
 //! - [`model`] —— 领域 DTO（T009）
-//! - [`error`] —— `ErrorKind` 六类错误分类（T010）
+//! - [`error`] —— `ErrorKind` 七类错误分类（T010；Proxy 类为 2026-10-10 仲裁新增）
 //! - [`seam`] —— 顶层接缝 trait（T011）与宿主能力 trait（T012）
 
 #![forbid(unsafe_code)]

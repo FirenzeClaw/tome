@@ -29,12 +29,14 @@
 //!
 //! 起步用 [`executor::RequestExecutor`]：它是组合起来的那一个入口。
 //!
-//! ## 已知缺口（已上报 PM 裁决，本 crate 不擅自改 tome-core）
+//! ## 与 tome-core 的契约关系
 //!
-//! 1. `ErrorKind` 没有 Proxy 类目，故"代理故障"借 `Configuration` 承载
-//!    （见 [`error::NetError::to_error_kind`] 的 `[WORKAROUND]` 注释）。
-//! 2. `RequestSpec` 没有请求间隔字段（FR-008 要求书源可声明），
-//!    故间隔由执行器侧注入（见 [`ratelimit`] 的模块文档）。
+//! 两个曾经的缺口已由 PM 仲裁修订（2026-10-10）：
+//!
+//! 1. `ErrorKind` 新增 `Proxy` 类目——代理故障不再借 `Configuration` 承载，
+//!    与目标站故障在分类层即可区分（FR-008 边缘情况）。
+//! 2. `RequestSpec` 新增 `request_interval_ms`——请求间隔现在是规则引擎可以
+//!    声明的字段，不再只靠执行器侧注入。
 
 #![forbid(unsafe_code)]
 

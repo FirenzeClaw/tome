@@ -1,9 +1,10 @@
-//! T010 验收测试：`ErrorKind` 六类分类 + 可本地化标识（FR-006 / FR-044 / SC-016）
+//! T010 验收测试：`ErrorKind` 分类 + 可本地化标识（FR-006 / FR-044 / SC-016）
 //!
 //! ## 这些测试在守什么
 //!
-//! 1. **六类齐备**（网络/规则/不支持能力/内容/存储/配置）——缺一类就会让某处
+//! 1. **七类齐备**（网络/代理/规则/不支持能力/内容/存储/配置）——缺一类就会让某处
 //!    错误被迫塞进不合适的分类，上层文案映射随之出错。
+//!    （代理类是 2026-10-10 PM 仲裁新增，见 `ErrorKind::Proxy` 的文档。）
 //! 2. **可本地化标识而非文案**（FR-044 / SC-016）——引擎内 MUST NOT 硬编码
 //!    面向用户的自然语言。故断言的是"标识符"，且标识须是稳定的 ASCII 点分路径。
 //! 3. **能力错误携带能力标识**（FR-006）——书源的 `try/catch` 降级逻辑依赖
@@ -11,14 +12,15 @@
 
 use tome_core::error::{ErrorCapability, ErrorKind, LocalizedMessage};
 
-/// 六类分类均存在且互不相等。
+/// 七类分类均存在且互不相等。
 ///
 /// 注意 `UnsupportedCapability` 是**带载荷的变体**（必须携带能力标识，FR-006），
 /// 故此处用构造出的值参与比较，而非裸的变体名。
 #[test]
-fn 错误分类覆盖六类且互异() {
+fn 错误分类覆盖七类且互异() {
     let all = [
         ErrorKind::Network,
+        ErrorKind::Proxy,
         ErrorKind::Rule,
         ErrorKind::unsupported_capability(ErrorCapability::new("webView")),
         ErrorKind::Content,
@@ -26,12 +28,28 @@ fn 错误分类覆盖六类且互异() {
         ErrorKind::Configuration,
     ];
 
-    assert_eq!(all.len(), 6, "FR-006/AGENTS.md 规定错误恰好分六类");
+    assert_eq!(all.len(), 7, "PM 仲裁（2026-10-10）规定错误分七类");
     for (index, left) in all.iter().enumerate() {
         for right in all.iter().skip(index + 1) {
             assert_ne!(left, right, "分类必须互异：{left:?} 与 {right:?}");
         }
     }
+}
+
+/// 代理故障与网络故障在**分类层**就必须可分（FR-008 边缘情况）。
+///
+/// 这条断言的意义不只是"两个枚举值不同"：它锁住的是"上层无需下探诊断细节
+/// 就能区分该改代理设置还是该查网络"。若日后有人把 `Proxy` 并入 `Network`
+/// 以求简化，这里会失败并指向 FR-008。
+#[test]
+fn 代理故障与网络故障分类可分() {
+    assert_ne!(
+        ErrorKind::Proxy,
+        ErrorKind::Network,
+        "FR-008 要求代理故障与目标站故障可区分"
+    );
+    assert_ne!(ErrorKind::Proxy, ErrorKind::Configuration);
+    assert_eq!(ErrorKind::Proxy.message().id(), "error.proxy");
 }
 
 /// 每一类都有**稳定的**可本地化标识。
@@ -41,6 +59,7 @@ fn 错误分类覆盖六类且互异() {
 #[test]
 fn 每类错误都有稳定标识() {
     assert_eq!(ErrorKind::Network.message().id(), "error.network");
+    assert_eq!(ErrorKind::Proxy.message().id(), "error.proxy");
     assert_eq!(ErrorKind::Rule.message().id(), "error.rule");
     assert_eq!(
         ErrorKind::unsupported_capability(ErrorCapability::new("webView"))
@@ -64,6 +83,7 @@ fn 每类错误都有稳定标识() {
 fn 错误标识是点分路径而非自然语言() {
     for kind in [
         ErrorKind::Network,
+        ErrorKind::Proxy,
         ErrorKind::Rule,
         ErrorKind::unsupported_capability(ErrorCapability::new("webView")),
         ErrorKind::Content,

@@ -1,8 +1,8 @@
-//! 错误分类 —— 六类粗粒度分类 + 可本地化标识
+//! 错误分类 —— 七类粗粒度分类 + 可本地化标识
 //!
 //! 对应 tasks.md T010（FR-006 / FR-044 / SC-016）。
 //!
-//! # 为什么只有六类，且**刻意不做上帝枚举**
+//! # 为什么只有七类，且**刻意不做上帝枚举**
 //!
 //! 各实现 crate 自带 thiserror 错误类型（`tome-net` 的 `NetError`、
 //! `tome-store` 的 `StoreError`...），在接缝处映射为本模块的 [`ErrorKind`]。
@@ -80,20 +80,34 @@ impl fmt::Display for ErrorCapability {
     }
 }
 
-/// 引擎错误的**分类**（六类），对齐 AGENTS.md 与 spec 的定义。
+/// 引擎错误的**分类**（七类），对齐 AGENTS.md 与 spec 的定义。
 ///
 /// 各实现 crate 的错误类型在接缝处映射到本枚举；上层据此做粗粒度处理
 /// 与文案映射，不依赖任何实现 crate 的错误细节。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErrorKind {
-    /// 网络：连接失败、超时、DNS、代理故障、非成功状态码等。
+    /// 网络：连接失败、超时、DNS、重定向、非成功状态码等**传输与协议层**问题。
+    ///
+    /// 注意**不含**代理故障——那是 [`Self::Proxy`] 的关切（FR-008 边缘情况
+    /// 明确要求两者可区分）。
     Network,
+    /// 代理：代理不可达、代理握手失败、代理认证失败等。
+    ///
+    /// ## 为什么代理故障不能并入 Network
+    ///
+    /// 上层要据此给**完全不同的**处置建议：`Network` 时用户该去看目标站是否
+    /// 可达、网络是否通；`Proxy` 时用户该去看本机代理设置是否正确——可能是
+    /// 代理没开、地址填错、或某个源在代理下反而不可达（那需要按源设
+    /// `ProxyOverride::Direct`）。两者混为一类会让提示指向错误的方向。
+    ///
+    /// FR-008 的边缘情况把这条区分写成了硬要求。
+    Proxy,
     /// 规则：书源不存在、规则语法错误、选择器无匹配、脚本抛错等。
     Rule,
     /// 不支持的能力：系统明确做不到的能力（FR-006）。
     ///
-    /// **必须**携带能力标识——这是与其余五类的结构性区别：它不是一个
-    /// "出错"信号，而是一个"此路不通，请改道"的可编程信号。
+    /// **必须**携带能力标识——这是与其馀**无载荷的**分类之间的结构性区别：
+    /// 它不是一个"出错"信号，而是一个"此路不通，请改道"的可编程信号。
     UnsupportedCapability {
         /// 不可用能力的标识
         capability: ErrorCapability,
@@ -123,6 +137,7 @@ impl ErrorKind {
     pub fn message(&self) -> LocalizedMessage {
         match self {
             Self::Network => LocalizedMessage::new("error.network"),
+            Self::Proxy => LocalizedMessage::new("error.proxy"),
             Self::Rule => LocalizedMessage::new("error.rule"),
             Self::UnsupportedCapability { .. } => {
                 LocalizedMessage::new("error.unsupported_capability")
@@ -156,6 +171,7 @@ impl ErrorKind {
     pub fn message_id(&self) -> &'static str {
         match self {
             Self::Network => "error.network",
+            Self::Proxy => "error.proxy",
             Self::Rule => "error.rule",
             Self::UnsupportedCapability { .. } => "error.unsupported_capability",
             Self::Content => "error.content",

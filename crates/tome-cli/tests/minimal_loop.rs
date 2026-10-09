@@ -215,7 +215,29 @@ fn localized_source(server: &MiniServer) -> (tempfile::TempDir, PathBuf) {
 }
 
 /// 用给定的全局选项与参数跑一次 CLI，返回结果。
+///
+/// ## 为什么自动补 `data_dir`
+///
+/// 未指定时注册表会落到**工作目录**的 `.tome/`（那是产品设计的"可移植模式"），
+/// 但测试用它会**污染工作树**——跑一遍测试后仓库里会冒出个 `.tome/`。
+/// 故这里在调用方没显式指定时重定向到临时目录。临时目录的 guard 活到
+/// 内层调用返回为止（用作用域而非 `into_path()`，后者会泄漏目录）。
 fn run_cli(
+    options: &GlobalOptions,
+    args: &[&str],
+    host: &dyn tome_core::NetHost,
+) -> tome_cli::CommandOutcome {
+    if options.data_dir.is_none() {
+        let dir = tempfile::tempdir().expect("应能建临时数据目录");
+        let mut effective = options.clone();
+        effective.data_dir = Some(dir.path().to_path_buf());
+        return run_cli_inner(&effective, args, host);
+    }
+    run_cli_inner(options, args, host)
+}
+
+/// 真正执行的那一层（`data_dir` 已确保不为 `None`）。
+fn run_cli_inner(
     options: &GlobalOptions,
     args: &[&str],
     host: &dyn tome_core::NetHost,
@@ -250,8 +272,12 @@ fn 完整闭环_导入后搜索出结果() {
     let (_guard, source_path) = localized_source(&server);
 
     // ① 导入：报告应显示 1 条新增
+    // `--data-dir` 指向临时目录：不指定时注册表会落到工作目录的 `.tome/`，
+    // 那是**测试污染工作树**——必须避免（本测试最初就踩了这个坑）。
+    let data_dir = tempfile::tempdir().expect("应能建数据目录");
     let options = GlobalOptions {
         format: OutputFormat::Json,
+        data_dir: Some(data_dir.path().to_path_buf()),
         ..GlobalOptions::default()
     };
     let executor = executor_for(&options);
@@ -610,12 +636,16 @@ fn 无全局配置_配置经参数注入() {
     let (_guard, source_path) = localized_source(&server);
     let source_arg = source_path.to_str().unwrap().to_string();
 
+    // data_dir 指向临时目录：不指定时注册表会落到工作目录的 `.tome/`（测试污染）
+    let data_dir = tempfile::tempdir().expect("应能建数据目录");
     let json_options = GlobalOptions {
         format: OutputFormat::Json,
+        data_dir: Some(data_dir.path().to_path_buf()),
         ..GlobalOptions::default()
     };
     let human_options = GlobalOptions {
         format: OutputFormat::Human,
+        data_dir: Some(data_dir.path().to_path_buf()),
         ..GlobalOptions::default()
     };
 

@@ -626,6 +626,13 @@ mod tests {
         }"#
     }
 
+    /// 跑一次 CLI。
+    ///
+    /// ## 为什么强制注入 `data_dir`
+    ///
+    /// 未指定 `--data-dir` 时注册表会落到**工作目录**的 `.tome/`——测试会污染
+    /// 工作树（本测试最初就踩了这个坑：跑完一遍测试后仓库里冒出个 `.tome/`）。
+    /// 故除非参数里显式给了 `--data-dir`，一律重定向到临时目录。
     fn run_args(items: &[&str], host: &dyn NetHost, stdin: &str) -> CommandOutcome {
         let parsed = parse(
             &items
@@ -634,7 +641,20 @@ mod tests {
                 .collect::<Vec<String>>(),
         );
         match parsed {
-            ParseOutcome::Run { options, command } => {
+            ParseOutcome::Run {
+                mut options,
+                command,
+            } => {
+                if options.data_dir.is_none() {
+                    let dir = tempfile::tempdir().expect("应能建临时数据目录");
+                    options.data_dir = Some(dir.path().to_path_buf());
+                    // 目录必须活到 run 结束：故把 guard 绑在局部变量上，
+                    // 而不是 `.into_path()`（那会泄漏临时目录）。
+                    let mut reader = std::io::Cursor::new(stdin.as_bytes().to_vec());
+                    let outcome = run(&options, &command, host, &mut reader);
+                    drop(dir);
+                    return outcome;
+                }
                 let mut reader = std::io::Cursor::new(stdin.as_bytes().to_vec());
                 run(&options, &command, host, &mut reader)
             }

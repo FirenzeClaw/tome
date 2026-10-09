@@ -28,6 +28,10 @@
 /spikes/s0/corpus/*.jsoup.txt
 /spikes/s0/corpus/*.jsoup.stats.txt
 
+# CLI 的默认书源注册表目录（可移植模式：数据跟着程序走）
+# 用户在工作目录跑 `tome source import` 会生成它，不该被提交
+.tome/
+
 # 本地环境与覆盖配置
 .env
 .env.local

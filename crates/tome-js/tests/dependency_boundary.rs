@@ -77,11 +77,28 @@ fn tome_js_只依赖_tome_core() {
     let manifest = manifest_text();
     let names = dependency_names(&manifest);
 
-    // 架构允许的两类：core（接缝）与纯工具 crate（沙箱自身的能力）。
+    // 架构允许的三类：
     //
-    // `rquickjs` 是引擎本身；`thiserror` 是错误类型（AGENTS.md 要求每个 crate
-    // 拥有自己的错误类型）。两者都不引入"实现 crate 依赖"，不破坏边界。
-    let allowed = ["tome-core", "rquickjs", "thiserror"];
+    // 1. `tome-core` —— 接缝（宿主能力 trait 与共享值对象）
+    // 2. 引擎本身（`rquickjs`）与错误类型（`thiserror`，AGENTS.md 要求
+    //    每个 crate 拥有自己的错误类型）
+    // 3. **纯计算**算法 crate（摘要/编码）—— 它们不引入"实现 crate 依赖"，
+    //    与 `tome-net`/`tome-store` 这类承载 I/O 实现与宿主能力的 crate 不同：
+    //    摘要与 base64 是 `CryptoHost` 的本体实现（trait 文档写明
+    //    "纯计算，tome-js 内建，不需外部实现"），放进 `tome-core` 会污染
+    //    接缝中枢的零依赖约束。
+    //
+    // 判据不是"库名白名单"本身，而是**"这个依赖会不会让 tome-js 拿到
+    // 宿主能力的实现"**——下面显式点名的四个 crate 才是真正要防的。
+    let allowed = [
+        "tome-core",
+        "rquickjs",
+        "thiserror",
+        "md-5",
+        "sha1",
+        "sha2",
+        "base64",
+    ];
     let unexpected: Vec<&String> = names
         .iter()
         .filter(|name| !allowed.contains(&name.as_str()))
@@ -90,11 +107,11 @@ fn tome_js_只依赖_tome_core() {
         unexpected.is_empty(),
         "tome-js 的依赖表出现了架构不允许的 crate：{unexpected:?}\n\
          实际依赖：{names:?}\n\
-         （宿主能力 trait 定义在 tome-core，由组合根注入实现；\
-         tome-js 依赖 tome-net/tome-store 会破坏 A1 的星型依赖）"
+         新增依赖前先想清楚：它会不会让 tome-js 拿到宿主能力的实现？\n\
+         （宿主能力 trait 定义在 tome-core，由组合根注入实现）"
     );
 
-    // 显式点名两个最容易被顺手加上的：给出比"不在 allowed 里"更直白的诊断。
+    // 显式点名四个最容易被顺手加上的。
     for forbidden in ["tome-net", "tome-store", "tome-source", "tome-rule"] {
         assert!(
             !names.iter().any(|name| name == forbidden),

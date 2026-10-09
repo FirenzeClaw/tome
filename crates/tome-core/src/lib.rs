@@ -7,8 +7,9 @@
 //!
 //! - **领域 DTO**（[`model`]）：书源/书籍/章节/规则/阅读痕迹等纯数据。
 //!   上层与实现 crate 的公共语言；不含 DB/UI 注解（无 serde/无图形类型）。
-//! - **`ErrorKind` 错误分类**：各 crate 自带 thiserror 错误类型，在接缝处映射为
-//!   本 crate 的小型分类枚举，携带**可本地化的错误标识**而非文案（FR-044 / SC-016）。
+//! - **`ErrorKind` 错误分类**（[`error`]）：各 crate 自带 thiserror 错误类型，
+//!   在接缝处映射为本 crate 的小型分类枚举，携带**可本地化的错误标识**而非文案
+//!   （FR-044 / SC-016）。
 //! - **顶层接缝 trait**：`SourceEngine` / `ContentProvider` / `BookRepository`。
 //! - **宿主能力 trait 与共享值对象**：`NetHost` / `StoreHost` / `CryptoHost` 与
 //!   `RequestSpec` / `Response`。规则引擎求值产出 `RequestSpec`，管线是唯一发
@@ -26,9 +27,12 @@
 //! ## 关键入口
 //!
 //! - [`model`] —— 领域 DTO（T009）
+//! - [`error`] —— `ErrorKind` 六类错误分类（T010）
 
 #![forbid(unsafe_code)]
 
+pub mod error;
 pub mod model;
 
+pub use error::{ErrorCapability, ErrorKind, LocalizedMessage};
 pub use model::*;

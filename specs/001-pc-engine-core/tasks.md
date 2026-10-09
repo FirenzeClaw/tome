@@ -106,22 +106,22 @@
 
 ### tome-rule 最小子集（CSS + 正则 + 替换链）
 
-- [x] T020 [US2] tome-rule：自建 arena DOM（实现 html5ever `TreeSink`，保留节点类型细分 DataNode/CDataNode）于 `crates/tome-rule/src/dom.rs`（research R2：禁用 markup5ever_rcdom）
-  - [x] html5lib 树构造样本解析正确；保留 jsoup 兼容所需节点类型
-  - [x] 解析性能：1MB 乱网页 <100ms（实测 48.7ms / 61153 节点 / release，探针见 `cargo test -p tome-rule --release -- --ignored`）
-- [x] T021 [US2] tome-rule：CSS 选择器引擎（Servo selectors + cssparser 跑在自建 DOM 上，实现 `Element` trait）于 `crates/tome-rule/src/css.rs`
-  - [x] 标准选择器（类型/类/id/属性/组合子/nth/is/where/has/not）全部可用
-- [x] T022 [US2] tome-rule：CSS 后缀与索引切片（`@text/@ownText/@html/@all/@attr(x)`、`[0]/.-1/[0:3]/[!0:3]`）于 `crates/tome-rule/src/css_post.rs`
-  - [x] 各后缀语义正确；索引切片含负索引与反序
-- [x] T023 [US2] tome-rule：规则分派器（前缀 `@css:`/`@json:`/`@XPath:`/`@js:`/`@@`/无前缀嗅探）+ 引号/括号感知组合符切分（`&&`/`||`/`%%`）于 `crates/tome-rule/src/dispatch.rs`（FR-003 规则选择语法）
-  - [x] 组合符不被 JSONPath 内的 `&&` 误切（引号/括号感知）
-- [x] T024 [US2] tome-rule：正则双引擎 + 规范化层 + `$1`→`${1}` 翻译层于 `crates/tome-rule/src/regex.rs`（research R5）
-  - [x] 预扫描路由：无 fancy 特性走 regex 快路径；含 lookaround/backref 路由 fancy-regex
-  - [x] **规范化层把 `a++`/`a*+`/`a?+` 显式转 `(?>a+)`**（regex 静默当嵌套重复的陷阱）
-  - [x] 翻译层：`$1a` 不误读为组 `1a`；`\$`→`$$`；非法引用→空串
-  - [x] fancy-regex 设低 backtrack_limit + 输入长度上限（防 20 万字挂起）
-- [x] T025 [US2] tome-rule：替换链（`## regex ## replacement ##` 可叠加）+ `{{}}` JS 插值占位（接 T043 的 JS 桥）于 `crates/tome-rule/src/replace.rs`（FR-004）
-  - [x] 多条替换按序叠加；`##` 边界引号感知
+- [ ] T020 [US2] tome-rule：自建 arena DOM（实现 html5ever `TreeSink`，保留节点类型细分 DataNode/CDataNode）于 `crates/tome-rule/src/dom.rs`（research R2：禁用 markup5ever_rcdom）
+  - [ ] html5lib 树构造样本解析正确；保留 jsoup 兼容所需节点类型
+  - [ ] 解析性能：1MB 乱网页 <100ms
+- [ ] T021 [US2] tome-rule：CSS 选择器引擎（Servo selectors + cssparser 跑在自建 DOM 上，实现 `Element` trait）于 `crates/tome-rule/src/css.rs`
+  - [ ] 标准选择器（类型/类/id/属性/组合子/nth/is/where/has/not）全部可用
+- [ ] T022 [US2] tome-rule：CSS 后缀与索引切片（`@text/@ownText/@html/@all/@attr(x)`、`[0]/.-1/[0:3]/[!0:3]`）于 `crates/tome-rule/src/css_post.rs`
+  - [ ] 各后缀语义正确；索引切片含负索引与反序
+- [ ] T023 [US2] tome-rule：规则分派器（前缀 `@css:`/`@json:`/`@XPath:`/`@js:`/`@@`/无前缀嗅探）+ 引号/括号感知组合符切分（`&&`/`||`/`%%`）于 `crates/tome-rule/src/dispatch.rs`（FR-003 规则选择语法）
+  - [ ] 组合符不被 JSONPath 内的 `&&` 误切（引号/括号感知）
+- [ ] T024 [US2] tome-rule：正则双引擎 + 规范化层 + `$1`→`${1}` 翻译层于 `crates/tome-rule/src/regex.rs`（research R5）
+  - [ ] 预扫描路由：无 fancy 特性走 regex 快路径；含 lookaround/backref 路由 fancy-regex
+  - [ ] **规范化层把 `a++`/`a*+`/`a?+` 显式转 `(?>a+)`**（regex 静默当嵌套重复的陷阱）
+  - [ ] 翻译层：`$1a` 不误读为组 `1a`；`\$`→`$$`；非法引用→空串
+  - [ ] fancy-regex 设低 backtrack_limit + 输入长度上限（防 20 万字挂起）
+- [ ] T025 [US2] tome-rule：替换链（`## regex ## replacement ##` 可叠加）+ `{{}}` JS 插值占位（接 T043 的 JS 桥）于 `crates/tome-rule/src/replace.rs`（FR-004）
+  - [ ] 多条替换按序叠加；`##` 边界引号感知
 
 ### tome-source 搜索路径
 

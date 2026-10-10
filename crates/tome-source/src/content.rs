@@ -795,7 +795,9 @@ mod tests {
         let _ = book_id;
 
         // 未命中 → 写入 → 命中
-        assert!(ChapterCache::get(&cache, chapter_id).expect("应成功").is_none());
+        assert!(ChapterCache::get(&cache, chapter_id)
+            .expect("应成功")
+            .is_none());
         ChapterCache::put(&cache, chapter_id, "正文内容".as_bytes()).expect("应能写");
         let read = ChapterCache::get(&cache, chapter_id)
             .expect("应成功")

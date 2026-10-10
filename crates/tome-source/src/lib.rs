@@ -40,6 +40,7 @@
 pub mod action;
 pub mod content;
 pub mod error;
+pub mod image;
 pub mod info;
 pub mod js;
 

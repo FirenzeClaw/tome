@@ -326,9 +326,8 @@ fn us1_scenario_1_line_width_within_one_squeeze_unit() {
                 // 实则是浮点与字形度量的边界。取 1px 余量过滤这类抖动。
                 let has_degraded_fragment = result.degraded_words > 0
                     && line.glyphs.iter().any(|glyph| {
-                        text.get(glyph.byte_range.clone()).is_some_and(|slice| {
-                            slice.chars().all(classify_is_latin)
-                        })
+                        text.get(glyph.byte_range.clone())
+                            .is_some_and(|slice| slice.chars().all(classify_is_latin))
                     })
                     && false; // 见下方说明：结构性例外 A 用更精确的判据
                 let _ = has_degraded_fragment;

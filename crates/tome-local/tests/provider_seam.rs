@@ -414,3 +414,264 @@ fn chapter_indices_match_the_toc() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// ChapterContent.images（PM 裁决 OQ#13 / `contracts/seams.md` §2）
+// ---------------------------------------------------------------------------
+
+/// 造一个含内嵌图片的 EPUB（内存→临时文件）。
+///
+/// 结构是最小可用的 EPUB：`mimetype` + `container.xml` + OPF + 一章 XHTML
+/// + 一张图片资源。
+fn write_epub_with_image(dir: &Path) -> std::path::PathBuf {
+    use std::io::Write;
+
+    // 图片前留一段**足够长**的文字（> 校正窗口的 16 字），
+    // 这样"改图片之前的文本"的测试可以把修改点放在窗口之外——
+    // 否则修改会落在窗口内，校正必然失败（那是另一条测试的场景）
+    let chapter_xhtml = r#"<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><body>
+<p>开头这段文字足够长以便把校正窗口完全填满不含任何可改动之处。</p>
+<p><img src="images/pic.png" alt="一幅插图"/></p>
+<p>第二段正文。</p>
+</body></html>"#;
+
+    let opf = r#"<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="id">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>插图测试书</dc:title>
+    <dc:identifier id="id">urn:uuid:img-test</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="c1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="img1" href="images/pic.png" media-type="image/png"/>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+  </manifest>
+  <spine toc="ncx"><itemref idref="c1"/></spine>
+</package>"#;
+
+    let ncx = r#"<?xml version="1.0" encoding="utf-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <navMap>
+    <navPoint id="n1" playOrder="1"><navLabel><text>第一章</text></navLabel>
+      <content src="chapter1.xhtml"/></navPoint>
+  </navMap>
+</ncx>"#;
+
+    let container = r#"<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>"#;
+
+    let path = dir.join("with-image.epub");
+    let file = std::fs::File::create(&path).expect("建文件");
+    let mut writer = zip::ZipWriter::new(file);
+    let options: zip::write::FileOptions<'_, ()> = zip::write::FileOptions::default();
+
+    writer.start_file("mimetype", options).expect("mimetype");
+    writer.write_all(b"application/epub+zip").expect("写");
+
+    writer
+        .start_file("META-INF/container.xml", options)
+        .expect("container");
+    writer.write_all(container.as_bytes()).expect("写");
+
+    writer
+        .start_file("OEBPS/content.opf", options)
+        .expect("opf");
+    writer.write_all(opf.as_bytes()).expect("写");
+
+    writer.start_file("OEBPS/toc.ncx", options).expect("ncx");
+    writer.write_all(ncx.as_bytes()).expect("写");
+
+    writer
+        .start_file("OEBPS/chapter1.xhtml", options)
+        .expect("chapter");
+    writer.write_all(chapter_xhtml.as_bytes()).expect("写");
+
+    // 一张 1x1 PNG（内容无所谓，测试不读它）
+    const PNG: &[u8] = &[
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
+        0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00,
+        0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49,
+        0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+    ];
+    writer
+        .start_file("OEBPS/images/pic.png", options)
+        .expect("png");
+    writer.write_all(PNG).expect("写");
+
+    writer.finish().expect("收尾");
+    path
+}
+
+/// 构造 EPUB 书的 provider。
+fn epub_provider(path: &Path, cleaner: Arc<dyn Cleaner>) -> LocalContentProvider {
+    // 走真实导入路径拿到目录（不手工拼 Chapter）
+    let parsed = tome_local::epub::import_path(path).expect("应能解析 EPUB");
+    let toc = tome_local::epub::to_chapters(&parsed.toc, 1);
+    let source = Arc::new(LocalSource::new(path.to_path_buf(), LocalFormat::Epub, toc));
+    LocalContentProvider::new(source, cleaner)
+}
+
+/// 一本书（EPUB）。
+fn epub_book() -> Book {
+    let mut book = sample_book();
+    book.name = "插图测试书".to_string();
+    book.format = Some("epub".to_string());
+    book.total_chapters = Some(1);
+    book
+}
+
+/// 含图章节经 ContentProvider 取得正文时，`images` 带正确的字符位置与缓存键。
+#[test]
+fn epub_chapter_content_carries_images() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let path = write_epub_with_image(dir.path());
+    let provider = epub_provider(&path, Arc::new(tome_local::provider::NoCleaner));
+
+    let content = provider
+        .chapter_content(&epub_book(), 0)
+        .expect("应能取正文");
+
+    assert_eq!(
+        content.images.len(),
+        1,
+        "这一章有一张图：{:?}",
+        content.images
+    );
+    let image = &content.images[0];
+    assert_eq!(
+        image.cache_key, "images/pic.png",
+        "缓存键应是资源地址（EPUB 内的相对路径）"
+    );
+    assert_eq!(
+        image.alt.as_deref(),
+        Some("一幅插图"),
+        "alt 应被带上（图取不到时界面才能展示有意义的占位）"
+    );
+
+    // 位置：应在第一段之后、第二段之前
+    let chars: Vec<char> = content.content.chars().collect();
+    let offset = image.char_offset as usize;
+    assert!(
+        offset <= chars.len(),
+        "偏移 {offset} 越界（正文 {} 字）——越界会让排版崩",
+        chars.len()
+    );
+    let before: String = chars[..offset].iter().collect();
+    assert!(
+        before.contains("开头这段文字"),
+        "图片应排在前一段文字之后，实际前缀：{before:?}"
+    );
+    // 且应排在**下一段之前**——只断言"在前面"会让"图片被放到文末"也通过
+    let after: String = chars[offset..].iter().collect();
+    assert!(
+        after.contains("第二段正文"),
+        "图片应排在「第二段正文」之前，实际后缀：{after:?}"
+    );
+}
+
+/// 无图章节的 `images` 是**空列表**（不是 panic、不是 None）。
+#[test]
+fn chapter_without_images_has_empty_list() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let provider = provider_with(
+        dir.path(),
+        SAMPLE,
+        Arc::new(tome_local::provider::NoCleaner),
+    );
+
+    for chapter in provider.toc(&sample_book()).expect("目录") {
+        let content = provider
+            .chapter_content(&sample_book(), chapter.index_in_book)
+            .expect("取正文");
+        assert!(
+            content.images.is_empty(),
+            "TXT 书没有内嵌图，images 应是空列表（第 {} 章）",
+            chapter.index_in_book
+        );
+    }
+}
+
+/// 净化**在图片之前**删字时，图片偏移被正确左移（而不是照搬旧值）。
+#[test]
+fn image_offset_shifts_with_purification() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let path = write_epub_with_image(dir.path());
+
+    // 先取未净化的偏移做基准
+    let plain = epub_provider(&path, Arc::new(tome_local::provider::NoCleaner));
+    let before = plain.chapter_content(&epub_book(), 0).expect("应能取正文");
+    assert_eq!(before.images.len(), 1);
+    let original_offset = before.images[0].char_offset;
+
+    // 净化：把开头的"开头"替换成"起首"（**等长**，故长度不变）……
+    // 等长替换测不出偏移校正。改用"开头这段"→"起首"（短 2 字），
+    // 修改点在图片前 20+ 字处，落在 16 字校正窗口**之外**——
+    // 故窗口内容在净化后原样存在，校正能把偏移左移 2。
+    let cleaner = Arc::new(FixedCleaner {
+        pattern: "开头这段".to_string(),
+        replacement: "起首".to_string(),
+    });
+    let provider = epub_provider(&path, cleaner);
+    let after = provider
+        .chapter_content(&epub_book(), 0)
+        .expect("应能取正文");
+
+    assert!(
+        after.content.contains("起首"),
+        "净化应已生效：{:?}",
+        after.content
+    );
+    assert_eq!(
+        after.images.len(),
+        1,
+        "净化只改了图片之前（且在窗口之外）的文本，图应仍能定位"
+    );
+    assert_eq!(
+        after.images[0].char_offset,
+        original_offset - 2,
+        "「开头这段」(4 字)→「起首」(2 字) 少了 2 个字，图片偏移应左移 2"
+    );
+}
+
+/// 净化**整段删掉图片所在的前文**时，图被丢弃（而不是插到错位置）。
+///
+/// # 为什么要"整段删"才能构造出"无法定位"
+///
+/// 首版这条测试只是**替换**了图片前面的一段文字，结果图仍能定位——
+/// 因为它紧邻的前导空白（两个换行）在净化后原样保留，4 字的上下文
+/// 照样匹配得上。要真正让位置无从确定，必须把图片**连同它周围的
+/// 上下文一起**改掉，使任何 ≥ `MIN_CONTEXT` 的前缀都不复存在。
+#[test]
+fn unlocatable_image_is_dropped_not_misplaced() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let path = write_epub_with_image(dir.path());
+
+    // 把整段前文（含尾部标点，故图片的紧邻前缀也随之消失）换成一串
+    // 与原文**无任何 4 字以上公共子串**的文字
+    let cleaner = Arc::new(FixedCleaner {
+        pattern: "开头这段文字足够长以便把校正窗口完全填满不含任何可改动之处。".to_string(),
+        replacement: "XYZQWERTY".to_string(),
+    });
+    let provider = epub_provider(&path, cleaner);
+    let content = provider
+        .chapter_content(&epub_book(), 0)
+        .expect("应能取正文");
+
+    assert!(
+        content.content.contains("XYZQWERTY"),
+        "净化应已生效：{:?}",
+        content.content
+    );
+    assert!(
+        content.images.is_empty(),
+        "上下文被整段改掉的图应被丢弃——位置错的图比没有图更糟（会被插进无关段落）。
+实际正文：{:?}
+实际 images：{:?}",
+        content.content,
+        content.images
+    );
+}

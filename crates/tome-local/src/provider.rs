@@ -179,6 +179,41 @@ impl LocalSource {
         }
     }
 
+    /// EPUB：读某章的**文本 + 图片锚点**（两者同源产出）。
+    ///
+    /// # 为什么单独一个方法而不复用 `read_epub`
+    ///
+    /// `read_epub` 只要文本，而图片锚点必须在**同一次解析**里收集
+    /// （见 `epub::extract_text_with_images` 的说明）。故这里多一个入口，
+    /// 两者共用同一份扫描逻辑。非 EPUB 格式返回空锚点。
+    pub fn raw_chapter_with_images(
+        &self,
+        chapter: &Chapter,
+    ) -> crate::LocalResult<(String, Vec<crate::epub::LocalImageAnchor>)> {
+        if self.format != LocalFormat::Epub {
+            // TXT/MOBI 没有内嵌资源，故无图（空列表是正常状态）
+            return Ok((self.raw_chapter(chapter)?, Vec::new()));
+        }
+        let bytes = self.bytes()?;
+        let entry = chapter
+            .epub_entry
+            .as_deref()
+            .ok_or_else(|| LocalError::damaged("EPUB 章节缺少 epub_entry 定位信息"))?;
+        let (name, fragment) = match entry.split_once('#') {
+            Some((name, fragment)) => (name, Some(fragment)),
+            None => (entry, None),
+        };
+        let raw = crate::epub::read_chapter_bytes(&bytes, name)?
+            .ok_or_else(|| LocalError::damaged(format!("EPUB 条目不存在：{name}")))?;
+        let xhtml = String::from_utf8_lossy(&raw).into_owned();
+        let (text, images) = crate::epub::extract_text_with_images(&xhtml);
+        let text = match fragment {
+            Some(fragment) => slice_fragment(&text, &xhtml, fragment),
+            None => text,
+        };
+        Ok((text, images))
+    }
+
     /// TXT：按字节偏移读区间。
     fn read_txt(&self, chapter: &Chapter) -> crate::LocalResult<String> {
         let bytes = self.bytes()?;
@@ -370,9 +405,9 @@ impl ContentProvider for LocalContentProvider {
             // 而 trait 签名不接收它。
             .ok_or(ErrorKind::Content)?;
 
-        let raw = self
+        let (raw, image_anchors) = self
             .source
-            .raw_chapter(&chapter)
+            .raw_chapter_with_images(&chapter)
             .map_err(|error| error.kind())?;
 
         // 净化链（FR-014 的固定顺序：替换 → 高亮 → 词典）。
@@ -384,6 +419,9 @@ impl ContentProvider for LocalContentProvider {
         Ok(ChapterContent {
             chapter_index,
             title: chapter.title.clone(),
+            // 图片位置要相对**净化后**的文本（契约见 `ImageRef` 的说明），
+            // 而锚点是相对原始文本算的——故对照两者做位置校正
+            images: crate::epub_image_refs(&raw, &outcome.text, &image_anchors),
             content: outcome.text,
             // 本地书没有"缓存"这回事（内容就在用户的文件里），
             // 故恒为 false。这个字段对本地书没有信息量，但契约要求它存在。
@@ -403,6 +441,7 @@ impl ContentProvider for LocalContentProvider {
             .cloned()
             .ok_or(ErrorKind::Content)?;
 
+        // 这里只要文本（锚点解析用），故不走取图片锚点的那条路径
         let raw = self
             .source
             .raw_chapter(&chapter)

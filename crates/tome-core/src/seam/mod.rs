@@ -33,7 +33,7 @@ pub use repository::{
 };
 pub use source::{
     AnchorQuery, ChangeSourceOutcome, ChapterContent, CheckReport, CheckStream, CheckVerdict,
-    ContentProvider, ExplorePage, ProgressMapping, SourceCheckFilter, SourceEngine,
+    ContentProvider, ExplorePage, ImageRef, ProgressMapping, SourceCheckFilter, SourceEngine,
 };
 pub use stream::{CancelToken, SearchResultItem, SearchStream};
 

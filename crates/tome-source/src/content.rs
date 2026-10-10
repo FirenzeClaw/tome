@@ -96,6 +96,21 @@ pub struct ChapterOutcome {
     pub title: String,
     /// **净化前**的原始正文
     pub raw: String,
+    /// 正文页的原始 HTML（`None` = 来自缓存，HTML 未保留）
+    ///
+    /// # 为什么保留它
+    ///
+    /// 图片位置（`ImageRef::char_offset`，PM 裁决 OQ#13）要从 HTML 里算
+    /// ——`<img>` 在正文元素序列中的位置决定了它插进文本流的偏移。
+    /// 从缓存读回时只有纯文本，没有 HTML，故那时算不出位置。
+    ///
+    /// ## 为什么缓存里不存 HTML
+    ///
+    /// 缓存的是**正文**（FR-029），HTML 比纯文本大数倍。为图片位置把
+    /// HTML 也缓存进去会让缓存体积显著膨胀，与 SC-005 的开销约束冲突。
+    /// 折中：缓存路径不产出图片位置（由 provider 的暂存兜住常见情况——
+    /// 同一章被连读时命中暂存，不经过缓存路径）。
+    pub raw_html: Option<String>,
     /// 内容是否来自缓存
     pub from_cache: bool,
     /// 缓存写入失败时的诊断（`None` = 没出问题或未尝试写入）
@@ -106,6 +121,17 @@ impl ChapterOutcome {
     /// 净化前的正文（供净化管线（T069）作为输入）。
     pub fn raw(&self) -> &str {
         &self.raw
+    }
+
+    /// 正文页 HTML；没有时给空串。
+    ///
+    /// # 为什么不返回 `Option`
+    ///
+    /// 调用方（图片锚点提取）拿到空 HTML 时的行为就是"解析出空文档、
+    /// 得空锚点列表"——那正是 `Option::None` 该有的下游行为。让它返回
+    /// `&str` 省得每个调用点都写一次 `unwrap_or_default()`。
+    pub fn raw_html(&self) -> &str {
+        self.raw_html.as_deref().unwrap_or("")
     }
 }
 
@@ -203,6 +229,8 @@ pub fn chapter_content_with_js(
                     chapter_index: chapter.index_in_book,
                     title: chapter.title.clone(),
                     raw,
+                    // 缓存里只有正文，没有 HTML（见字段说明）
+                    raw_html: None,
                     from_cache: true,
                     cache_warning: None,
                 });
@@ -239,6 +267,7 @@ pub fn chapter_content_with_js(
         chapter_index: chapter.index_in_book,
         title: chapter.title.clone(),
         raw,
+        raw_html: Some(html),
         from_cache: false,
         cache_warning,
     })

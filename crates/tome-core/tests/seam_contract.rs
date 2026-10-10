@@ -161,6 +161,8 @@ impl ContentProvider for FakeContentProvider {
             chapter_index,
             title: "第一章".to_owned(),
             content: "正文".to_owned(),
+            // 这一章无图 —— 空列表是"无图"的正常表达（见 `ImageRef` 的说明）
+            images: Vec::new(),
             from_cache: false,
         })
     }

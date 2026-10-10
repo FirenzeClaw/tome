@@ -34,16 +34,19 @@
 //!
 //! | 模块 | 职责 | 状态 |
 //! |---|---|---|
+//! | [`text`] | 文本模型（字符下标口径）+ 段落切分 | [DONE] T010/T011 |
+//! | [`corpus`] | 排版合成语料的装载与校验 | [DONE] T004 |
 //! | [`error`] | 本层错误类型 + `→ErrorKind` 映射（FR-057/058） | [DONE] T003 |
 //! | [`render`] | wgpu 自绘管线（仅 `render` feature） | [WIP] S2-4 |
 //!
-//! 后续切片的模块（`text` / `rules` / `layout` / `paginate` / `scroll` /
-//! `trace`）随 S2-1~S2-5 落地，见 `specs/002-typesetting-renderer/tasks.md`。
+//! 后续切片的模块（`rules` / `layout` / `paginate` / `scroll` / `trace`）
+//! 随 S2-1~S2-5 落地，见 `specs/002-typesetting-renderer/tasks.md`。
 
 #![forbid(unsafe_code)]
 
 pub mod corpus;
 pub mod error;
+pub mod text;
 
 #[cfg(feature = "render")]
 pub mod render;

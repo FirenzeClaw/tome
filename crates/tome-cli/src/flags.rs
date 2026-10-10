@@ -178,11 +178,28 @@ pub enum Command {
     ///
     /// 跑合成语料差分：逐条比对引擎输出与期望，输出一致率与逐条 diff。
     /// 对应 SC-002(a)：合成用例通过率 ≥95%。
+    ///
+    /// 同时输出 **FR-005b 覆盖率矩阵**（T085）。
     Verify {
         /// 语料目录
         corpus: PathBuf,
         /// 报告输出文件（`None` 表示写 stdout）
         report: Option<PathBuf>,
+    },
+    /// `verify --real-sources <dir> --golden <dir> [--report <file>]`（T086 / SC-002b）
+    ///
+    /// 真实书源端到端对照：跑真实书源抓取，与对照基线比对。
+    /// 与 `--corpus` 的区别是它**真的发请求**（合成语料是纯计算），
+    /// 故需要网络宿主。
+    VerifyReal {
+        /// 真实书源目录
+        real_sources: PathBuf,
+        /// 对照基线目录
+        golden: PathBuf,
+        /// 报告输出文件
+        report: Option<PathBuf>,
+        /// 是否把本次结果写为新基线（首轮基线落盘）
+        write_baseline: bool,
     },
 }
 
@@ -229,6 +246,9 @@ pub fn parse(args: &[String]) -> ParseOutcome {
     let mut action: Option<String> = None;
     let mut input: Option<String> = None;
     let mut corpus: Option<PathBuf> = None;
+    let mut real_sources: Option<PathBuf> = None;
+    let mut golden: Option<PathBuf> = None;
+    let mut write_baseline_flag = false;
     let mut report: Option<PathBuf> = None;
     let mut group: Option<String> = None;
     let mut enabled_only = false;
@@ -361,6 +381,28 @@ pub fn parse(args: &[String]) -> ParseOutcome {
                 };
                 corpus = Some(PathBuf::from(value));
                 2
+            }
+            // T086：真实书源档（SC-002b）
+            "--real-sources" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => return ParseOutcome::Usage("--real-sources 需要一个目录".to_string()),
+                };
+                real_sources = Some(PathBuf::from(value));
+                2
+            }
+            "--golden" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => return ParseOutcome::Usage("--golden 需要一个目录".to_string()),
+                };
+                golden = Some(PathBuf::from(value));
+                2
+            }
+            // 首轮基线落盘（T086）
+            "--write-baseline" => {
+                write_baseline_flag = true;
+                1
             }
             // [P7-MERGE] 本地书：`--copy` 与 `--library`（可重复）
             "--copy" => {
@@ -546,14 +588,40 @@ pub fn parse(args: &[String]) -> ParseOutcome {
             }
         }
         "verify" => {
-            // `verify` 需要 `--corpus <dir>`（`contracts/cli.md` 的唯一形态；
-            // `--real-sources`/`--golden` 形态属 S1-6 的真实基线，本阶段不做）
-            let Some(corpus) = corpus else {
+            // `verify` 有两种形态（`contracts/cli.md`）：
+            //   --corpus <dir>                            合成语料差分（SC-002a，纯计算）
+            //   --real-sources <dir> --golden <dir>        真实书源对照（SC-002b，发请求）
+            //
+            // 两者互斥：同时给是用法错误（"你要跑哪一档"没有歧义余地，
+            // 静默选一个会让脚本以为另一档也跑了）。
+            if corpus.is_some() && real_sources.is_some() {
                 return ParseOutcome::Usage(
-                    "verify 需要 --corpus <dir>（用法：verify --corpus tests/corpus/）".to_string(),
+                    "verify 的 --corpus 与 --real-sources 互斥（合成档与真实源档是两回事）"
+                        .to_string(),
                 );
-            };
-            Command::Verify { corpus, report }
+            }
+
+            if let Some(real_sources) = real_sources {
+                let Some(golden) = golden else {
+                    return ParseOutcome::Usage(
+                        "verify --real-sources 需要 --golden <dir>（对照基线目录）".to_string(),
+                    );
+                };
+                Command::VerifyReal {
+                    real_sources,
+                    golden,
+                    report,
+                    write_baseline: write_baseline_flag,
+                }
+            } else {
+                let Some(corpus) = corpus else {
+                    return ParseOutcome::Usage(
+                        "verify 需要 --corpus <dir> 或 --real-sources <dir> --golden <dir>"
+                            .to_string(),
+                    );
+                };
+                Command::Verify { corpus, report }
+            }
         }
         // [P7-MERGE] `local` 子命令（T076-T083）
         "local" => {
@@ -662,6 +730,8 @@ pub fn help_text() -> String {
         "  tome local scan <dir> [--library <dir>...]         库根扫描（多库根）",
         "  tome run <source-id> --action <a> [--input <s>]     通用执行（--action search）",
         "  tome verify --corpus <dir> [--report <file>]       跑合成语料差分（SC-002a）",
+        "  tome verify --real-sources <dir> --golden <dir>     真实书源对照基线（SC-002b）",
+        "              [--write-baseline] [--report <file>]",
         "",
         "全局选项：",
         "  --format json|human    输出格式（默认 json）",
@@ -670,6 +740,9 @@ pub fn help_text() -> String {
         "  --offline              完全离线（须与 --replay 同用）",
         "  --data-dir <path>      数据目录",
         "  --corpus <dir>         合成语料目录（verify 用）",
+        "  --real-sources <dir>   真实书源目录（verify --real-sources 用）",
+        "  --golden <dir>         对照基线目录（verify --real-sources 用）",
+        "  --write-baseline       把本次结果写为新基线（首轮基线落盘用）",
         "  --report <file>        报告输出文件（verify 用，默认为 stdout）",
         "  -h, --help             显示本帮助",
         "",

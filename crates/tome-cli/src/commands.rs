@@ -222,6 +222,21 @@ pub fn run_with_js(
             _unused: _,
         } => crate::local::run_scan(options, directory, roots),
         Command::Verify { corpus, report } => run_verify(corpus, report.as_deref()),
+        // T086：真实书源档（SC-002b）。它**真的发请求**，故需要网络宿主。
+        Command::VerifyReal {
+            real_sources,
+            golden,
+            report,
+            write_baseline,
+        } => crate::verify_real::run(
+            real_sources,
+            golden,
+            report.as_deref(),
+            *write_baseline,
+            options,
+            host,
+            hosts,
+        ),
     }
 }
 

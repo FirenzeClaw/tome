@@ -41,6 +41,7 @@ pub mod js_host;
 pub mod local;
 pub mod pipeline_commands;
 pub mod root;
+pub mod verify_real;
 
 pub use commands::{build_executor, run, CommandOutcome};
 pub use flags::{

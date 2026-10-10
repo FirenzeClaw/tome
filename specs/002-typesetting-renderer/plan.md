@@ -163,7 +163,28 @@ crates/tome-reader/tests/
 ├── snapshot.rs                   # pixelmatch-YIQ 双闸门 harness（R4）+ 诚实跳过/probe
 ├── snapshots/                    # 基线 PNG（入 git，dev-only）
 ├── anchor_matrix.rs              # SC-004/005/005b 参数化不变量
+├── pagination_lossless.rs        # SC-006 内容页无损
+├── spread_override.rs            # FR-015 手动覆盖回落/保留
+├── book_semantics.rs             # FR-016 书页语义 + SC-006 留白页完整口径
+├── theme_independence.rs         # SC-005 呈现参数零依赖
+├── precalc.rs                    # FR-044/045 预计算/增量重排
+├── scroll_flow_integrity.rs      # SC-006b 滚动流完整
+├── scroll_map_inverse.rs         # FR-022/040 滚动双向映射互逆
+├── mode_switch_anchor.rs         # SC-005b 形态切换保锚点
+├── scroll_relayout_anchor.rs     # FR-024 滚动重排保锚点
+├── scroll_no_fetch.rs            # FR-025 滚动零抓取 + 加载态
+├── scroll_memory.rs              # FR-026/SC-010 按需释放与内存
+├── record_dedup_cross_mode.rs    # SC-013b 记录跨模式一致 + 节流
+├── render_deterministic.rs       # SC-012 渲染确定性
+├── theme_injection.rs            # FR-029 Theme 注入路径
+├── trace_exactness.rs            # SC-013 痕迹渲染精确性
+├── hit_test_inverse.rs           # FR-040 命中互逆 + FR-038 选择
+├── footer.rs                     # FR-042 页脚各分支
+├── perf_baseline.rs              # SC-007~010 性能分档（release）
 └── corpus/                       # 排版合成语料（禁则/挤压/混排/对齐各语法点）
+
+crates/tome-reader/examples/
+└── probe.rs                      # 快照后端探针（CI 以 cargo run --example probe 触发，打印后端名）
 
 crates/tome-cli/src/
 └── reader_commands.rs            # 五子命令薄壳（layout/layout-anchor/render/fonts/verify-layout）

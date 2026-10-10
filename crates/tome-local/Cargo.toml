@@ -12,5 +12,30 @@ tome-store = { workspace = true }
 # TOC 识别复用规则引擎的既有语义，避免同一套切分逻辑实现两遍（宪法原则 IV DRY）
 tome-rule = { workspace = true }
 
+# 字符集检测与解码（T076 / FR-020）。
+#
+# 与 tome-net 用同一对 crate，但**各自持有依赖**：架构铁律规定 tome-local
+# 不依赖 tome-net（本地书全程离线），故这边独立声明。判据与取向保持一致
+# （见 encoding 模块文档），只是没有"响应声明"这个前提。
+chardetng = "1.0.0"
+encoding_rs = "0.8.42"
+
+# EPUB 容器解析（T077 / FR-021）：zip 读条目、quick-xml 读写 OPF/NCX。
+zip = { version = "2", default-features = false, features = ["deflate"] }
+quick-xml = "0.37"
+
+# TXT 目录规则求值（T076 / FR-020）。只用来跑用户配置的目录正则，
+# 不做书源规则的完整求值（那属 tome-rule）。
+regex = "1.13.1"
+
+# 本 crate 自身错误类型（AGENTS.md：每个 crate 拥有自己的错误类型）
+thiserror = "2.0.21"
+
+[dev-dependencies]
+# 测试要写临时书与临时目录（不污染仓库）
+tempfile = "3"
+# provider 的 seam 契约测试要构造净化管线（T083 的"净化在 seam 下游"）
+tome-rule = { workspace = true }
+
 [lints]
 workspace = true

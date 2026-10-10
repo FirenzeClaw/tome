@@ -1,0 +1,1080 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tome · 设计稿渲染预览</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* 预览容器：每屏固定 1440×900，用于像素核对 */
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #1a1a1a; font-family: var(--font-ui); }
+  /* ============================================================
+     交互控制台（仅预览用，不属于设计稿本身）
+     ============================================================ */
+  body.lab { background: #121216; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+  .labbar { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+            padding: 10px 16px; background: #1b1b21; border-bottom: 1px solid #2a2a33;
+            font-family: var(--font-ui); color: #c9c9d4; font-size: 12px; }
+  .labbar .ttl { font-weight: 700; color: #ececf1; margin-right: 6px; }
+  .labbar .grp { display: flex; align-items: center; gap: 6px; padding: 4px 8px;
+                 background: #24242c; border-radius: 8px; }
+  .labbar .grp > .k { opacity: .6; }
+  .labbar button { background: #2e2e38; color: #c9c9d4; border: 1px solid #3a3a46; border-radius: 6px;
+                   padding: 5px 11px; font-size: 12px; cursor: pointer; font-family: inherit; }
+  .labbar button:hover { background: #3a3a46; color: #fff; }
+  .labbar button.on { background: #D9794A; border-color: #D9794A; color: #15100c; font-weight: 600; }
+  .labbar .range { width: 150px; accent-color: #D9794A; }
+  .labbar .readout { font-family: var(--font-mono); font-size: 12px; min-width: 74px; }
+  .labbar .hint { margin-left: auto; opacity: .5; font-size: 11.5px; }
+
+  /* 舞台：可滚动的设计稿容器 */
+  .viewport { flex: 1; overflow: auto; padding: 32px; display: block; }
+  .viewport.centered { display: flex; align-items: center; justify-content: center; }
+  .frame { box-shadow: 0 24px 60px -12px rgba(0,0,0,.6); border-radius: 10px; }
+  .frame.dragging-width { transition: none; }
+
+  /* 原有一屏一屏的静态网格模式（?grid=1） */
+  .stage.gridmode { display: flex; flex-wrap: wrap; gap: 24px; padding: 24px; }
+  .stage.gridmode .frame { display: block !important; }
+
+  .frame { width: 1440px; height: 900px; position: relative; overflow: hidden;
+           background: var(--bg-base); color: var(--text-primary); }
+  .frame.narrow { width: 600px; }
+  /* 双页画板：宽度须真实满足 MASTER §5.2 的双页阈值（默认字号下 1432px 可用宽 + 内边距） */
+  .frame.wide { width: 1760px; }
+  /* 单屏截图模式：只显示被指定的那一屏，且紧贴视口左上角铺满。
+     必须用绝对定位清零——若走流式布局，页面尺寸与 --window-size 不一致时
+     会在视口边缘露出未绘制的黑色底色（污染归档截图）。 */
+  body.single { background: #1a1a1a; }
+  body.single .stage { position: absolute; top: 0; left: 0; }
+  body.single .frame { display: none; margin: 0; box-shadow: none; border-radius: 0; }
+  body.single .frame.active { display: block; }
+  .frame > .app > .body { height: calc(100% - 56px); }
+  .frame > .body { height: calc(100% - 56px); }
+
+  /* ---------- 骨架 ---------- */
+  .app { display: flex; flex-direction: column; width: 100%; height: 100%; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 18px;
+            height: 56px; padding: 0 20px; background: var(--bg-surface); border-bottom: 1px solid var(--border-subtle); flex: 0 0 auto; }
+  .brand { display: flex; align-items: center; gap: 8px; }
+  .brand .name { font-family: var(--font-reading); font-size: 17px; font-weight: 700; color: var(--text-primary); }
+  .search { display: flex; align-items: center; gap: 8px; width: 380px; height: var(--control-h); flex: 0 0 auto;
+            background: var(--bg-inset); border-radius: var(--r-sm); padding: 0 12px; color: var(--text-tertiary); font-size: 13px;
+            white-space: nowrap; overflow: hidden; }
+  .search .ph { overflow: hidden; text-overflow: ellipsis; }
+  .search .kbd { margin-left: auto; font-family: var(--font-mono); font-size: 11px; flex: 0 0 auto; }
+  .topactions { display: flex; align-items: center; gap: 6px; }
+  .theme-btn { display: flex; align-items: center; gap: 6px; height: var(--control-h); padding: 0 10px;
+               background: var(--bg-base); border-radius: var(--r-sm); font-size: 12.5px; color: var(--text-secondary); }
+  .primary-btn { display: flex; align-items: center; gap: 6px; height: var(--control-h); padding: 0 12px;
+                 background: var(--accent-primary); color: var(--text-inverse); border-radius: var(--r-sm); font-size: 12.5px; font-weight: 500; }
+  .avatar { width: var(--control-h); height: var(--control-h); border-radius: 999px; background: var(--accent-secondary); }
+
+  .body { display: flex; flex: 1; min-height: 0; }
+  .sidebar { width: 240px; flex: 0 0 auto; background: var(--bg-surface); padding: 16px 12px;
+             display: flex; flex-direction: column; gap: 2px; }
+  .navgroup { font-size: 11px; font-weight: 500; color: var(--text-tertiary); padding: 8px 10px 4px; }
+  .nav { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px;
+         border-radius: var(--r-sm); font-size: 13.5px; color: var(--text-secondary); }
+  .nav.active { background: var(--accent-soft); color: var(--accent-primary); font-weight: 500;
+                box-shadow: inset 3px 0 0 var(--accent-primary); }
+  .nav .count { margin-left: auto; font-family: var(--font-mono); font-size: 11px; opacity: .85; }
+  /* 通用图标尺寸——必须对「所有」.ico 生效，不能只写成后代选择器（如 .nav .ico），
+     否则搜索框等其他位置的 SVG 拿不到尺寸，会退回浏览器默认尺寸（300×150）并渲染成黑块。 */
+  .ico { width: 16px; height: 16px; flex: 0 0 auto; stroke: currentColor; fill: none; stroke-width: 1.7; }
+  .spacer { flex: 1; }
+  .divider { height: 1px; background: var(--border-subtle); margin: 8px 0; }
+
+  .content { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg-base); }
+  .pagehead { display: flex; align-items: flex-end; justify-content: space-between; padding: 24px 32px 14px; }
+  .pagehead h1 { margin: 0; font-size: 22px; font-weight: 700; }
+  .pagehead .desc { margin-top: 6px; font-size: 13px; color: var(--text-secondary); }
+  .headactions { display: flex; gap: 8px; }
+  .ghost-btn { display: flex; align-items: center; gap: 6px; height: var(--control-h); padding: 0 14px;
+               background: var(--bg-surface); border-radius: var(--r-sm); font-size: 12.5px; color: var(--text-secondary); }
+  .cta { display: flex; align-items: center; gap: 6px; height: var(--control-h); padding: 0 14px;
+         background: var(--accent-primary); color: var(--text-inverse); border-radius: var(--r-sm); font-size: 12.5px; font-weight: 500; }
+
+  .filterbar { display: flex; align-items: center; gap: 8px; padding: 0 32px 16px; }
+  .seg { display: flex; gap: 2px; padding: 3px; background: var(--bg-inset); border-radius: var(--r-sm); }
+  .seg > span { height: 26px; display: flex; align-items: center; padding: 0 12px; border-radius: var(--r-xs);
+                font-size: 12.5px; color: var(--text-secondary); }
+  .seg > span.on { background: var(--bg-elevated); color: var(--text-primary); font-weight: 500; }
+  .chipbox { display: flex; gap: 6px; margin-left: auto; }
+  .chip { display: flex; align-items: center; height: 30px; padding: 0 14px; border-radius: 999px;
+          font-size: 12px; color: var(--text-secondary); border: 1px solid var(--border-subtle); }
+  .chip.on { background: var(--accent-soft); color: var(--accent-primary); font-weight: 500; border-color: transparent; }
+
+  /* ---------- 书架网格 ---------- */
+  .grid { flex: 1; padding: 0 32px 24px; display: grid; gap: 18px 24px;
+          grid-template-columns: repeat(auto-fill, minmax(clamp(132px,11vw,168px), 1fr));
+          align-content: start; overflow: hidden; }
+  .book { display: flex; flex-direction: column; gap: 8px; }
+  .cover { position: relative; height: 200px; border-radius: var(--r-md); overflow: hidden;
+           display: flex; flex-direction: column; justify-content: flex-end; padding: 14px; }
+  .cover .t { font-family: var(--font-reading); font-weight: 700; color: var(--text-inverse); line-height: 1.2; letter-spacing: .5px; }
+  .badge { position: absolute; top: 10px; left: 10px; height: 22px; display: flex; align-items: center;
+           padding: 0 8px; border-radius: var(--r-xs); font-size: 11px; font-weight: 500; background: var(--accent-clash); color: var(--text-primary); }
+  .badge.done { background: var(--state-success); color: var(--text-inverse); }
+  .badge.off  { background: var(--text-tertiary); color: var(--text-inverse); }
+  .prog { position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+          background: rgba(0,0,0,.55); box-shadow: inset 0 0 0 1px rgba(245,238,220,.35); }
+  .prog i { display: block; height: 100%; background: var(--accent-clash); }
+  .book .author { font-size: 12px; color: var(--text-tertiary); }
+
+  /* ---------- 表格 ---------- */
+  .tablewrap { flex: 1; padding: 0 32px 24px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; background: var(--bg-surface);
+          border: 1px solid var(--border-subtle); border-radius: var(--r-md); overflow: hidden; }
+  thead th { background: var(--bg-inset); text-align: left; font-size: 12px; font-weight: 500;
+             color: var(--text-secondary); height: 40px; padding: 0 16px; }
+  tbody td { height: 48px; padding: 0 16px; font-size: 13px; border-top: 1px solid var(--border-subtle); }
+  tbody td.num { text-align: right; font-family: var(--font-mono); font-size: 12px; }
+  tbody td.url { font-family: var(--font-mono); font-size: 12px; color: var(--text-tertiary); }
+  tbody td.grp { font-size: 12px; color: var(--text-secondary); }
+  tbody td.act { text-align: right; color: var(--accent-primary); font-size: 12px; font-weight: 500; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 999px; background: var(--state-success); }
+  .dot.warn { background: var(--state-warning); }
+  .dot.err  { background: var(--state-error); }
+  /* 状态列带文本标签——色彩之外必须还有可读的名称（色盲可达性，MASTER §9） */
+  td.status { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+  td.status .stxt { color: var(--text-secondary); }
+  /* 行内操作：默认隐藏，hover / focus-within 时浮现，且具 ≥32px 触达目标（MASTER §7 行内 hover 操作） */
+  tbody tr:hover td.act .actbtn,
+  tbody tr:focus-within td.act .actbtn { opacity: 1; }
+  td.act .actbtn { display: inline-flex; align-items: center; justify-content: center;
+                   height: var(--control-h); padding: 0 10px; border-radius: var(--r-sm);
+                   color: var(--accent-primary); font-size: 12px; font-weight: 500; opacity: .55; }
+  tbody tr:hover { background: var(--bg-inset); }
+  .ok { color: var(--state-success); }
+  .mid { color: var(--state-warning); }
+  .bad { color: var(--state-error); }
+
+  /* ---------- 阅读器 ---------- */
+  .reader { display: flex; flex-direction: column; height: 100%; background: var(--bg-reading); }
+  .rtop { display: flex; align-items: center; justify-content: space-between; height: 52px; padding: 0 20px; flex: 0 0 auto; }
+  .rtop .l, .rtop .r { display: flex; align-items: center; gap: 14px; }
+  .rtop .r { gap: 8px; }
+  .rback { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); }
+  .rbook { font-size: 13px; font-weight: 500; }
+  .rprog { font-family: var(--font-mono); font-size: 12px; color: var(--text-tertiary); }
+  .ricon { width: 18px; height: 18px; stroke: var(--text-secondary); fill: none; stroke-width: 1.7; }
+  /* 阅读区左右内边距 = 2×--sp-10（MASTER §5.2 的 available 公式口径） */
+  .rpage { flex: 1; min-height: 0; padding: 40px var(--sp-10); display: flex; justify-content: center; overflow: hidden; }
+  /* 版心宽以「36em 相对阅读字号」表达——须把 font-size 设为阅读字号，
+     否则 em 会相对 .reader 继承来的 UI 正文字号解析（MASTER §5.1 / spec §FR-013）。
+     width:100% + max-width 使窄窗时自然收窄，宽窗时封顶 36em。 */
+  .measure { font-size: var(--reading-font-size);
+             width: 100%; max-width: var(--reading-measure);
+             display: flex; flex-direction: column; gap: 20px; }
+  .chapno { text-align: center; font-size: 13px; font-weight: 500; color: var(--text-tertiary); }
+  /* 章节标题随阅读字号等比缩放——不得硬编码固定像素（MASTER §5.1 注 / spec §FR-010） */
+  .chaptitle { text-align: center; font-family: var(--font-reading); font-size: 1.58em; font-weight: 700; line-height: 1.45; }
+  .rule { width: 48px; height: 2px; background: var(--border-strong); border-radius: 1px; margin: 0 auto; }
+  .p { font-family: var(--font-reading); font-size: var(--reading-font-size); line-height: var(--reading-line-height);
+       text-align: justify; text-indent: var(--reading-paragraph-indent); margin: 0; }
+  /* 段间距模式（与段首缩进二选一）——MASTER §5.1 / spec §FR-018 */
+  .measure.gapmode .p { text-indent: 0; margin-top: var(--reading-paragraph-gap); }
+  .measure.gapmode .p:first-of-type { margin-top: 0; }
+  .rfoot { display: flex; justify-content: space-between; align-items: center; height: 40px; padding: 0 40px;
+           font-size: 11px; color: var(--text-tertiary); font-family: var(--font-ui); flex: 0 0 auto; }
+
+  /* 双页 */
+  /* 双页：中缝与左右内边距同 MASTER §5.2 公式口径（gutter 64px，左右各 --sp-10） */
+  .spread { flex: 1; min-height: 0; display: flex; gap: var(--reading-gutter); padding: 40px var(--sp-10); justify-content: center; overflow: auto; }
+  .spread .measure { width: var(--reading-measure); }
+  .spread .seamwrap { position: relative; }
+  .seam { position: absolute; left: -32px; top: 0; bottom: 0; width: 1px; background: var(--border-subtle); }
+
+  /* ---------- 设置 ---------- */
+  .settings { flex: 1; overflow: hidden; padding: 0 32px 24px; display: flex; flex-direction: column; gap: 16px; }
+  .card { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--r-md);
+          padding: 18px 20px; }
+  .card h2 { margin: 0 0 14px; font-size: var(--fs-h3); font-weight: 600; }
+  .row { display: flex; align-items: center; gap: 16px; height: 36px; }
+  .row .lbl { flex: 1; font-size: 13px; color: var(--text-secondary); }
+  .row .val { font-size: 13px; font-weight: 500; }
+  .row .valnum { font-family: var(--font-mono); font-size: 12px; width: 60px; }
+  .slider { width: 240px; height: 4px; border-radius: 2px; background: var(--bg-inset); position: relative; }
+  .slider i { position: absolute; left: 0; top: 0; height: 100%; border-radius: 2px; background: var(--accent-primary); }
+  .note { font-size: 12px; color: var(--text-tertiary); line-height: 1.7; }
+  .themecards { display: flex; gap: 12px; }
+  .tcard { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+  .swatch { height: 64px; border-radius: var(--r-md); padding: 10px; display: flex; align-items: center; gap: 6px;
+            border: 2px solid transparent; }
+  .swatch i { width: 28px; height: 28px; border-radius: var(--r-sm); display: block; }
+  .tcard.sel .swatch { border-color: var(--accent-primary); }
+  /* 主题预览色卡的配色（不随当前主题变化，见 tokens.css） */
+  .swatch.sw-day   { background: var(--swatch-day-bg); }
+  .swatch.sw-day   .s-a { background: var(--swatch-day-a); }
+  .swatch.sw-day   .s-b { background: var(--swatch-day-b); }
+  .swatch.sw-day   .s-c { background: var(--swatch-day-c); }
+  .swatch.sw-night { background: var(--swatch-night-bg); }
+  .swatch.sw-night .s-a { background: var(--swatch-night-a); }
+  .swatch.sw-night .s-b { background: var(--swatch-night-b); }
+  .swatch.sw-night .s-c { background: var(--swatch-night-c); }
+  .tcard .tlbl { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; }
+  .tcard .tlbl small { font-weight: 400; color: var(--text-tertiary); font-family: var(--font-mono); font-size: 11px; }
+  .drow { display: flex; align-items: center; gap: 10px; height: 44px; border-top: 1px solid var(--border-subtle); }
+  .drow .folder { width: 16px; height: 16px; stroke: var(--accent-clash); fill: none; stroke-width: 1.7; }
+  .drow .path { flex: 1; font-family: var(--font-mono); font-size: 12.5px; }
+  .drow .cnt { font-family: var(--font-mono); font-size: 12px; color: var(--text-tertiary); }
+
+  /* ============================================================
+     Switch（开关）——布尔选项专用（MASTER §7）
+     枚举用 Segmented，布尔用 Switch，不得混用。
+     ============================================================ */
+  .sw { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; cursor: pointer; }
+  .sw .track { width: 36px; height: 20px; border-radius: 999px; background: var(--bg-inset);
+               border: 1px solid var(--border-strong); position: relative; flex: 0 0 auto;
+               transition: background-color var(--dur-fast) var(--ease-out); }
+  .sw .knob { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 999px;
+              background: var(--text-tertiary); transition: left var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out); }
+  .sw.on .track { background: var(--accent-primary); border-color: var(--accent-primary); }
+  .sw.on .knob { left: 18px; background: var(--text-inverse); }
+  .sw .swlbl { font-size: 12.5px; color: var(--text-secondary); }
+
+  /* 行内错误态（设置保存失败时用，不得静默） */
+  .inline-err { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--state-error); }
+  .inline-err .retry { color: var(--accent-primary); font-weight: 500; text-decoration: underline; }
+  /* 保存状态条 */
+  .savebar { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-tertiary); }
+  .savebar .dotspin { width: 6px; height: 6px; border-radius: 999px; background: var(--state-info); }
+  .savebar.err { color: var(--state-error); }
+  .savebar.err .dotspin { background: var(--state-error); }
+
+  /* ============================================================
+     状态组件：EmptyState / LoadingSkeleton / ErrorState（MASTER §7）
+     每个列表与表格都必须有三态。
+     ============================================================ */
+  .statebox { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+              gap: 12px; padding: 48px 32px; text-align: center; }
+  .statebox .art { width: 72px; height: 72px; border-radius: var(--r-lg); background: var(--bg-inset);
+                   display: flex; align-items: center; justify-content: center; }
+  .statebox .art svg { width: 32px; height: 32px; stroke: var(--text-tertiary); fill: none; stroke-width: 1.5; }
+  .statebox h3 { margin: 0; font-size: var(--fs-h3); font-weight: 600; }
+  .statebox p { margin: 0; font-size: 13px; color: var(--text-secondary); max-width: 42ch; line-height: 1.7; }
+  .statebox .hint { font-size: 12px; color: var(--text-tertiary); }
+  .statebox.err .art { background: color-mix(in srgb, var(--state-error) 12%, transparent); }
+  .statebox.err .art svg { stroke: var(--state-error); }
+  .statebox.err h3 { color: var(--state-error); }
+
+  /* 骨架屏：微光扫过（MOTION.md §3 唯一允许的循环动画） */
+  .skel { display: flex; flex-direction: column; gap: 10px; padding: 24px 32px; }
+  .skel .sk { height: 14px; border-radius: var(--r-xs);
+              background: linear-gradient(90deg, var(--bg-inset) 0%, var(--bg-surface) 50%, var(--bg-inset) 100%);
+              background-size: 220% 100%; animation: shimmer 1400ms linear infinite; }
+  .skel .sk.t { height: 22px; width: 30%; }
+  .skel .sk.row { height: 44px; }
+  .skel .sk.w60 { width: 60%; } .skel .sk.w80 { width: 80%; } .skel .sk.w45 { width: 45%; }
+  @keyframes shimmer { 0% { background-position: 140% 0; } 100% { background-position: -40% 0; } }
+  @media (prefers-reduced-motion: reduce) {
+    .skel .sk { animation: none; background: var(--bg-inset); }
+  }
+
+  /* ============================================================
+     浮层：Toast / Modal / Drawer / CommandPalette
+     ============================================================ */
+  .scrim { position: absolute; inset: 0; background: var(--overlay-bg); z-index: 40; }
+  .scrim.inline { position: relative; inset: auto; flex: 1;
+                  display: flex; align-items: center; justify-content: center; }
+  .modal { width: min(560px, calc(100% - 48px)); background: var(--bg-elevated);
+           border: 1px solid var(--border-subtle); border-radius: var(--r-lg); box-shadow: var(--shadow-lg);
+           overflow: hidden; }
+  .modal .mh { padding: 18px 20px 0; font-size: var(--fs-h2); font-weight: 600; }
+  .modal .mb { padding: 10px 20px 18px; font-size: 13px; color: var(--text-secondary); line-height: 1.7; }
+  .modal .mf { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px;
+               background: var(--bg-surface); border-top: 1px solid var(--border-subtle); }
+  .btn-danger { display: flex; align-items: center; height: var(--control-h); padding: 0 14px;
+                background: var(--state-error); color: var(--text-inverse); border-radius: var(--r-sm);
+                font-size: 12.5px; font-weight: 500; }
+  .btn-sec { display: flex; align-items: center; height: var(--control-h); padding: 0 14px;
+             background: var(--bg-surface); border: 1px solid var(--border-strong); border-radius: var(--r-sm);
+             font-size: 12.5px; color: var(--text-secondary); }
+
+  .toasts { position: absolute; right: 24px; bottom: 24px; z-index: 50;
+            display: flex; flex-direction: column; gap: 10px; align-items: flex-end; }
+  .toast { display: flex; align-items: flex-start; gap: 10px; min-width: 260px; max-width: 360px;
+           padding: 12px 14px; background: var(--bg-elevated); border: 1px solid var(--border-subtle);
+           border-left: 3px solid var(--state-info); border-radius: var(--r-md); box-shadow: var(--shadow-md); }
+  .toast.ok  { border-left-color: var(--state-success); }
+  .toast.err { border-left-color: var(--state-error); }
+  .toast.warn{ border-left-color: var(--state-warning); }
+  .toast .tt { font-size: 13px; font-weight: 500; }
+  .toast .td { margin-top: 3px; font-size: 12px; color: var(--text-secondary); line-height: 1.6; }
+
+  .drawer { position: absolute; top: 0; right: 0; bottom: 0; width: min(420px, 80%); z-index: 45;
+            background: var(--bg-elevated); border-left: 1px solid var(--border-subtle);
+            box-shadow: var(--shadow-lg); display: flex; flex-direction: column; }
+  .drawer .dh { display: flex; align-items: center; justify-content: space-between;
+                height: var(--topbar-h); padding: 0 20px; border-bottom: 1px solid var(--border-subtle); }
+  .drawer .dh h2 { margin: 0; font-size: var(--fs-h3); font-weight: 600; }
+  .drawer .db { flex: 1; overflow: auto; padding: 16px 20px; }
+
+  /* 命令面板（Ctrl+K） */
+  .palette { width: min(560px, calc(100% - 48px)); background: var(--bg-elevated);
+             border: 1px solid var(--border-strong); border-radius: var(--r-lg);
+             box-shadow: var(--shadow-lg); overflow: hidden; }
+  .palette .pin { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 16px;
+                  border-bottom: 1px solid var(--border-subtle); }
+  .palette .pin input { flex: 1; border: none; background: none; outline: none;
+                        font-size: 14px; color: var(--text-primary); }
+  .palette .plist { padding: 8px; max-height: 320px; overflow: auto; }
+  .palette .pgrp { padding: 8px 10px 4px; font-size: 11px; font-weight: 500; color: var(--text-tertiary); }
+  .palette .pitem { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px;
+                    border-radius: var(--r-sm); font-size: 13px; color: var(--text-secondary); }
+  .palette .pitem.on { background: var(--accent-soft); color: var(--accent-primary); font-weight: 500; }
+  .palette .pitem kbd { margin-left: auto; font-family: var(--font-mono); font-size: 11px;
+                        color: var(--text-tertiary); }
+
+  /* 阅读工具栏「隐形」态：仅留 8px 顶部热区（MASTER §5.3 的默认形态） */
+  .hotzone { position: absolute; top: 0; left: 0; right: 0; height: 8px; z-index: 30; }
+  .hotzone::after { content: ""; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+                    width: 96px; height: 3px; border-radius: 0 0 3px 3px; background: var(--border-strong); opacity: .5; }
+  .rtop.hidden { opacity: 0; pointer-events: none; }
+  .rtop { transition: opacity var(--dur-base) var(--ease-out); }
+
+  /* 交互四态演示（hover / focus-visible / active / disabled） */
+  .statebar { display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+              padding: 14px 20px; background: var(--bg-surface); border: 1px solid var(--border-subtle);
+              border-radius: var(--r-md); }
+  .statebar .cap { font-size: 11px; color: var(--text-tertiary); margin-bottom: 6px; display: block; }
+  .demo-btn { display: inline-flex; align-items: center; height: var(--control-h); padding: 0 14px;
+              border-radius: var(--r-sm); font-size: 12.5px; font-weight: 500;
+              background: var(--accent-primary); color: var(--text-inverse); }
+  .demo-btn.hov { background: var(--accent-hover); }
+  .demo-btn.act { background: var(--accent-primary); transform: translateY(1px);
+                  box-shadow: inset 0 2px 4px rgba(0,0,0,.25); }
+  .demo-btn.dis { background: var(--bg-inset); color: var(--text-tertiary); cursor: not-allowed; }
+  .demo-btn.foc { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="stage" id="stage"></div>
+
+<script>
+/* ============================================================
+   渲染四种界面 × 昼夜双主题，用于像素核对。
+   色值/尺寸/字号全部来自 design-system/MASTER.md + tokens.css。
+   ============================================================ */
+const ICO = {
+  shelf: '<svg class="ico" viewBox="0 0 24 24"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="16" rx="1"/><path d="M17.5 5l3 15"/></svg>',
+  globe: '<svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 2.5 15.4 0 18M12 3c-2.5 2.6-2.5 15.4 0 18"/></svg>',
+  folder:'<svg class="ico" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg>',
+  chart: '<svg class="ico" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
+  gear:  '<svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>',
+  search:'<svg class="ico" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/></svg>',
+  moon:  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+  plus:  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  left:  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  font:  '<svg class="ricon" viewBox="0 0 24 24"><path d="M4 19L9.5 5l5.5 14M6 14.5h7"/><path d="M16 19l3-8 3 8M16.8 16.5h4.4"/></svg>',
+  dots:  '<svg class="ricon" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>',
+  book:  '<svg class="ico" viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h6v18H6a2 2 0 0 1-2-2Z"/><path d="M12 3h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6"/></svg>',
+  set:   '<svg class="ico" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>',
+  check: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" style="flex:0 0 auto;margin-top:2px"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6" opacity=".35"/><path d="M8 12.5l2.6 2.5L16 9.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  alert: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="flex:0 0 auto"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.7"/><path d="M12 7.5v5.5M12 16.4v.2" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>',
+  close: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  dot:   '<svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/></svg>'
+};
+
+/* 状态页的插画位图标（EmptyState / ErrorState） */
+const ICI = {
+  art: '<div class="art"><svg viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/><path d="M9 13h6"/></svg></div>',
+  alertArt: '<div class="art"><svg viewBox="0 0 24 24"><path d="M12 3.5 21 20H3Z"/><path d="M12 10v4.2M12 17.2v.2"/></svg></div>'
+};
+
+const BOOKS = [
+  { t:'剑来',        a:'烽火戏诸侯',   g:['#4A6B5C','#29332B'], b:'在读', p:62 },
+  { t:'诡秘之主',    a:'爱潜水的乌贼', g:['#3A2E4A','#120D1C'], b:'在读', p:37 },
+  { t:'三体',        a:'刘慈欣',       g:['#24303E','#0A0F16'], b:'读完', p:100 },
+  { t:'百年孤独',    a:'加西亚·马尔克斯', g:['#8C6B2E','#402912'], b:'在读', p:27 },
+  { t:'沙丘',        a:'弗兰克·赫伯特', g:['#AD7333','#542E0F'], b:'未读', p:0 },
+  { t:'红楼梦',      a:'曹雪芹',       g:['#8C2429','#380D14'], b:'在读', p:43 },
+  { t:'人类简史',    a:'尤瓦尔·赫拉利', g:['#B86B2E','#592814'], b:'读完', p:100 },
+  { t:'雪中悍刀行',  a:'烽火戏诸侯',   g:['#4F5C6B','#1C2430'], b:'在读', p:18 },
+  { t:'夜色人生',    a:'丹尼斯·勒翰',  g:['#3B3346','#12101A'], b:'未读', p:0 },
+  { t:'西游记',      a:'吴承恩',       g:['#C79433','#66420F'], b:'在读', p:52 },
+  { t:'平凡的世界',  a:'路遥',         g:['#73613D','#332614'], b:'读完', p:100 },
+  { t:'银河帝国',    a:'艾萨克·阿西莫夫', g:['#4A4038','#14100C'], b:'未读', p:0 }
+];
+
+const ROWS = [
+  { s:'ok',  st:'可用', n:'笔趣阁（新）', u:'https://www.bqg128.com',   g:'综合书源', r:'412 ms', c:'ok'  },
+  { s:'ok',  st:'可用', n:'起点中文网',   u:'https://www.qidian.com',   g:'付费书源', r:'286 ms', c:'ok'  },
+  { s:'ok',  st:'可用', n:'番茄小说',     u:'https://fanqienovel.com',  g:'综合书源', r:'531 ms', c:'ok'  },
+  { s:'warn',st:'缓慢', n:'铅笔小说',     u:'https://www.qbxs.org',     g:'综合书源', r:'1.2 s',  c:'mid' },
+  { s:'err', st:'已失效',n:'69书吧',       u:'https://www.69shuba.com',  g:'综合书源', r:'已失效', c:'bad' },
+  { s:'ok',  st:'可用', n:'书趣阁',       u:'https://www.shuquge.com',  g:'轻小说',   r:'763 ms', c:'ok'  },
+  { s:'ok',  st:'可用', n:'顶点小说',     u:'https://www.23ddw.net',    g:'综合书源', r:'344 ms', c:'ok'  }
+];
+
+const P1 = '陈平安蹲在廊下，把那半块干饼掰成两半，一半塞进嘴里慢慢嚼着，另一半用干净的油纸包好，揣回怀里。他抬头看了眼天色，日头刚过屋脊，风里有股湖水特有的腥气，混着书院后山那片老梅的酸香。';
+const P2 = '“陈平安。”有人在身后喊他。声音不响，却像石子投进深潭，一圈一圈荡开。他回过头，看见一个青衫少年立在月洞门口，手里握着一卷旧书，眉目清朗，只是脸色有些过分的白。';
+const P3 = '少年姓崔，名瀺，是书院里最不起眼的一位读书人，却也是唯一一个愿意同陈平安说话的人。他走过来，把书卷往陈平安怀里一塞：“借你看三日。看完了还我，可不许在书页上留指印。”';
+const P4 = '陈平安接了书，低头看那封面，是手抄的《观湖录》，字迹瘦硬，一看便知下了苦功。他忽然想起镇上那位说书先生讲过的话——山外有山，人外有人，江湖再大，也大不过一个“理”字。';
+const R1 = '崔瀺笑了笑，没有接话。他望着院中那株老梅，枝干虬结，像是被岁月拧过千百遍。良久，他才轻声说：“平安，你信命吗？”';
+const R2 = '陈平安把书抱在怀里，想了想，摇头：“不信。我娘走的那年，镇上先生说我命硬，克亲。可如今我还活着，书院收了我，也有饭吃。若真有命，那命也不知被谁写坏了。”';
+const R3 = '少年听了，怔了一怔，随即大笑起来，笑到咳嗽。等他止住笑，眼角竟有些湿意：“说得好。写坏了，那便改。”他说完便转身走了，青衫在暮色里一晃，像一片将要落下的叶子。';
+const R4 = '晚风忽起，吹得满院书页哗哗作响。陈平安低头看着怀里的《观湖录》，忽然觉得，这书院里的每一页纸，都比镇上的米价要沉。';
+
+function sidebar(active) {
+  const items = [
+    ['shelf','书架','128'], ['globe','书源管理','42'],
+    ['folder','本地库','36'], ['chart','阅读统计','']
+  ];
+  let h = '<aside class="sidebar"><div class="navgroup">资产</div>';
+  for (const [ic, nm, ct] of items) {
+    h += `<div class="nav${active===nm?' active':''}">${ICO[ic]}<span>${nm}</span>${ct?`<span class="count">${ct}</span>`:''}</div>`;
+  }
+  h += '<div class="spacer"></div><div class="divider"></div>'
+     + `<div class="nav${active==='设置'?' active':''}">${ICO.gear}<span>设置</span></div></aside>`;
+  return h;
+}
+
+function topbar(themeName) {
+  return `<header class="topbar">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+        <path d="M4 5.5C4 4.67 4.67 4 5.5 4H11v15H5.5C4.67 19 4 18.33 4 17.5V5.5Z" stroke="var(--accent-primary)" stroke-width="1.6" stroke-linejoin="round"/>
+        <path d="M20 5.5C20 4.67 19.33 4 18.5 4H13v15h5.5c.83 0 1.5-.67 1.5-1.5V5.5Z" stroke="var(--accent-primary)" stroke-width="1.6" stroke-linejoin="round"/>
+        <path d="M12 4v15" stroke="var(--accent-clash)" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
+      <span class="name">tome</span>
+    </div>
+    <div class="search">${ICO.search}<span class="ph">搜索书架、书源或输入关键词发现新书</span><span class="kbd">Ctrl K</span></div>
+    <div class="topactions">
+      <div class="theme-btn">${ICO.moon}<span>${themeName}</span></div>
+      <div class="primary-btn">${ICO.plus}<span>导入书籍</span></div>
+      <div class="avatar"></div>
+    </div>
+  </header>`;
+}
+
+function shelf(themeName) {
+  let books = BOOKS.map(b => {
+    /* 封面书名按字数选字号：2 字用大字，4 字以上收小以免溢出 200px 高的封面 */
+    const fs = b.t.length <= 2 ? 30 : b.t.length <= 3 ? 26 : b.t.length <= 4 ? 22 : 18;
+    return `
+    <div class="book">
+      <div class="cover" style="background:linear-gradient(135deg, ${b.g[0]}, ${b.g[1]})">
+        <span class="badge ${b.b==='读完'?'done':b.b==='未读'?'off':''}">${b.b}</span>
+        <span class="t" style="font-size:${fs}px">${b.t}</span>
+        ${b.p>0?`<span class="prog"><i style="width:${b.p}%"></i></span>`:''}
+      </div>
+      <div class="author">${b.a}</div>
+    </div>`;
+  }).join('');
+  return `<div class="app">${topbar(themeName)}<div class="body">${sidebar('书架')}
+    <div class="content">
+      <div class="pagehead">
+        <div><h1>书架</h1><div class="desc">128 本藏书 · 3 本在读 · 昨日阅读 1 小时 12 分</div></div>
+      </div>
+      <div class="filterbar">
+        <div class="seg"><span class="on">全部</span><span>在读</span><span>已读完</span><span>本地</span></div>
+        <div class="chipbox"><span class="chip on">最近阅读</span><span class="chip">中</span></div>
+      </div>
+      <div class="grid">${books}</div>
+    </div></div></div>`;
+}
+
+function sources(themeName) {
+  const rows = ROWS.map(r => `
+    <tr>
+      <td class="status"><span class="dot ${r.s==='ok'?'':r.s}"></span><span class="stxt">${r.st}</span></td>
+      <td style="font-weight:500">${r.n}</td>
+      <td class="url">${r.u}</td>
+      <td class="grp">${r.g}</td>
+      <td class="num ${r.c}">${r.r}</td>
+      <td class="act"><span class="actbtn">编辑</span></td>
+    </tr>`).join('');
+  return `<div class="app">${topbar(themeName)}<div class="body">${sidebar('书源管理')}
+    <div class="content">
+      <div class="pagehead">
+        <div><h1>书源管理</h1><div class="desc">42 个书源 · 38 个可用 · 最近检查 2 小时前</div></div>
+        <div class="headactions">
+          <div class="ghost-btn">检查可用性</div>
+          <div class="cta">${ICO.plus}<span>导入书源</span></div>
+        </div>
+      </div>
+      <div class="filterbar">
+        <div class="search" style="width:260px">${ICO.search}<span class="ph" style="font-size:12.5px">搜索书源名称或地址</span></div>
+        <div class="chipbox"><span class="chip on">全部 42</span><span class="chip">可用 38</span><span class="chip">失效 4</span></div>
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th style="width:88px">状态</th><th>书源名称</th><th style="width:240px">站点地址</th><th style="width:100px">分组</th><th style="width:90px;text-align:right">响应</th><th style="width:88px;text-align:right">操作</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div></div></div>`;
+}
+
+function reader({ spread = false, themeName }) {
+  const mode = spread ? '双页' : '单页';
+  const left = `<div class="measure">
+      <div class="chapno">第二十一章</div>
+      <div class="chaptitle">观湖书院</div>
+      <div class="rule"></div>
+      <p class="p">${P1}</p><p class="p">${P2}</p><p class="p">${P3}</p><p class="p">${P4}</p>
+    </div>`;
+  const right = `<div class="measure">
+      <div class="chapno">（续上页）</div>
+      <p class="p">${R1}</p><p class="p">${R2}</p><p class="p">${R3}</p><p class="p">${R4}</p>
+    </div>`;
+  const pages = spread
+    ? `<div class="spread">${left}<div class="seamwrap"><span class="seam"></span></div>${right}</div>`
+    : `<div class="rpage"><div class="measure">
+         <div class="chapno">第二十一章</div>
+         <div class="chaptitle">观湖书院</div>
+         <div class="rule"></div>
+         <p class="p">${P1}</p><p class="p">${P2}</p><p class="p">${P3}</p><p class="p">${P4}</p>
+       </div></div>`;
+
+  return `<div class="reader">
+    <header class="rtop">
+      <div class="l">
+        <span class="rback">${ICO.left}<span>书架</span></span>
+        <span class="rbook">剑来 · 第二十一章 观湖书院</span>
+      </div>
+      <div class="r">
+        <span class="rprog">第 21 / 486 章 · 4.3%${spread?' · 双页':''}</span>
+        <div class="seg" style="height:30px"><span class="${spread?'':'on'}" style="height:24px;font-size:12px">自动</span><span class="${spread?'':'on'}" style="height:24px;font-size:12px">单页</span><span class="${spread?'on':''}" style="height:24px;font-size:12px">双页</span></div>
+        ${ICO.font}${ICO.moon}${ICO.dots}
+      </div>
+    </header>
+    ${pages}
+    <footer class="rfoot">
+      <span>4.3%</span>
+      <span>第二十一章 观湖书院 · 第 ${spread?'2-3':'1'} 页</span>
+      <span>剩余 1 小时 4 分</span>
+    </footer>
+  </div>`;
+}
+
+function settings(themeName) {
+  const selIsNight = themeName === '日间';
+  return `<div class="app">${topbar(themeName)}<div class="body">${sidebar('设置')}
+    <div class="content">
+      <div class="pagehead">
+        <div><h1>设置</h1><div class="desc">外观、阅读排版与本地库配置 · 配置文件可随程序搬移</div></div>
+      </div>
+      <div class="settings">
+        <div class="card">
+          <h2>外观主题</h2>
+          <div class="themecards">
+            <div class="tcard ${!selIsNight?'sel':''}">
+              <div class="swatch sw-day">
+                <i class="s-a"></i><i class="s-b"></i><i class="s-c"></i>
+              </div>
+              <div class="tlbl">羊皮卷轴 <small>${!selIsNight?'当前':'亮色'}</small></div>
+            </div>
+            <div class="tcard ${selIsNight?'sel':''}">
+              <div class="swatch sw-night">
+                <i class="s-a"></i><i class="s-b"></i><i class="s-c"></i>
+              </div>
+              <div class="tlbl">纯黑基底 <small>${selIsNight?'当前':'OLED'}</small></div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <h2>阅读排版</h2>
+          <div class="row"><span class="lbl">正文字体</span><span class="val">宋体（书卷衬线）</span></div>
+          <div class="row"><span class="lbl">阅读字号</span><span class="slider"><i style="width:42%"></i></span><span class="valnum">19 px</span></div>
+          <div class="row"><span class="lbl">行高</span><span class="slider"><i style="width:65%"></i></span><span class="valnum">1.85 ×</span></div>
+          <div class="row"><span class="lbl">分页模式</span>
+            <div class="seg" style="height:30px"><span class="on" style="height:24px;font-size:12px">自动</span><span style="height:24px;font-size:12px">单页</span><span style="height:24px;font-size:12px">双页</span></div>
+          </div>
+          <div class="note" style="margin-top:10px">自动模式按阅读区可用宽度判定：容纳两个不小于 36em 的行长时切换为双页，中缝 64px。字号变化会实时重算阈值，切换时保留阅读位置。</div>
+        </div>
+        <div class="card">
+          <h2>阅读行为</h2>
+          <div class="row"><span class="lbl">段首缩进两字 <span class="note" style="display:inline">（与段间距二选一）</span></span>
+            <span class="sw on"><span class="track"><span class="knob"></span></span><span class="swlbl">开</span></span>
+          </div>
+          <div class="row"><span class="lbl">章节从新页开始 <span class="note" style="display:inline">（双页书页语义）</span></span>
+            <span class="sw on"><span class="track"><span class="knob"></span></span><span class="swlbl">开</span></span>
+          </div>
+          <div class="row"><span class="lbl">连续滚动阅读 <span class="note" style="display:inline">（关闭则为翻页）</span></span>
+            <span class="sw"><span class="track"><span class="knob"></span></span><span class="swlbl">关</span></span>
+          </div>
+          <div class="row"><span class="lbl">减少动效</span>
+            <span class="sw"><span class="track"><span class="knob"></span></span><span class="swlbl">关</span></span>
+          </div>
+          <div class="note" style="margin-top:10px">改动即时生效并写入配置，无需保存。</div>
+        </div>
+        <div class="card">
+          <h2>数据与同步</h2>
+          <div class="row"><span class="lbl">自动缓存下一章</span>
+            <span class="sw on"><span class="track"><span class="knob"></span></span><span class="swlbl">开</span></span>
+          </div>
+          <div class="row"><span class="lbl">书源可用性自动检查 <span class="note" style="display:inline">（每日一次）</span></span>
+            <span class="sw on"><span class="track"><span class="knob"></span></span><span class="swlbl">开</span></span>
+          </div>
+        </div>
+        <div class="card">
+          <div class="row" style="height:auto;justify-content:space-between"><h2 style="margin:0">本地库目录</h2>
+            <span class="ghost-btn">${ICO.plus}<span style="font-size:12px">添加目录</span></span>
+          </div>
+          <div class="drow"><svg class="folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg><span class="path">D:\\Books\\武侠全集</span><span class="cnt">1,284 本</span></div>
+          <div class="drow"><svg class="folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg><span class="path">D:\\Books\\科幻译文</span><span class="cnt">312 本</span></div>
+        </div>
+      </div>
+    </div></div></div>`;
+}
+
+/* ============================================================
+   状态页 f 函数：三态 / 浮层 / 工具栏隐形 / 痕迹与选词
+   —— 与 spec FR-033/037/038（痕迹与选择）对应，供审查静态基线。
+   ============================================================ */
+const TR1 = '陈平安蹲在廊下，<mark style="background:var(--accent-soft);border-bottom:2px solid var(--accent-clash)">把那半块干饼掰成两半</mark>，一半塞进嘴里慢慢嚼着，另一半用干净的油纸包好，揣回怀里。他抬头看了眼天色，日头刚过屋脊。';
+const TR2 = '少年姓崔，名<span style="background:var(--state-warning);color:var(--text-primary);padding:0 1px">瀺</span><span style="background:var(--accent-primary);color:var(--text-inverse);padding:0 1px">，是书院里</span>最不起眼的一位读书人<u style="text-decoration-color:var(--accent-primary);text-underline-offset:3px;text-decoration-thickness:2px">，却也是唯一一个愿意同陈平安说话的人</u>。';
+
+function settingsErrorPage(themeName) {
+  return `<div class="app">${topbar(themeName)}<div class="body">${sidebar('设置')}
+    <div class="content">
+      <div class="pagehead">
+        <div><h1>设置</h1><div class="desc">外观、阅读排版与本地库配置</div></div>
+        <div class="savebar err"><span class="dotspin"></span><span>1 项未能保存</span></div>
+      </div>
+      <div class="settings">
+        <div class="card" style="border-color:var(--state-error)">
+          <h2>阅读行为</h2>
+          <div class="row"><span class="lbl">段首缩进两字</span>
+            <span class="sw on"><span class="track"><span class="knob"></span></span><span class="swlbl">开</span></span>
+          </div>
+          <div class="row"><span class="lbl">连续滚动阅读</span>
+            <span class="sw on"><span class="track"><span class="knob"></span></span><span class="swlbl">开</span></span>
+          </div>
+          <div class="row" style="height:auto;padding:8px 0 2px">
+            <span class="inline-err">${ICO.alert}<span>配置目录不可写（权限被拒绝）</span><span class="retry">重试</span><span class="retry">换目录</span></span>
+          </div>
+          <div class="note" style="margin-top:6px">你的输入已保留，重试成功后即生效。</div>
+        </div>
+        <div class="card">
+          <h2>本地库目录</h2>
+          <div class="drow"><svg class="folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg><span class="path">D:\\Books\\武侠全集</span><span class="cnt">1,284 本</span></div>
+        </div>
+      </div>
+    </div></div></div>`;
+}
+
+function shelfStates(themeName, kind) {
+  let body, desc;
+  if (kind === 'empty') {
+    desc = '还没有藏书';
+    body = `<div class="statebox">
+      ${ICI.art}
+      <h3>书架还是空的</h3>
+      <p>导入本地书籍，或从书源搜索添加。支持 TXT / EPUB，也可导入书源订阅。</p>
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <span class="cta">${ICO.plus}<span>导入书籍</span></span>
+        <span class="ghost-btn">导入书源</span>
+      </div>
+      <span class="hint">快捷键 Ctrl+K 可打开命令面板</span>
+    </div>`;
+  } else if (kind === 'loading') {
+    desc = '正在载入…';
+    body = `<div class="filterbar">
+        <div class="seg"><span class="on">全部</span><span>在读</span><span>已读完</span><span>本地</span></div>
+      </div>
+      <div class="skel">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:24px">
+          ${Array(8).fill('<div style="display:flex;flex-direction:column;gap:8px"><div class="sk" style="height:200px"></div><div class="sk w80"></div><div class="sk w45"></div></div>').join('')}
+        </div>
+      </div>`;
+  } else {
+    desc = '载入失败';
+    body = `<div class="statebox err">
+      ${ICI.alertArt}
+      <h3>无法读取书架</h3>
+      <p>数据库文件被其他程序占用，或库根目录不可访问。请关闭占用程序后重试。</p>
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <span class="cta">重试</span>
+        <span class="ghost-btn">打开数据目录</span>
+      </div>
+      <span class="hint">错误标识：Storage.DatabaseLocked</span>
+    </div>`;
+  }
+  return `<div class="app">${topbar(themeName)}<div class="body">${sidebar('书架')}
+    <div class="content">
+      <div class="pagehead"><div><h1>书架</h1><div class="desc">${desc}</div></div></div>
+      ${body}
+    </div></div></div>`;
+}
+
+function sourcesStates(themeName, kind) {
+  const head = `<div class="app">${topbar(themeName)}<div class="body">${sidebar('书源管理')}
+    <div class="content">
+      <div class="pagehead">
+        <div><h1>书源管理</h1><div class="desc">${kind==='empty'?'0 个书源':'42 个书源 · 38 个可用'}</div></div>
+        <div class="headactions"><div class="ghost-btn">检查可用性</div><div class="cta">${ICO.plus}<span>导入书源</span></div></div>
+      </div>`;
+  const twoRows = `<div class="tablewrap"><table><tbody>
+        <tr><td class="status"><span class="dot"></span><span class="stxt">可用</span></td><td style="font-weight:500">笔趣阁（新）</td><td class="url">https://www.bqg128.com</td><td class="grp">综合书源</td><td class="num ok">412 ms</td><td class="act"><span class="actbtn">编辑</span></td></tr>
+        <tr><td class="status"><span class="dot err"></span><span class="stxt">已失效</span></td><td style="font-weight:500">69书吧</td><td class="url">https://www.69shuba.com</td><td class="grp">综合书源</td><td class="num bad">已失效</td><td class="act"><span class="actbtn">编辑</span></td></tr>
+      </tbody></table></div>`;
+
+  if (kind === 'empty') {
+    return head + `<div class="statebox">
+      ${ICI.art}
+      <h3>还没有书源</h3>
+      <p>导入书源文件（JSON），或粘贴书源地址。书源决定能搜到哪些书。</p>
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <span class="cta">${ICO.plus}<span>导入书源</span></span>
+        <span class="ghost-btn">从剪贴板导入</span>
+      </div>
+      <span class="hint">支持 Legado 书源格式</span>
+    </div></div></div></div>`;
+  }
+  if (kind === 'loading') {
+    return head + `<div class="filterbar"><div class="chipbox"><span class="chip on">全部</span><span class="chip">可用</span><span class="chip">失效</span></div></div>
+      <div class="skel">${Array(7).fill('<div class="sk row"></div>').join('')}</div>
+    </div></div></div>`;
+  }
+  if (kind === 'error') {
+    return head + `<div class="statebox err">
+      ${ICI.alertArt}
+      <h3>书源注册表损坏</h3>
+      <p>注册表文件校验失败，可能是上次写入被中断。可从备份恢复，或在确认后重建空注册表。</p>
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <span class="cta">从备份恢复</span>
+        <span class="ghost-btn">重建空注册表</span>
+      </div>
+      <span class="hint">错误标识：Storage.RegistryCorrupted</span>
+    </div></div></div></div>`;
+  }
+  if (kind === 'toast') {
+    return head + twoRows + `</div></div>
+    <div class="toasts">
+      <div class="toast ok">${ICO.check}<div><div class="tt">已导入 42 个书源</div><div class="td">其中 4 个标记为失效，可在列表中重新检查。</div></div></div>
+      <div class="toast err">${ICO.alert}<div><div class="tt">导入失败</div><div class="td">第 17 条规则缺少 bookSourceUrl，已跳过该条。</div></div></div>
+    </div></div>`;
+  }
+  if (kind === 'drawer') {
+    return head + twoRows + `</div></div>
+    <div class="scrim"></div>
+    <aside class="drawer">
+      <div class="dh"><h2>编辑书源 · 笔趣阁（新）</h2><span class="ricon">${ICO.close}</span></div>
+      <div class="db">
+        <div class="row"><span class="lbl">名称</span><span class="val">笔趣阁（新）</span></div>
+        <div class="row"><span class="lbl">地址</span><span class="val" style="font-family:var(--font-mono);font-size:12px">https://www.bqg128.com</span></div>
+        <div class="row"><span class="lbl">启用</span><span class="sw on"><span class="track"><span class="knob"></span></span><span class="swlbl">开</span></span></div>
+        <div class="note" style="margin-top:14px">搜索规则</div>
+        <div style="font-family:var(--font-mono);font-size:12px;color:var(--text-secondary);line-height:1.8;background:var(--bg-inset);padding:10px;border-radius:var(--r-sm);margin-top:6px">/search?q={{key}}<br>@css:.bookbox</div>
+        <div class="row" style="margin-top:12px"><span class="lbl">启用该源</span><span class="sw on"><span class="track"><span class="knob"></span></span><span class="swlbl">开</span></span></div>
+      </div>
+    </aside></div>`;
+  }
+  if (kind === 'palette') {
+    return `<div class="app">${topbar(themeName)}<div class="body">${sidebar('书源管理')}
+    <div class="content">
+      <div class="pagehead"><div><h1>书源管理</h1><div class="desc">42 个书源 · 38 个可用</div></div></div>
+    </div></div>
+    <div class="scrim" style="display:flex;align-items:flex-start;justify-content:center;padding-top:120px">
+      <div class="palette">
+        <div class="pin">${ICO.search}<input value="书源" readonly><kbd>Esc</kbd></div>
+        <div class="plist">
+          <div class="pgrp">导航</div>
+          <div class="pitem on">${ICO.globe}<span>书源管理</span><kbd>G S</kbd></div>
+          <div class="pitem">${ICO.shelf}<span>书架</span><kbd>G B</kbd></div>
+          <div class="pitem">${ICO.set}<span>设置</span><kbd>G ,</kbd></div>
+          <div class="pgrp">操作</div>
+          <div class="pitem">${ICO.check}<span>检查所有书源可用性</span></div>
+          <div class="pitem">${ICO.plus}<span>导入书源…</span></div>
+          <div class="pgrp">书源</div>
+          <div class="pitem">${ICO.dot}<span>笔趣阁（新）</span><kbd>可用</kbd></div>
+          <div class="pitem">${ICO.dot}<span>69书吧</span><kbd>已失效</kbd></div>
+        </div>
+      </div>
+    </div></div>`;
+  }
+  /* modal */
+  return head + twoRows + `</div></div>
+    <div class="scrim" style="display:flex;align-items:center;justify-content:center">
+      <div class="modal">
+        <div class="mh">移除本地库目录？</div>
+        <div class="mb">将从书架移除 <b>D:\\Books\\武侠全集</b> 下的 1,284 本书。原始文件不会被删除，可随时重新添加该目录。</div>
+        <div class="mf"><span class="btn-sec">取消</span><span class="btn-danger">移除目录</span></div>
+      </div>
+    </div></div>`;
+}
+
+function readerHidden(themeName) {
+  return `<div class="reader">
+    <div class="hotzone"></div>
+    <header class="rtop hidden">
+      <div class="l"><span class="rback">${ICO.left}<span>书架</span></span><span class="rbook">剑来 · 第二十一章</span></div>
+      <div class="r"><span class="rprog">第 21 / 486 章 · 4.3%</span></div>
+    </header>
+    <div class="rpage"><div class="measure">
+      <div class="chapno">第二十一章</div>
+      <div class="chaptitle">观湖书院</div>
+      <div class="rule"></div>
+      <p class="p">${P1}</p><p class="p">${P2}</p><p class="p">${P3}</p><p class="p">${P4}</p>
+    </div></div>
+    <footer class="rfoot">
+      <span>4.3%</span>
+      <span>第二十一章 观湖书院 · 第 1 页</span>
+      <span>剩余 1 小时 4 分</span>
+    </footer>
+  </div>`;
+}
+
+function readerTraces(themeName) {
+  return `<div class="reader">
+    <header class="rtop">
+      <div class="l"><span class="rback">${ICO.left}<span>书架</span></span><span class="rbook">剑来 · 第二十一章</span></div>
+      <div class="r"><span class="rprog">第 21 / 486 章 · 4.3%</span><span class="ricon">${ICO.font}</span></div>
+    </header>
+    <div class="rpage"><div class="measure">
+      <div class="chapno">第二十一章</div>
+      <div class="chaptitle">观湖书院</div>
+      <div class="rule"></div>
+      <p class="p">${TR1}</p>
+      <p class="p">${TR2}</p>
+      <div style="position:relative;height:0">
+        <div style="position:absolute;left:8%;top:6px;width:216px;background:var(--bg-elevated);
+                    border:1px solid var(--border-strong);border-radius:var(--r-md);box-shadow:var(--shadow-md);padding:10px 12px">
+          <div style="font-size:13px;font-weight:600">瀺 <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-tertiary)">chán</span></div>
+          <div style="font-size:12px;color:var(--text-secondary);line-height:1.6;margin-top:4px">水声。见于人名。</div>
+          <div style="font-size:11px;color:var(--text-tertiary);margin-top:6px">来自内置词典</div>
+        </div>
+      </div>
+      <div class="note" style="margin-top:64px">痕迹与选区均以字符区间表达（spec FR-028/037/038）；改字号、切主题后覆盖的字符集合不变。三种呈现：高亮底 + 下划线 / 字色方块 / 下划线。</div>
+    </div></div>
+    <footer class="rfoot"><span>4.3%</span><span>第二十一章 观湖书院 · 第 1 页</span><span>剩余 1 小时 4 分</span></footer>
+  </div>`;
+}
+
+function statesPage(themeName) {
+  const st = (cap, cls) => `<div><span class="cap">${cap}</span><span class="demo-btn ${cls}">按钮</span></div>`;
+  const pill = (t, bg, fg) => `<span style="display:inline-flex;align-items:center;height:22px;padding:0 10px;border-radius:var(--r-xs);font-size:11px;font-weight:500;background:${bg};color:${fg}">${t}</span>`;
+  return `<div class="app">${topbar(themeName)}<div class="body">${sidebar('设置')}
+    <div class="content">
+      <div class="pagehead"><div><h1>交互状态与组件</h1><div class="desc">四态 + 开关 + 状态组件 · 供实现对照</div></div></div>
+      <div class="settings">
+        <div class="card">
+          <h2>按钮四态（强制）</h2>
+          <div class="statebar">
+            ${st('default','')}${st('hover','hov')}${st('active','act')}${st('focus-visible','foc')}${st('disabled','dis')}
+          </div>
+        </div>
+        <div class="card">
+          <h2>Switch（布尔选项专用）</h2>
+          <div class="statebar">
+            <div><span class="cap">开</span><span class="sw on"><span class="track"><span class="knob"></span></span><span class="swlbl">开</span></span></div>
+            <div><span class="cap">关</span><span class="sw"><span class="track"><span class="knob"></span></span><span class="swlbl">关</span></span></div>
+            <div><span class="cap">focus-visible</span><span class="sw on" style="outline:2px solid var(--accent-primary);outline-offset:2px;border-radius:var(--r-xs)"><span class="track"><span class="knob"></span></span><span class="swlbl">开</span></span></div>
+            <div><span class="cap">disabled</span><span class="sw" style="opacity:.45"><span class="track"><span class="knob"></span></span><span class="swlbl">关</span></span></div>
+          </div>
+          <div class="note" style="margin-top:12px">布尔用 Switch，2–4 个互斥枚举用 Segmented——不得混用（见 MASTER §7）。</div>
+        </div>
+        <div class="card">
+          <h2>StatusPill 四态</h2>
+          <div class="statebar">
+            ${pill('成功','var(--state-success)','var(--text-inverse)')}
+            ${pill('警告','var(--state-warning)','var(--text-primary)')}
+            ${pill('错误','var(--state-error)','var(--text-inverse)')}
+            ${pill('中性','var(--state-info)','var(--text-inverse)')}
+          </div>
+          <div class="note" style="margin-top:10px">第四态「中性」用暖中性灰 <code style="font-family:var(--font-mono)">--state-info</code>——原蓝灰违反 §8 禁蓝条款，已重调。</div>
+        </div>
+        <div class="card">
+          <h2>保存失败的内联错误（不得静默）</h2>
+          <div class="statebar" style="display:block">
+            <span class="inline-err">${ICO.alert}<span>配置目录不可写（权限被拒绝）</span><span class="retry">重试</span><span class="retry">换目录</span></span>
+            <div class="note" style="margin-top:8px">失败时保留用户输入并标记「未保存」，不回滚、不静默（见 MASTER §7 设置型页面交互契约）。</div>
+          </div>
+        </div>
+      </div>
+    </div></div></div>`;
+}
+
+const SHOTS = [
+  { id:'shelf-day',    label:'书架 · 日间',        theme:'day',   html: () => shelf('夜间') },
+  { id:'shelf-night',  label:'书架 · 夜间',        theme:'night', html: () => shelf('日间') },
+  { id:'reader-day',   label:'阅读器 · 单页 · 日间', theme:'day',  html: () => reader({ themeName:'夜间' }) },
+  { id:'reader-spread',label:'阅读器 · 双页 · 日间', theme:'day', wide:true, html: () => reader({ spread:true, themeName:'夜间' }) },
+  { id:'reader-narrow',label:'阅读器 · 窄窗单页 · 日间', theme:'day', narrow:true, html: () => reader({ themeName:'夜间' }) },
+  { id:'sources-day',  label:'书源管理 · 日间',    theme:'day',   html: () => sources('夜间') },
+  { id:'sources-night',label:'书源管理 · 夜间',    theme:'night', html: () => sources('日间') },
+  { id:'settings-day', label:'设置 · 日间',        theme:'day',   html: () => settings('夜间') },
+  { id:'settings-night',label:'设置 · 夜间',       theme:'night', html: () => settings('日间') },
+  /* ---- 状态页（MASTER §9.1 覆盖面的静态基线） ---- */
+  { id:'state-styles',  label:'交互状态与组件 · 日间', theme:'day',   html: () => statesPage('夜间') },
+  { id:'state-styles-night', label:'交互状态与组件 · 夜间', theme:'night', html: () => statesPage('日间') },
+  { id:'state-hollow',  label:'书架 · 空状态',         theme:'day',   html: () => shelfStates('夜间','empty') },
+  { id:'state-sload',   label:'书架 · 加载中',         theme:'day',   html: () => shelfStates('夜间','loading') },
+  { id:'state-serr',    label:'书架 · 错误态',         theme:'day',   html: () => shelfStates('夜间','error') },
+  { id:'state-mempty',  label:'书源 · 空状态',         theme:'day',   html: () => sourcesStates('夜间','empty') },
+  { id:'state-mload',   label:'书源 · 加载中',         theme:'day',   html: () => sourcesStates('夜间','loading') },
+  { id:'state-merr',    label:'书源 · 错误态',         theme:'day',   html: () => sourcesStates('夜间','error') },
+  { id:'state-toast',   label:'书源 · Toast',          theme:'day',   html: () => sourcesStates('夜间','toast') },
+  { id:'state-drawer',  label:'书源 · 抽屉',           theme:'day',   html: () => sourcesStates('夜间','drawer') },
+  { id:'state-modal',   label:'书源 · 弹窗',           theme:'day',   html: () => sourcesStates('夜间','modal') },
+  { id:'state-palette', label:'命令面板 · Ctrl+K',     theme:'day',   html: () => sourcesStates('夜间','palette') },
+  { id:'state-setterr', label:'设置 · 保存失败',       theme:'day',   html: () => settingsErrorPage('夜间') },
+  { id:'state-hidebar', label:'阅读器 · 工具栏隐形',   theme:'day',   html: () => readerHidden('夜间') },
+  { id:'state-trace',   label:'阅读器 · 痕迹与选词',   theme:'day',   html: () => readerTraces('夜间') }
+];
+
+/* ============================================================
+   三种呈现模式：
+   - 默认：交互控制台（可切界面/主题/宽度，实时看响应式与单双页切换）
+   - ?shot=<id>：单屏静态，供 Edge 无头截图（逐屏归档）
+   - ?grid=1：全部画板平铺，供总览
+   ============================================================ */
+const params = new URLSearchParams(location.search);
+const wantShot = params.get('shot');
+const gridMode = params.get('grid') === '1';
+const stage = document.getElementById('stage');
+
+if (wantShot) {
+  /* --- 单屏静态模式（截图用） --- */
+  document.body.classList.add('single');
+  stage.innerHTML = SHOTS.filter(s => s.id === wantShot).map(s =>
+    `<div class="frame ${s.narrow?'narrow':''}${s.wide?'wide':''} active" id="${s.id}" data-theme="${s.theme}">${s.html()}</div>`
+  ).join('');
+} else if (gridMode) {
+  /* --- 平铺总览模式 --- */
+  document.body.classList.add('lab');
+  stage.classList.add('gridmode');
+  stage.innerHTML = SHOTS.map(s =>
+    `<div class="frame ${s.narrow?'narrow':''}${s.wide?'wide':''}" id="${s.id}" data-theme="${s.theme}">${s.html()}</div>`
+  ).join('');
+  wrapViewport();
+} else {
+  /* --- 交互控制台模式（主入口） --- */
+  document.body.classList.add('lab');
+  buildLab();
+}
+
+/* 平铺模式需要一个可滚动容器 */
+function wrapViewport() {
+  const vp = document.createElement('div');
+  vp.className = 'viewport';
+  document.body.appendChild(vp);
+  vp.appendChild(stage);
+}
+
+function buildLab() {
+  /* 控制台 */
+  const bar = document.createElement('div');
+  bar.className = 'labbar';
+  bar.innerHTML = `
+    <span class="ttl">tome 设计预览</span>
+    <span class="grp"><span class="k">界面</span><span id="navbtns"></span></span>
+    <span class="grp"><span class="k">主题</span>
+      <button data-theme-btn="day">羊皮卷轴</button>
+      <button data-theme-btn="night">纯黑基底</button>
+    </span>
+    <span class="grp"><span class="k">宽度</span>
+      <input class="range" id="wrange" type="range" min="560" max="2400" step="20" value="${+(params.get('w') || 1440)}">
+      <span class="readout" id="wout">${+(params.get('w') || 1440)} px</span>
+    </span>
+    <span class="grp"><span class="k">分页</span>
+      <button data-fit="auto">自动</button>
+      <button data-fit="single">单页</button>
+      <button data-fit="spread">双页</button>
+    </span>
+    <span class="hint" id="hint"></span>`;
+  document.body.appendChild(bar);
+
+  const vp = document.createElement('div');
+  vp.className = 'viewport centered';
+  document.body.appendChild(vp);
+
+  /* 界面按钮 */
+  const PAGES = [
+    { key:'shelf',    label:'书架' },
+    { key:'reader',   label:'阅读器' },
+    { key:'sources',  label:'书源管理' },
+    { key:'settings', label:'设置' }
+  ];
+  const navbtns = bar.querySelector('#navbtns');
+  navbtns.innerHTML = PAGES.map(p => `<button data-page="${p.key}">${p.label}</button>`).join('');
+
+  let curPage = params.get('page') || 'reader';   // 默认打开阅读器——本次需求的核心
+  let curTheme = params.get('theme') === 'night' ? 'night' : 'day';
+  let curW = +(params.get('w') || 1440);
+  let curFit = ['auto','single','spread'].includes(params.get('fit')) ? params.get('fit') : 'auto';
+
+  const el = document.createElement('div');
+  el.className = 'frame';
+  vp.appendChild(el);
+
+  const themeNameFor = t => (t === 'day' ? '夜间' : '日间');
+
+  /* ============================================================
+     单/双页自动判定 —— 与 design-system/MASTER.md §5.2 一致：
+     判据是「版心可用宽度能否容纳两个不小于 36em 的行长」，
+     而非固定 px 断点。em 随阅读字号缩放（此处 19px）。
+     ============================================================ */
+  const READING_FS = 19;               // 阅读字号
+  const MEASURE_EM  = 36;              // 单栏理想版心 = 36em
+  const GUTTER      = 64;              // 双页中缝
+  const PAGE_PAD_X  = 40;              // 阅读区左右内边距（= --sp-10，MASTER §5.2 公式口径）
+
+  function measurePx() { return MEASURE_EM * READING_FS; }          // 36em → 684px
+  function spreadThreshold() { return measurePx() * 2 + GUTTER + PAGE_PAD_X * 2; }  // 1432px
+  /* available = 阅读区可用宽度（已扣除内边距）。
+     注意：阅读器是**全窗浸入式**视图，其上没有 Sidebar——不得再减 240px。
+     若阅读器改为嵌在外壳侧栏内，应在此处以参数传入侧栏宽，而不是写死。 */
+  function autoSpread(readerW) {
+    return (readerW - PAGE_PAD_X * 2) >= measurePx() * 2 + GUTTER;
+  }
+
+  function render() {
+    const isReader = curPage === 'reader';
+    /* 阅读器全窗呈现：可用宽度 = 画板宽度本身（不含侧栏） */
+    const spread = isReader && (curFit === 'spread' || (curFit === 'auto' && autoSpread(curW)));
+
+    el.style.width = curW + 'px';
+    el.style.transition = 'width .18s ease';
+    el.setAttribute('data-theme', curTheme);
+
+    if (curPage === 'shelf')         el.innerHTML = shelf(themeNameFor(curTheme));
+    else if (curPage === 'sources')  el.innerHTML = sources(themeNameFor(curTheme));
+    else if (curPage === 'settings') el.innerHTML = settings(themeNameFor(curTheme));
+    else el.innerHTML = reader({ spread, themeName: themeNameFor(curTheme) });
+
+    /* 状态回显 */
+    bar.querySelector('#wout').textContent = curW + ' px';
+    const threshold = spreadThreshold();
+    if (isReader) {
+      const mode = spread ? '双页' : '单页';
+      bar.querySelector('#hint').textContent =
+        `${mode} · 版心 ${measurePx()}px(36em) · 双页阈值 ${Math.round(threshold)}px（阅读区可用宽度）`;
+    } else {
+      bar.querySelector('#hint').textContent = `双页阈值 ${Math.round(threshold)}px（阅读区可用宽度，切到阅读器可见）`;
+    }
+
+    /* 按钮态 */
+    navbtns.querySelectorAll('button').forEach(b =>
+      b.classList.toggle('on', b.dataset.page === curPage));
+    bar.querySelectorAll('[data-theme-btn]').forEach(b =>
+      b.classList.toggle('on', b.dataset.themeBtn === curTheme));
+    bar.querySelectorAll('[data-fit]').forEach(b =>
+      b.classList.toggle('on', b.dataset.fit === curFit));
+  }
+
+  navbtns.addEventListener('click', e => {
+    const p = e.target.closest('[data-page]'); if (!p) return;
+    curPage = p.dataset.page; render();
+  });
+  bar.querySelectorAll('[data-theme-btn]').forEach(b =>
+    b.addEventListener('click', () => { curTheme = b.dataset.themeBtn; render(); }));
+  bar.querySelectorAll('[data-fit]').forEach(b =>
+    b.addEventListener('click', () => { curFit = b.dataset.fit; render(); }));
+  bar.querySelector('#wrange').addEventListener('input', e => {
+    curW = +e.target.value; render();
+  });
+
+  render();
+}
+
+/* 标记渲染完成，供外部检测 */
+document.documentElement.setAttribute('data-rendered', 'true');
+</script>
+</body>
+</html>

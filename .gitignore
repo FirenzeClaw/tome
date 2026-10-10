@@ -41,6 +41,14 @@
 /testdata/real-sources/
 /testdata/captures/
 
+# 参考运行器（T084）的第三方二进制与编译产物
+#
+# Jsoup jar 是运行 oracle 的前置依赖（`ref-runner.sh fetch-jsoup` 取回），
+# 第三方二进制不入仓库——与 spikes/s0/tools/lib/ 同一约定。
+# `.class` 已由上面的 `*.class` 覆盖，这里只补 jar 与编译输出目录。
+/tools/ref-runner/lib/
+/tools/ref-runner/.build/
+
 # 编辑器与系统
 .idea/
 .vscode/*

@@ -68,6 +68,111 @@ jobs:
         run: bash scripts/check-rquickjs-features.sh
 
   # ---------------------------------------------------------------------------
+  # 依赖图断言（tasks.md T096 / FR-039、宪章 IV）
+  #
+  # ## 为什么独立成 job
+  #
+  # 分支保护只能勾"某个 check"。依赖图是**架构级**约束，与"测试过了没"
+  # 是两回事——独立 job 让"架构破了"在 CI 界面上一眼可辨，也让它自己能
+  # 成为必需检查。
+  #
+  # ## 两层断言（都要）
+  #
+  # 1. `cargo build -p tome-core` —— **动态**：core 能不能在无上层时独立构建
+  # 2. `cargo tree` 的传递依赖扫描 —— **静态**：引擎依赖图里有没有图形栈
+  # 3. `cargo test --test dependency_graph` —— 星型无环、不依赖上层
+  #    （测试在本地也能跑，CI 里跑一遍是防"本地跑了没推"）
+  #
+  # ## 为什么用 cargo tree 扫传递依赖
+  #
+  # 本地测试读的是**直接依赖表**；`cargo tree` 能看到传递闭包。
+  # 有人引入一个"看起来无害"的 crate 而它内部依赖 winit 时，
+  # 只有传递扫描能发现。
+  # ---------------------------------------------------------------------------
+  dependency-graph:
+    name: 依赖图断言（FR-039）
+    runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: stable-x86_64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 cargo 构建产物
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: dependency-graph
+
+      # --- ① core 独立构建 -------------------------------------------------
+      - name: tome-core 可独立构建
+        run: |
+          set -euo pipefail
+          cargo build -p tome-core
+          echo "tome-core 在无上层 crate 时独立构建通过"
+
+      # --- ② 星型无环（走测试）---------------------------------------------
+      - name: 星型无环断言
+        run: cargo test -p tome-cli --test dependency_graph
+
+      # --- ③ 传递依赖里无图形栈 --------------------------------------------
+      #
+      # 引擎 crate 的传递闭包不该出现图形栈。tome-reader 是合法依赖 wgpu
+      # 的排版层，**不在**本检查范围（它不属引擎）。
+      - name: 引擎传递依赖无图形栈
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # 图形栈的特征 crate 名（与 crates/tome-cli/tests/headless.rs 的
+          # GRAPHICS_CRATES 保持一致；两处都写是因为一处是静态扫描、
+          # 一处看传递闭包，覆盖面不同）
+          forbidden="winit|wgpu|glutin|glfw|sdl2|^gtk|gtk-sys|cocoa|^objc|tao|egui|iced|slint|fltk|minifb|pixels|softbuffer|raw-window-handle"
+
+          failed=0
+          for crate in tome-core tome-rule tome-js tome-net tome-store tome-source tome-local tome-cli; do
+            echo "--- $crate 的传递依赖 ---"
+            # `--edges normal` 排除 dev/build 依赖：它们不参与生产构建
+            tree=$(cargo tree -p "$crate" --edges normal --prefix none --no-dedupe 2>/dev/null               | sed 's/ (\*)$//' | awk '{print $1}' | sort -u)
+
+            hits=$(echo "$tree" | grep -E "$forbidden" || true)
+            if [ -n "$hits" ]; then
+              echo "::error::$crate 的传递依赖里出现图形栈：$hits"
+              failed=1
+            else
+              echo "无图形栈"
+            fi
+          done
+
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::引擎依赖图包含图形栈（FR-036 / SC-011）"
+            exit 1
+          fi
+          echo "全部引擎 crate 的传递依赖均无图形栈"
+
+      # --- ④ 引擎不依赖阅读器 ----------------------------------------------
+      #
+      # Tome-reader 依赖 wgpu，故"引擎依赖 reader"会间接把图形栈拉进引擎。
+      # 这条是 ③ 的**充分性反证**：即便 ③ 因某种原因漏了，这条也会拦。
+      - name: 引擎不依赖阅读器
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed=0
+          for crate in tome-core tome-rule tome-js tome-net tome-store tome-source tome-local tome-cli; do
+            tree=$(cargo tree -p "$crate" --edges normal --prefix none 2>/dev/null || true)
+            if echo "$tree" | grep -qE "^tome-reader"; then
+              echo "::error::$crate 依赖了 tome-reader（FR-039：引擎不得依赖上层）"
+              failed=1
+            fi
+          done
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "引擎均不依赖 tome-reader"
+
+  # ---------------------------------------------------------------------------
   # S0 spike（tasks.md T006-T008）—— 独立 job，独立 crate
   #
   # ## 为什么要独立成 job 而不是并进 build

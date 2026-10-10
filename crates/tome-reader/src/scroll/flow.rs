@@ -44,6 +44,21 @@ use crate::paginate::config::GeometryConfig;
 use crate::paginate::page::{ChapterLayout, PageLine};
 use crate::paginate::spread::Viewport;
 
+/// 形态切换的**过渡事件数参考值**（供上层判断"何时算稳定"）。
+///
+/// ## 这不是"稳定判据"，而是给上层的参考量
+///
+/// FR-023 要求"进度以切换**稳定后**的锚点为准"，但"何时算稳定"取决于
+/// UI 生命周期（动效播完？首帧渲染完？），那是 S3 的关切。本层**不自行**
+/// 用事件数判定——那样会引入一个凭空数字（与 MASTER 被判废的"变化幅度
+/// 阈值"同类问题，裁决 OQ#14→C）。
+///
+/// 这个常量的用途是：上层若需要"大概几次事件之后可以认为动效结束"的
+/// 默认值，可以取它；否则自行判定。取 **3** 的理由是它对应一个直觉上
+/// 合理的下限（动画开始 + 中段 + 结束），且与 `--dur-slow`（280ms）在
+/// 常见帧率下的帧数量级相当。
+pub const TRANSCRIPTION_SETTLE_EVENTS: usize = 3;
+
 /// 滚动流中的一个视口（data-model.md §6 的 `ScrollViewport`）。
 ///
 /// ## 与 `Page` 的同构（FR-021）

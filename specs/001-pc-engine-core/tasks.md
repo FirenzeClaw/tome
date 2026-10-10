@@ -415,6 +415,15 @@
 > - [x] spec 全部 SC 可度量项通过；宪章合规复检通过
 > - [x] 人工审查 + 干净室轴审查通过
 > - [x] 上游参考运行器接线的干净室约定已成文并执行（运行器怎么跑 / 产物落盘位置 / 核对人）
+>
+> **PM 注记（2026-10-11，P9 收口）**：本检查点此前的勾选是**暂判**——宪章合规复检
+> 与干净室轴审查两处正由 P9 执行。现 T100/T101 已完成，两处引用落到可核验产物：
+> - 宪章合规 → `checklists/constitution.md`（8 条原则 + 3 项附加约束逐条达标）
+> - 干净室轴 → `checklists/cleanroom.md`（10 组扫描，命中 0）+ `tools/ref-runner/CLEANROOM.md`（T084 台账 + 核对人签字）
+> - 性能类 SC 的可度量性 → `perf-baseline.md`（SC-003/004/005 实测 + 口径 + 复跑须知）
+>
+> 两处审查的自述局限已写明：静态扫描不能证明"从未打开过上游源码"（靠 T084 过程
+> 台账与签字），也不能替代 PM 的独立复核（原则 VII）。**结论待 PM 复核后生效。**
 
 ---
 
@@ -422,13 +431,23 @@
 
 **Purpose**: 影响多个故事的横切收尾。**无用户故事标签。**
 
-- [ ] T097 [P] AGENTS.md 构建命令填实——把「待补充」替换为真实可运行命令（`cargo build/test/clippy/fmt`、差分测试入口、CI 触发）于 `AGENTS.md`
-  - [ ] AGENTS.md 中每条命令在仓库里真实可运行
-- [ ] T098 [P] quickstart.md 验证——按 quickstart.md 从零走一遍上手流程，修正不符处于 `specs/001-pc-engine-core/quickstart.md`
-- [ ] T099 [P] rustdoc 文档注释完整性检查（公开 API 均有 docstring），产物为 `cargo doc --no-deps` 无警告于 `crates/*/src/**/*.rs`
-- [ ] T100 宪章合规复检——对照 constitution.md 8 条原则逐条确认，结果记录于 `specs/001-pc-engine-core/checklists/constitution.md`
-- [ ] T101 干净室轴审查——全库扫描确认无上游 Kotlin 移植痕迹、注释/提交无上游源码引用，结果记录于 `specs/001-pc-engine-core/checklists/cleanroom.md`
-- [ ] T102 性能基线复核——SC-003/SC-004/SC-005 实测达标并记录于 `specs/001-pc-engine-core/perf-baseline.md`
+- [x] T097 [P] AGENTS.md 构建命令填实——把「待补充」替换为真实可运行命令（`cargo build/test/clippy/fmt`、差分测试入口、CI 触发）于 `AGENTS.md`
+  - [x] AGENTS.md 中每条命令在仓库里真实可运行——逐条实跑：`build`/`test`/`clippy --all-targets`/`fmt --all --check`/`doc`/守卫脚本、CLI 命令面、四条差分测试入口、两条 CI workflow 均验证可跑
+- [x] T098 [P] quickstart.md 验证——按 quickstart.md 从零走一遍上手流程，修正不符处于 `specs/001-pc-engine-core/quickstart.md`
+  - [x] 修正三处不符：工具链版本（1.98→1.99）、目录结构（9 个 crate 含 tome-reader；无 `tests/fixtures/`）、补齐可执行的上手步骤与差分测试入口
+  - [x] 全命令面在干净 `--data-dir` 上实跑：导入/列表/分组/搜索/详情/目录/正文/轨迹/关键词/源检查/本地书/导出导入/缓存清理/删除/离线回放（关站后仍返回结果，证真离线）
+- [x] T099 [P] rustdoc 文档注释完整性检查（公开 API 均有 docstring），产物为 `cargo doc --no-deps` 无警告于 `crates/*/src/**/*.rs`
+  - [x] 实测 **270 → 0**：265 条是功能标注（`[DONE]` 等）被当成 intra-doc link，转义后字面渲染不变；53 条是失效/私有链接目标，按情形补全路径或改字面文本
+  - [x] 附带订正一处文档与实现脱节（`bridge.rs` 指向已改名的 `eval_nested`）
+- [x] T100 宪章合规复检——对照 constitution.md 8 条原则逐条确认，结果记录于 `specs/001-pc-engine-core/checklists/constitution.md`
+  - [x] 8 条原则 + 3 项附加约束全部达标，每条附可核验落点（测试文件/CI 断言/机制位置）
+  - [x] 生产路径 unwrap/expect/panic 实测 0 处；release 二进制 12.6 MB（< 20 MB 基线）
+- [x] T101 干净室轴审查——全库扫描确认无上游 Kotlin 移植痕迹、注释/提交无上游源码引用，结果记录于 `specs/001-pc-engine-core/checklists/cleanroom.md`
+  - [x] 10 组扫描 + 5 项补充核对：上游包名/类名、Kotlin 语法特征、英文移植表述均命中 **0**；`*.kt`/`*.kts` 文件 0 个；提交消息 160 条无源码引用
+  - [x] 唯一的 2 个 `.java` 是自研 Jsoup 公开 API oracle；复核 T084 台账一致
+- [x] T102 性能基线复核——SC-003/SC-004/SC-005 实测达标并记录于 `specs/001-pc-engine-core/perf-baseline.md`
+  - [x] SC-003 = 714 ms（阈值 1s，余量 1.40×）；SC-004 = 1.77 s（阈值 8s，余量 4.5×）且 300MB 上限参考 5.53 s 不失败；SC-005 = 1.000651（阈值 1.01），SC-005b 文件数 10（上限 1000）
+  - [x] 三条各自写明测量口径（SC-003 不计网络传输、SC-004 必须 release、SC-005 核算须等于磁盘实际）与复跑须知
 
 ---
 

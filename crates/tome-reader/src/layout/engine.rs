@@ -1,0 +1,558 @@
+//! [DONE] 排版引擎：ShapeLine 克隆后处理（T013 / research R1 方案 A）
+//!
+//! ## 引擎在做什么（一句话）
+//!
+//! cosmic-text 的断行只认 **word 边界**（T005 实测证实）。故"禁止在 A 与 B
+//! 之间断行"的**实现手段就是**把 A 与 B 合并成同一个 `ShapeWord`——
+//! 断行自然不会再落在它们之间。
+//!
+//! ```text
+//! 原始 shape 结果            合并后                  layout()
+//! ┌───┬───┬───┐             ┌─────┬───┐            行1: 甲乙
+//! │甲 │乙 │丙 │   ──────→   │甲乙 │丙 │   ──────→   行2: 丙
+//! └───┴───┴───┘             └─────┴───┘
+//!   （丙前可断）              （丙前仍可断，甲乙间不可）
+//! ```
+//!
+//! ## 三个来自 T005 spike 硬约束（照做，不重新论证）
+//!
+//! 1. **必须在 `Wrap::Word` 下做**。实测 `Wrap::WordOrGlyph` 在遇到超宽
+//!    西文单词时会**切换到 glyph 路径**，而那条路径无视 word 边界——
+//!    合并 word 的禁则手段对它失效。故 FR-009 的"超长单词退化为按字符
+//!    断行"**不能**靠 `WordOrGlyph` 获得，须在 T014 自行实现。
+//! 2. **hinting 关闭**。实测量化发生在 layout 层（px），偏差达半字身
+//!    挤压单位的 4.19%——开 hinting 会让挤压语义不可表达。
+//!    注意 shape 层的 `x_advance`（em 单位）改写**不受** hinting 干扰，
+//!    故挤压改写点无需额外处理。
+//! 3. **合并不得丢字形、不得改原文区间**。T005 已实测（`merge_words`
+//!    的 `glyphs` 移动保持 `start`/`end` 序列不变），本层复用该实现。
+
+use cosmic_text::{
+    Attrs, Buffer, Family, FontSystem, Hinting, Metrics, ShapeLine, ShapeWord, Shaping, Wrap,
+};
+
+use crate::layout::linebox::{GlyphBox, HardOrderStep, LineBox, RuleExceptionRecord};
+use crate::rules::cjk::{break_decision, BreakDecision};
+use crate::text::model::TextModel;
+
+/// 排版几何参数（T013 阶段的最小集；完整的 `ReadingConfig` 属 T017）。
+///
+/// ## 为什么只放这三项
+///
+/// T013 只负责"文本 → 行盒"。几何参数里真正影响**断行**的只有版心宽度；
+/// 字号与行高影响**度量**（字形位置与行盒高度）。其余参数（段缩进、
+/// 中缝、单双页）属分页层（T019/T020），此处不引入以免过早耦合。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Geometry {
+    /// 版心宽度（px）
+    pub measure_px: f32,
+    /// 阅读字号（px）
+    pub font_size_px: f32,
+    /// 行高（字号倍数）
+    pub line_height: f32,
+}
+
+impl Geometry {
+    /// 默认几何（MASTER §5.1 的默认值）。
+    #[must_use]
+    pub const fn default_ma() -> Self {
+        Self {
+            measure_px: 36.0 * 19.0, // 36em @ 19px = 684px
+            font_size_px: 19.0,
+            line_height: 1.85,
+        }
+    }
+
+    /// 行高（px）。
+    #[must_use]
+    pub fn line_height_px(&self) -> f32 {
+        self.font_size_px * self.line_height
+    }
+}
+
+/// 排版一段文本的结果。
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayoutResult {
+    /// 行盒序列
+    pub lines: Vec<LineBox>,
+    /// 本段产生的全部禁则例外（供 SC-002 计数）
+    pub exceptions: Vec<RuleExceptionRecord>,
+}
+
+/// 排版引擎（持有 `FontSystem`——它是昂贵的字体库句柄）。
+///
+/// ## 为什么持有而非每次新建
+///
+/// `FontSystem::new()` 会加载系统字体库（实测耗时可观）。分页预计算
+/// （T024）要对多章反复排版，每次新建会成为瓶颈。故引擎是**长生命周期**
+/// 对象，排版是它的方法。
+pub struct LayoutEngine {
+    font_system: FontSystem,
+}
+
+impl LayoutEngine {
+    /// 新建引擎（加载系统字体库）。
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            font_system: FontSystem::new(),
+        }
+    }
+
+    /// 排版一段文本。
+    ///
+    /// ## 流程（与 research R1 方案 A 逐条对应）
+    ///
+    /// 1. 建 `Buffer`（`Wrap::Word` + hinting 关闭 + 按版心宽设尺寸）
+    /// 2. `line_shape` 取 `ShapeLine` **克隆体**（不改 Buffer 原文——
+    ///    这一点重要：Buffer 可被复用，克隆体上的改动不应污染它）
+    /// 3. 按禁则表**合并需要禁断的相邻 word**
+    /// 4. 在合并后的克隆体上调 `layout()` 拿断行结果
+    /// 5. 把 `LayoutLine` 的字形区间从**字节**换算为**字符**，组装 `LineBox`
+    ///
+    /// ## 第 5 步为什么必须做换算
+    ///
+    /// cosmic-text 的 `LayoutGlyph.start/end` 是**字节**区间，而本层的
+    /// 输出契约是**字符**区间（FR-003）。换算在此发生一次，
+    /// 之后全链路都是字符口径。
+    pub fn layout_paragraph(
+        &mut self,
+        model: &TextModel,
+        paragraph_index: usize,
+        geometry: &Geometry,
+    ) -> LayoutResult {
+        let text = model.text();
+        if text.is_empty() {
+            return LayoutResult {
+                lines: Vec::new(),
+                exceptions: Vec::new(),
+            };
+        }
+
+        let metrics = Metrics::relative(geometry.font_size_px, geometry.line_height);
+        let mut buffer = Buffer::new(&mut self.font_system, metrics);
+        buffer.set_size(Some(geometry.measure_px), None);
+        // 约束 1：必须 Wrap::Word（见模块文档）
+        buffer.set_wrap(Wrap::Word);
+        // 约束 2：hinting 关闭
+        buffer.set_hinting(Hinting::Disabled);
+        buffer.set_text(
+            text,
+            &Attrs::new().family(Family::Serif),
+            Shaping::Advanced,
+            None,
+        );
+        buffer.shape_until_scroll(&mut self.font_system, false);
+
+        // `.cloned()` 而非 `.map(ShapeLine::clone)`——clippy 的
+        // `map_clone` 认为后者是显式克隆。语义上等价，取惯用写法。
+        let Some(shape_line) = buffer.line_shape(&mut self.font_system, 0).cloned() else {
+            return LayoutResult {
+                lines: Vec::new(),
+                exceptions: Vec::new(),
+            };
+        };
+
+        // 第 3 步：按禁则合并（在克隆体上）
+        let (merged, merge_plan) = merge_for_kinsoku(&shape_line, text);
+
+        // 第 4 步：layout
+        let laid_out = merged.layout(
+            geometry.font_size_px,
+            Some(geometry.measure_px),
+            Wrap::Word,
+            None,
+            None,
+            Hinting::Disabled,
+        );
+
+        // 第 5 步：字节 → 字符换算 + 组装行盒
+        let mut lines = Vec::with_capacity(laid_out.len());
+        let mut exceptions = Vec::new();
+
+        for line in &laid_out {
+            let mut glyphs = Vec::with_capacity(line.glyphs.len());
+            let mut char_start: Option<usize> = None;
+            let mut char_end = 0usize;
+
+            for glyph in &line.glyphs {
+                let byte_range = glyph.start..glyph.end;
+                // 字节区间 → 字符区间。两端的字节位置都是字符边界
+                // （cosmic-text 的字形区间按字形切，必落在字符边界上）。
+                let Some(glyph_char_start) = model.to_char_index(glyph.start) else {
+                    continue;
+                };
+                let Some(glyph_char_end) = model.to_char_index(glyph.end) else {
+                    continue;
+                };
+
+                char_start.get_or_insert(glyph_char_start);
+                char_end = glyph_char_end.max(char_end);
+
+                glyphs.push(GlyphBox {
+                    char_range: glyph_char_start..glyph_char_end,
+                    byte_range,
+                    x_px: glyph.x * geometry.font_size_px,
+                    advance_px: glyph.w,
+                    // 压缩量由 T014 的挤压模块填充；T013 阶段恒为 0
+                    squeeze_px: 0.0,
+                });
+            }
+
+            let Some(char_start) = char_start else {
+                continue;
+            };
+
+            lines.push(LineBox {
+                paragraph_index,
+                char_range: char_start..char_end,
+                glyphs,
+                height_px: geometry.line_height_px(),
+                baseline_px: line.max_ascent,
+                squeeze_px: 0.0,
+                rule_exception: None,
+            });
+        }
+
+        // 第 6 步：**事后核验**——layout 是否真的遵守了合并边界？
+        //
+        // 这是"判据必须能实际失败"的落点：若 layout 无视了合并（T005 的
+        // 证伪条件），此处会产出 RuleExceptionRecord。它同时是 FR-008
+        // 第 ④ 步的记账机制——"几何条件不允许时放弃禁则"与"引擎无视禁则"
+        // 在这个口径下是同一件事，都必须留痕。
+        exceptions.extend(verify_kinsoku_respected(&lines, text, &merge_plan));
+
+        for line in &mut lines {
+            if let Some(record) = exceptions
+                .iter()
+                .find(|record| line.char_range.contains(&record.char_index))
+                .cloned()
+            {
+                line.rule_exception = Some(record);
+            }
+        }
+
+        LayoutResult { lines, exceptions }
+    }
+}
+
+impl Default for LayoutEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// 一次合并操作的记录（供事后核验使用）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergePlanEntry {
+    /// 合并后该 word 覆盖的字节区间
+    pub byte_range: std::ops::Range<usize>,
+    /// 被强制绑在一起的位置（字节）
+    pub merged_at_byte: usize,
+}
+
+/// 按禁则表合并相邻 `ShapeWord`。
+///
+/// ## 算法
+///
+/// 逐 word 扫描：若「当前 word 的末字符」与「下一 word 的首字符」之间的
+/// 断点被禁则禁止（[`break_decision`]），则把两者合并。
+///
+/// 合并可能**连锁**：`甲乙），` 里「乙」与「）」禁断、「）」与「，」也禁断，
+/// 故三者要合成一个 word。实现用"累积待合并窗口"而不是两两合并——
+/// 后者只能处理相邻一对（T005 的 `merge_words(from, to)` 天然支持区间，
+/// 故这里传累积后的区间）。
+///
+/// ## 返回值
+///
+/// `(合并后的 ShapeLine, 合并记录)`。记录用于事后核验（见调用处）。
+fn merge_for_kinsoku(shape_line: &ShapeLine, text: &str) -> (ShapeLine, Vec<MergePlanEntry>) {
+    let mut merged = shape_line.clone();
+    let mut plan = Vec::new();
+
+    for span in &mut merged.spans {
+        if span.words.len() < 2 {
+            continue;
+        }
+
+        // 先算出"哪些相邻 word 之间需要禁断"，再一次性合并区间。
+        // 分两步是为了让 `merge_words` 的区间参数能被正确累积。
+        let mut merge_ranges: Vec<(usize, usize)> = Vec::new();
+        let mut window_start: Option<usize> = None;
+
+        for index in 0..span.words.len() - 1 {
+            let left_char = last_char_of_word(&span.words[index], text);
+            let right_char = first_char_of_word(&span.words[index + 1], text);
+
+            let must_merge = match (left_char, right_char) {
+                (Some(left), Some(right)) => !break_decision(left, right).is_allowed(),
+                _ => false,
+            };
+
+            if must_merge {
+                if window_start.is_none() {
+                    window_start = Some(index);
+                }
+            } else if let Some(start) = window_start.take() {
+                // 窗口是 [start, index]（闭区间，因为 index-1 与 index 需合并）
+                merge_ranges.push((start, index + 1));
+            }
+        }
+        if let Some(start) = window_start {
+            merge_ranges.push((start, span.words.len()));
+        }
+
+        // 从后往前合并，避免索引位移
+        for (from, to) in merge_ranges.into_iter().rev() {
+            if to - from < 2 {
+                continue;
+            }
+            let merged_at_byte = span.words[to - 1]
+                .glyphs
+                .first()
+                .map_or(0, |glyph| glyph.start);
+            merge_words(span, from, to);
+            plan.push(MergePlanEntry {
+                byte_range: span.words[from]
+                    .glyphs
+                    .first()
+                    .zip(span.words[from].glyphs.last())
+                    .map_or(0..0, |(first, last)| first.start..last.end),
+                merged_at_byte,
+            });
+        }
+    }
+
+    (merged, plan)
+}
+
+/// 合并 `[from, to)` 区间的 `ShapeWord` 为一个。
+///
+/// ## 实现与 T005 spike 的 `merge_words` 一致
+///
+/// 把后一个 word 的 `glyphs` 移到前一个的尾部，再删掉后一个。
+/// `ShapeGlyph` 的 `start`/`end` 是原文区间，移动后天然连续，无需重算。
+/// 合并后的 `blank` 取"整段是否全空白"——取第一个的 `blank` 会错
+/// （若第一个是空白而后面有实质字形，"空白 word 含字形"是非法状态）。
+fn merge_words(span: &mut cosmic_text::ShapeSpan, from: usize, to: usize) {
+    let mut merged_glyphs = Vec::new();
+    for word in &span.words[from..to] {
+        merged_glyphs.extend(word.glyphs.iter().cloned());
+    }
+    let merged_blank = span.words[from..to].iter().all(|word| word.blank);
+
+    span.words[from] = ShapeWord {
+        blank: merged_blank,
+        glyphs: merged_glyphs,
+    };
+    for index in (from + 1..to).rev() {
+        span.words.remove(index);
+    }
+}
+
+/// 取一个 word 的**末字符**。
+fn last_char_of_word(word: &ShapeWord, text: &str) -> Option<char> {
+    let glyph = word.glyphs.last()?;
+    text.get(glyph.start..glyph.end)?.chars().next_back()
+}
+
+/// 取一个 word 的**首字符**。
+fn first_char_of_word(word: &ShapeWord, text: &str) -> Option<char> {
+    let glyph = word.glyphs.first()?;
+    text.get(glyph.start..glyph.end)?.chars().next()
+}
+
+/// 事后核验：每行的**首字符**与**尾字符**是否违反禁则？
+///
+/// ## 判据直接取自 SC-002 的原文
+///
+/// SC-002 说的是"行首禁则与行尾禁则的**违反次数为 0**"——故判据就是
+/// **逐行查行首字符与行尾字符**，而不是我初版写的"查相邻两行的边界"。
+///
+/// 两种写法的差别在**段首/段尾**：
+///
+/// - 边界写法会漏掉"某行以闭标点开头，而它前面没有上一行"的情形
+///   （段落本身以标点开头）——那**是**违反 SC-002 的，且是正当的
+///   第 ④ 步情形（输入把标点放在章首，任何排版手段都无法把它移到别处）。
+/// - 逐行写法覆盖它，因而让"例外记录"这条路径**真的可达**。
+///
+/// ## 为什么例外必须可达（而不是"永远记 0 条"）
+///
+/// 一个永远返回空例外表的核验逻辑与"禁则完美生效"在结果上无法区分——
+/// 那正是 T-005/T-007/T-009 三次踩到的"全绿但没测到"。
+/// 逐行写法让机制在真实输入下可见地触发（见 `exceptions_are_reachable`）。
+///
+/// ## 与 T013 的实现手段的关系
+///
+/// T013 的禁则靠**合并 word**实现，故断点几乎不会落在禁则位置——
+/// 违规只可能来自"输入的边界条件"（段首就是标点、或单个合并单元本身
+/// 超出版心而被迫独行）。这是 merge 路线的固有性质：它的失效模式是
+/// **溢出**（SC-003 关切）而非**违规**（SC-002 关切）。
+/// T015 的硬序前三步会进一步减少例外数量。
+fn verify_kinsoku_respected(
+    lines: &[LineBox],
+    text: &str,
+    _plan: &[MergePlanEntry],
+) -> Vec<RuleExceptionRecord> {
+    let mut exceptions = Vec::new();
+
+    for line in lines {
+        // 行首：首字符是否属行首禁则
+        if let Some(first) = char_at_start_of_line(line, text) {
+            if let BreakDecision::Forbidden { rule_id, .. } = break_decision('\0', first) {
+                // 用 '\0' 作左邻（非任何禁则字符），只让**行首禁则**参与判定
+                if rule_affects_line_start(rule_id) {
+                    exceptions.push(RuleExceptionRecord {
+                        char_index: line.char_range.start,
+                        rule_id,
+                        reached_step: HardOrderStep::GiveUpKinsoku,
+                    });
+                }
+            }
+        }
+
+        // 行尾：末字符是否属行尾禁则
+        if let Some(last) = char_at_end_of_line(line, text) {
+            if let BreakDecision::Forbidden { rule_id, .. } = break_decision(last, '\0') {
+                if rule_affects_line_end(rule_id) {
+                    exceptions.push(RuleExceptionRecord {
+                        char_index: line.char_range.end.saturating_sub(1),
+                        rule_id,
+                        reached_step: HardOrderStep::GiveUpKinsoku,
+                    });
+                }
+            }
+        }
+    }
+
+    exceptions
+}
+
+/// 该规则是否约束**行首**（用于区分"行首禁则"与"行尾禁则"的命中）。
+fn rule_affects_line_start(rule_id: &str) -> bool {
+    rule_id.starts_with("kinsoku.line_start.")
+}
+
+/// 该规则是否约束**行尾**。
+fn rule_affects_line_end(rule_id: &str) -> bool {
+    rule_id.starts_with("kinsoku.line_end.")
+}
+
+/// 取一行**末尾**的字符。
+fn char_at_end_of_line(line: &LineBox, text: &str) -> Option<char> {
+    let glyph = line.glyphs.last()?;
+    text.get(glyph.byte_range.clone())?.chars().next_back()
+}
+
+/// 取一行**开头**的字符。
+fn char_at_start_of_line(line: &LineBox, text: &str) -> Option<char> {
+    let glyph = line.glyphs.first()?;
+    text.get(glyph.byte_range.clone())?.chars().next()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn engine() -> LayoutEngine {
+        LayoutEngine::new()
+    }
+
+    #[test]
+    fn empty_text_yields_no_lines() {
+        let mut engine = engine();
+        let model = TextModel::new("");
+        let result = engine.layout_paragraph(&model, 0, &Geometry::default_ma());
+        assert!(result.lines.is_empty());
+        assert!(result.exceptions.is_empty());
+    }
+
+    #[test]
+    fn short_text_yields_single_line() {
+        let mut engine = engine();
+        let model = TextModel::new("很短的一段");
+        let result = engine.layout_paragraph(&model, 0, &Geometry::default_ma());
+
+        assert_eq!(result.lines.len(), 1);
+        assert_eq!(result.lines[0].char_range.start, 0);
+        assert_eq!(result.lines[0].char_range.end, 5);
+    }
+
+    /// 字符区间必须是**字符**口径（不是字节）。
+    #[test]
+    fn char_ranges_are_char_based_not_byte_based() {
+        let mut engine = engine();
+        // "中文😀" = 3 字符、10 字节
+        let model = TextModel::new("中文😀");
+        let result = engine.layout_paragraph(&model, 0, &Geometry::default_ma());
+
+        let line = &result.lines[0];
+        assert_eq!(
+            line.char_range.end, 3,
+            "字符区间上界应为 3（字符数）而非 10（字节数）"
+        );
+    }
+
+    /// 段落序号被如实记录。
+    #[test]
+    fn paragraph_index_is_recorded() {
+        let mut engine = engine();
+        let model = TextModel::new("内容");
+        let result = engine.layout_paragraph(&model, 7, &Geometry::default_ma());
+        assert_eq!(result.lines[0].paragraph_index, 7);
+    }
+
+    /// 行盒度量与几何参数一致。
+    #[test]
+    fn metrics_follow_geometry() {
+        let mut engine = engine();
+        let model = TextModel::new("测试");
+        let geometry = Geometry {
+            measure_px: 400.0,
+            font_size_px: 19.0,
+            line_height: 1.85,
+        };
+        let result = engine.layout_paragraph(&model, 0, &geometry);
+
+        assert!((result.lines[0].height_px - 19.0 * 1.85).abs() < 1e-4);
+        assert!(result.lines[0].baseline_px > 0.0, "基线应为正");
+    }
+
+    /// 窄版心产生多行，且行序与字符序一致（不丢不重）。
+    #[test]
+    fn narrow_measure_wraps_in_order() {
+        let mut engine = engine();
+        let text = "甲乙丙丁戊己庚辛壬癸";
+        let model = TextModel::new(text);
+        let geometry = Geometry {
+            measure_px: 57.0, // 3 字身
+            font_size_px: 19.0,
+            line_height: 1.85,
+        };
+        let result = engine.layout_paragraph(&model, 0, &geometry);
+
+        assert!(result.lines.len() >= 3, "应排成多行");
+
+        let mut expected_start = 0usize;
+        for line in &result.lines {
+            assert_eq!(line.char_range.start, expected_start, "行序应连续");
+            expected_start = line.char_range.end;
+        }
+        assert_eq!(expected_start, text.chars().count(), "末行应覆盖到文末");
+    }
+
+    /// 中文每字一个字形，字形区间与字符区间一一对应。
+    #[test]
+    fn cjk_glyphs_map_one_to_one_with_chars() {
+        let mut engine = engine();
+        let model = TextModel::new("甲乙丙");
+        let result = engine.layout_paragraph(&model, 0, &Geometry::default_ma());
+
+        let line = &result.lines[0];
+        assert_eq!(line.glyphs.len(), 3, "三个汉字应有三个字形");
+        for (index, glyph) in line.glyphs.iter().enumerate() {
+            assert_eq!(glyph.char_range.start, index);
+            assert_eq!(glyph.char_range.end, index + 1);
+        }
+    }
+}

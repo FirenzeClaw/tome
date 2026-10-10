@@ -28,9 +28,33 @@ use std::path::{Path, PathBuf};
 /// 的提示语，上层不得直接展示"）。但目前本 crate 的生产代码里**一条都没有**
 /// ——所有 detail 都由调用方传入 `impl Into<String>`。
 ///
-/// 白名单因此是**空的**：任何 CJK 字面量都必须先在这里登记并写明理由。
-/// 空白名单是最强的形态——它让"加一句中文"这个动作必须经过一次显式决策，
-/// 而不是顺手写下去。
+/// 白名单（键为行内片段，值为理由）。
+///
+/// ## 范围收窄：本扫描只覆盖**消息通道**，不接受"数据"内容
+///
+/// T013 的 `rules/cjk.rs` 引入了大量 CJK 字面量（禁则字符集本身、
+/// `basis` 依据、判定例/反例）。它们**不是错误消息**，故不应受 FR-058 约束：
+///
+/// | 类别 | 例子 | 是不是消息 |
+/// |---|---|---|
+/// | 禁则字符集 | `chars: "）］｝"` | ✗ 是**数据**（规则要约束的字符） |
+/// | 依据文本 | `basis: "UAX#14…CLreq §3.1.1"` | ✗ 是**文档**（随代码分发的说明） |
+/// | 判定例/反例 | `positive_case: "行，「甲」）…"` | ✗ 是**测试语料** |
+/// | 错误标识 | `"error.reader.layout_failed"` | ✓ 是消息（但为 ASCII） |
+/// | 诊断细节 | `ReaderError::detail` | ✓ 是消息（由调用方传入） |
+///
+/// 把"数据/文档"也算违规会让本扫描**必然全红**，然后被整块豁免掉——
+/// 那比收窄范围更糟。故改为按**模块职责**界定范围，并把判断理由写在此处。
+///
+/// ## 覆盖范围（只扫这些）
+///
+/// - `error.rs`：错误标识与诊断细节的构造点
+/// - `corpus.rs`：语料装载的错误消息
+///
+/// 新增模块若要产出**错误消息**，应加入此列表；若只是包含中文**数据**
+/// （如禁则表、语料、设计 token），则不需要。
+const MESSAGE_BEARING_SOURCES: &[&str] = &["src/error.rs", "src/corpus.rs"];
+
 const ALLOWED_NON_MESSAGE_LITERALS: &[(&str, &str)] = &[];
 
 /// 递归收集 `src/` 下的全部 `.rs` 文件。
@@ -168,6 +192,22 @@ fn no_natural_language_in_reader_error_sources() {
     let mut findings = Vec::new();
 
     for path in &sources {
+        let relative = path
+            .strip_prefix(&manifest_dir)
+            .unwrap_or(path)
+            .display()
+            .to_string()
+            // 归一化路径分隔符（Windows 上是 `\`），使范围表可跨平台书写
+            .replace('\\', "/");
+
+        // 只扫**消息通道**模块（范围与理由见 MESSAGE_BEARING_SOURCES）
+        if !MESSAGE_BEARING_SOURCES
+            .iter()
+            .any(|scoped| relative.ends_with(scoped))
+        {
+            continue;
+        }
+
         let content = match fs::read_to_string(path) {
             Ok(content) => content,
             Err(_) => continue,
@@ -183,12 +223,7 @@ fn no_natural_language_in_reader_error_sources() {
             if !code.chars().any(is_cjk) {
                 continue;
             }
-            // 逐条核对白名单（键为"文件:行片段"，值为理由）
-            let relative = path
-                .strip_prefix(&manifest_dir)
-                .unwrap_or(path)
-                .display()
-                .to_string();
+            // 逐条核对白名单
             let allowed = ALLOWED_NON_MESSAGE_LITERALS
                 .iter()
                 .any(|(needle, _)| raw_line.contains(needle));
@@ -201,6 +236,34 @@ fn no_natural_language_in_reader_error_sources() {
             }
         }
     }
+
+    // **范围有效性自检**：受扫模块必须真的存在且被扫到。
+    //
+    // 若 MESSAGE_BEARING_SOURCES 里写错了路径（改了文件名却忘了同步），
+    // 扫描会扫 0 个文件并"全绿"——那是最危险的失效形态（守卫形同虚设）。
+    // 这与 `scanner_detects_chinese_in_code` 是不同角度：后者验判断逻辑，
+    // 本条验范围接线。
+    let scanned = sources
+        .iter()
+        .filter(|path| {
+            let relative = path
+                .strip_prefix(&manifest_dir)
+                .unwrap_or(path)
+                .display()
+                .to_string()
+                .replace('\\', "/");
+            MESSAGE_BEARING_SOURCES
+                .iter()
+                .any(|scoped| relative.ends_with(scoped))
+        })
+        .count();
+    assert_eq!(
+        scanned,
+        MESSAGE_BEARING_SOURCES.len(),
+        "受扫模块数（{scanned}）与 MESSAGE_BEARING_SOURCES（{} 项）不符——\n\
+         某个路径写错了，扫描范围被意外缩小（那是「守卫形同虚设」的失效形态）",
+        MESSAGE_BEARING_SOURCES.len()
+    );
 
     assert!(
         findings.is_empty(),

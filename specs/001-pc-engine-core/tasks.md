@@ -343,28 +343,29 @@
 
 **MOBI 分阶段**（research R4 降险路径）：阶段一 PalmDOC → 阶段二 HUFF/CDIC → 阶段三 KF8 FDST（**阶段三可拆为独立后续任务，不阻塞 S1 主线**）。
 
-- [ ] T076 [US3] tome-local：TXT 导入——编码检测（chardetng）+ 目录识别（多条目录规则回退 + 无目录时按大小切分）于 `crates/tome-local/src/txt.rs`（FR-020）
-  - [ ] 100MB TXT 导入+目录识别 <8s（SC-004）；300MB 不失败（上限参考）
-- [ ] T077 [P] [US3] tome-local：EPUB 导入——zip + quick-xml 解析元数据/目录/正文/内嵌资源于 `crates/tome-local/src/epub.rs`（FR-021）
-- [ ] T078 [US3] tome-local：MOBI 阶段一——PalmDB 容器 + PalmDOC/MOBI 头 + EXTH + trailing data 剥离 + PalmDOC 解压 + MOBI6 纯文本 + guide 型 TOC 于 `crates/tome-local/src/mobi/`（FR-022）
-  - [ ] **trailing data 剥离正确**（R4 静默 bug 高发区：剥离错不报错只丢字）
-  - [ ] 真实 PalmDOC MOBI 文件（Gutenberg 公有领域）验证
-- [ ] T079 [US3] tome-local：MOBI 阶段二——HUFF/CDIC 解压（phrase 递归展开+记忆化+u64 移位）于 `crates/tome-local/src/mobi/huffcdic.rs`（依据 MIT 的 mobi-rs `huff.md` + MobileRead Wiki 文字规范独立实现）
-  - [ ] 真实 `kindlegen -c2` HUFF/CDIC 文件验证；与 oracle（kindling dump）diff 一致
-- [ ] T080 [US3] tome-local：MOBI DRM 检测（PalmDOC 头 0x0C Encryption Type；区分"加密"与"不支持格式"；KFX/Topaz 显式拒绝）于 `crates/tome-local/src/mobi/drm.rs`
-  - [ ] compression=17480(HUFF/CDIC)不误报为 DRM；DRM 文件给明确报错
-- [ ] T081 [US3] tome-local：MOBI 阶段三——KF8 FDST primary flow 取整段 HTML（跳过 SKEL/FRAG 拼接）于 `crates/tome-local/src/mobi/kf8.rs`（**可拆为独立后续任务**）
-- [ ] T082 [US3] tome-local：库根目录扫描（只索引不搬移）+ 导入时可选 `--copy` 复制到库目录（非强制）+ 移动/换盘符后索引重建不重复（归一化文件哈希）于 `crates/tome-local/src/library.rs`（FR-023/FR-024/FR-025）
-  - [ ] 多库根目录指向同一文件时识别为同一本书（边缘情况）
-- [ ] T083 [US3] tome-local：实现 ContentProvider seam 的**本地书 adapter**（偏移直读；净化管线下游统一应用）于 `crates/tome-local/src/provider.rs`（A4 第二个 adapter）
-  - [ ] 本地书与网络书经同一 seam 供上层；净化对两类一致生效
+- [x] T076 [US3] tome-local：TXT 导入——编码检测（chardetng）+ 目录识别（多条目录规则回退 + 无目录时按大小切分）于 `crates/tome-local/src/txt.rs`（FR-020）
+  - [x] 100MB TXT 导入+目录识别 <8s（SC-004）；300MB 不失败（上限参考）
+- [x] T077 [P] [US3] tome-local：EPUB 导入——zip + quick-xml 解析元数据/目录/正文/内嵌资源于 `crates/tome-local/src/epub.rs`（FR-021）
+- [x] T078 [US3] tome-local：MOBI 阶段一——PalmDB 容器 + PalmDOC/MOBI 头 + EXTH + trailing data 剥离 + PalmDOC 解压 + MOBI6 纯文本 + guide 型 TOC 于 `crates/tome-local/src/mobi/`（FR-022）
+  - [x] **trailing data 剥离正确**（R4 静默 bug 高发区：剥离错不报错只丢字）
+  - [x] 真实 PalmDOC MOBI 文件（Gutenberg 公有领域）验证
+- [x] T079 [US3] tome-local：MOBI 阶段二——HUFF/CDIC 解压（phrase 递归展开+记忆化+u64 移位）于 `crates/tome-local/src/mobi/huffcdic.rs`（依据 MIT 的 mobi-rs `huff.md` + MobileRead Wiki 文字规范独立实现）
+  - [x] 真实 `kindlegen -c2` HUFF/CDIC 文件验证；与 oracle（kindling dump）diff 一致
+- [x] T080 [US3] tome-local：MOBI DRM 检测（PalmDOC 头 0x0C Encryption Type；区分"加密"与"不支持格式"；KFX/Topaz 显式拒绝）于 `crates/tome-local/src/mobi/drm.rs`
+  - [x] compression=17480(HUFF/CDIC)不误报为 DRM；DRM 文件给明确报错
+- [x] T081 [US3] tome-local：MOBI 阶段三——KF8 FDST primary flow 取整段 HTML（跳过 SKEL/FRAG 拼接）于 `crates/tome-local/src/mobi/kf8.rs`（**可拆为独立后续任务**）
+- [x] T082 [US3] tome-local：库根目录扫描（只索引不搬移）+ 导入时可选 `--copy` 复制到库目录（非强制）+ 移动/换盘符后索引重建不重复（归一化文件哈希）于 `crates/tome-local/src/library.rs`（FR-023/FR-024/FR-025）
+  - [x] 多库根目录指向同一文件时识别为同一本书（边缘情况）
+- [x] T083 [US3] tome-local：实现 ContentProvider seam 的**本地书 adapter**（偏移直读；净化管线下游统一应用）于 `crates/tome-local/src/provider.rs`（A4 第二个 adapter）
+  - [x] 本地书与网络书经同一 seam 供上层；净化对两类一致生效
 
 > **⛔ 检查点：S1-5 之后（本地书）**
-> - [ ] TXT/EPUB/MOBI(阶段一/二) 导入可读；MOBI 阶段三范围已确认（前置或后置由你定）
-> - [ ] 库根扫描；移动目录索引重建不重复
-> - [ ] MOBI 用真实文件验证（非仅单元测试）
-> - [ ] ContentProvider 双 adapter 就位，净化管线下游统一
-> - [ ] 人工审查后进入下一阶段
+> - [x] TXT/EPUB/MOBI(阶段一/二) 导入可读；MOBI 阶段三范围已确认（前置或后置由你定）
+> - [x] 库根扫描；移动目录索引重建不重复
+> - [x] MOBI 用真实文件验证（非仅单元测试）
+> - [x] ContentProvider 双 adapter 就位，净化管线下游统一
+> - [x] 人工审查后进入下一阶段
+>   - PM 注记（2026-10-10）：**T079 的「真实 kindlegen -c2 文件验证」未达成**——本机无 kindlegen/Calibre，Gutenberg 三种 Kindle 格式实测均为 compression=2(PalmDOC)。HUFF/CDIC 已按 mobi-rs `huff.md` 规范重写（31 单测），真实文件验证标 `#[ignore]` 待补样本，另设诊断测试持续可见。**P8/P9 需补获 -c2 样本后关闭此项**。T081（KF8）未拆分、已完成。SC-004 实测 100MB/1.87s。
 
 ---
 

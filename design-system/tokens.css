@@ -1,0 +1,177 @@
+/* ============================================================
+   tome · Design Tokens
+   来源：design-system/MASTER.md v1.0
+   规矩：页面禁止直接写十六进制；一律引用本文件变量。
+   ============================================================ */
+
+:root {
+  /* ---- 间距（4px 网格） ---- */
+  --sp-1: 4px;   --sp-2: 8px;   --sp-3: 12px;  --sp-4: 16px;
+  --sp-5: 20px;  --sp-6: 24px;  --sp-8: 32px;  --sp-10: 40px;  --sp-12: 48px;
+
+  /* ---- 圆角 ---- */
+  --r-xs: 4px; --r-sm: 6px; --r-md: 8px; --r-lg: 12px; --r-full: 999px;
+
+  /* ---- 字体族 ---- */
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-reading: "Iowan Old Style", "Source Han Serif SC", "Songti SC", "Noto Serif SC", Georgia, "SimSun", serif;
+  --font-mono: "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, monospace;
+
+  /* ---- 字号（UI 层） ---- */
+  --fs-display: 30px; --fs-h1: 22px; --fs-h2: 17px; --fs-h3: 15px;
+  --fs-body: 14px; --fs-sm: 13px; --fs-caption: 12px; --fs-micro: 11px;
+
+  /* ---- 动效 ---- */
+  --ease-out: cubic-bezier(.22,.61,.36,1);
+  --ease-spring: cubic-bezier(.34,1.3,.64,1);
+  --dur-fast: 150ms; --dur-base: 200ms; --dur-slow: 280ms;
+
+  /* ---- 阅读层 ---- */
+  --reading-font-size: 19px;
+  --reading-line-height: 1.85;
+  --reading-measure: 36em;
+  --reading-gutter: 64px;
+
+  /* ---- 布局骨架 ---- */
+  --topbar-h: 56px;
+  --sidebar-w: 240px;
+  --sidebar-w-collapsed: 64px;
+}
+
+/* ============================================================
+   昼 · Parchment（羊皮卷轴暖色）
+   ============================================================ */
+:root, [data-theme="day"] {
+  color-scheme: light;
+
+  --bg-base:      #E8DFC8;   /* 应用底层：做旧羊皮纸 */
+  --bg-surface:   #F2EAD6;   /* 卡片 / 侧栏 */
+  --bg-elevated:  #FAF4E4;   /* 悬浮 / 弹窗 */
+  --bg-reading:   #F5EEDC;   /* 正文区（最纯净层） */
+  --bg-inset:     #DFD4B8;   /* 输入槽 / 斑马纹 */
+
+  --border-subtle: #D6C9A8;
+  --border-strong: #BCA97F;
+
+  --text-primary:   #2E2418;  /* 暖褐墨色 */
+  --text-secondary: #5C4B33;
+  --text-tertiary:  #8A7658;
+  --text-inverse:   #F5EEDC;
+
+  --accent-primary:   #8C3A1E;  /* 封蜡红 */
+  --accent-hover:     #A34524;
+  --accent-soft:      #E4D3B8;
+  --accent-secondary: #3F5C4A;  /* 苔绿 */
+  --accent-clash:     #B8862B;  /* 鎏金 */
+
+  --state-success: #3F5C4A;
+  --state-warning: #B8862B;
+  --state-error:   #A32B1F;
+  --state-info:    #4A5A6B;
+
+  --shadow-sm: 0 1px 2px rgba(70,52,28,.10);
+  --shadow-md: 0 6px 16px -4px rgba(70,52,28,.16);
+  --shadow-lg: 0 16px 40px -12px rgba(70,52,28,.22);
+
+  /* 纸纤维噪点（昼主题专属质感） */
+  --paper-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.5'/%3E%3C/svg%3E");
+  --paper-noise-opacity: .045;
+  --overlay-bg: rgba(46,36,24,.28);
+}
+
+/* ============================================================
+   夜 · Obsidian（OLED 纯黑基底）
+   ============================================================ */
+[data-theme="night"] {
+  color-scheme: dark;
+
+  --bg-base:      #000000;   /* 真黑 */
+  --bg-surface:   #0B0B0D;
+  --bg-elevated:  #141417;
+  --bg-reading:   #000000;
+  --bg-inset:     #101013;
+
+  --border-subtle: #1E1E23;
+  --border-strong: #32323A;
+
+  --text-primary:   #E6E4DE;  /* 暖白，非纯白 */
+  --text-secondary: #9A9790;
+  --text-tertiary:  #6A6761;
+  --text-inverse:   #0B0B0D;
+
+  --accent-primary:   #D9794A;  /* 炭火橙 */
+  --accent-hover:     #E88F5F;
+  --accent-soft:      #2A1A12;
+  --accent-secondary: #7FA88C;
+  --accent-clash:     #D9AE5C;
+
+  --state-success: #7FA88C;
+  --state-warning: #D9AE5C;
+  --state-error:   #E06B5C;
+  --state-info:    #8FA3B8;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.60);
+  --shadow-md: 0 6px 16px -4px rgba(0,0,0,.75);
+  --shadow-lg: 0 16px 40px -12px rgba(0,0,0,.85);
+
+  --paper-noise: none;
+  --paper-noise-opacity: 0;
+  --overlay-bg: rgba(0,0,0,.66);
+}
+
+/* ============================================================
+   基础重置 + 主题过渡（像晨昏交替）
+   ============================================================ */
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0; height: 100%;
+  font-family: var(--font-ui);
+  font-size: var(--fs-body);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  /* 主题切换过渡——只过渡颜色，不过渡布局 */
+  transition: background-color var(--dur-slow) var(--ease-out),
+              color var(--dur-slow) var(--ease-out);
+  -webkit-font-smoothing: antialiased;
+}
+
+button, input, select, textarea { font-family: inherit; font-size: inherit; color: inherit; }
+button { cursor: pointer; border: none; background: none; }
+
+/* 焦点环——两主题均可见，禁止抹掉 */
+:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+
+/* 纸纤维噪点覆盖层（只昼主题可见） */
+body::after {
+  content: "";
+  position: fixed; inset: 0; z-index: 9999;
+  pointer-events: none;
+  background-image: var(--paper-noise);
+  opacity: var(--paper-noise-opacity);
+  mix-blend-mode: multiply;
+  transition: opacity var(--dur-slow) var(--ease-out);
+}
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--r-full);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background-clip: content-box; background-color: var(--accent-primary); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

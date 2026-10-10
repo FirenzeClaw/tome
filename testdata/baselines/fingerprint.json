@@ -1,6 +1,7 @@
 [
   {
-    "case": "参考运行器合成样本源/search",
+    "case": "http://127.0.0.1:38921/search",
+    "label": "参考运行器合成样本源",
     "ok": true,
     "entries": 6,
     "total_chars": 21,

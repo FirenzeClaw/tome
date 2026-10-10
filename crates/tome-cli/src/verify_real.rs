@@ -76,18 +76,38 @@ pub enum Verdict {
 /// 站点改版导致的量级变化才是我们真正关心的。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Fingerprint {
-    /// 用例标识（`源名/动作`）
+    /// 用例标识（`bookSourceUrl/动作`）
     ///
-    /// # 键为什么用**源名**而不是 `bookSourceUrl`
+    /// # 键为什么用 `bookSourceUrl`（2026-10-10 PM 裁决）
     ///
-    /// 源名是人对这份对照数据的称呼，报告里读起来直接。代价是
-    /// **书源改名会让这条基线配不上**，表现为"基线里没有这条"——
-    /// 那次运行就不会判回退（静默失去保护，而非误报）。
+    /// 键的职责是**在多次运行之间认出"这是同一条用例"**。源名换不得
+    /// ——书源改名（作者改了、用户自己改了、导入时被规范化了）都会让
+    /// 这条基线配不上，表现为"基线里没有这条"，于是那次运行**静默失去
+    /// 回归保护**（不报错、不报警，只是不再比对）。
     ///
-    /// [UNCERTAIN] 这在实践中是不是够用，要等真实书源档累积若干轮才知道。
-    /// 若发现改名频繁到让基线失效，应改用 `bookSourceUrl` 作键
-    /// （它更稳定，但报告可读性差）。
+    /// `bookSourceUrl` 是书源的主键（`tome-core` 的 `Source::id`），
+    /// 按定义它标识这个源，改名不影响它。
+    ///
+    /// ## 代价与补偿
+    ///
+    /// URL 作键在报告里可读性差（`https://a.example.com/search`
+    /// 不如 `我的书源/search` 直观）。故指纹另带 [`Self::label`] 存源名
+    /// ——**键求稳定、标签求可读**，两者不必是同一个字段。
+    ///
+    /// ## wave1 的旧基线
+    ///
+    /// wave1 的基线用源名作键，与本次不兼容。处置见 `load_baseline`：
+    /// 旧键的条目**无法自动映射**（源名到 URL 不是可逆转换），故首次
+    /// 运行会视为"基线里没有这条"并提示重新生成。这是有意选择的
+    /// **明确失效**而非"尽力猜测"——猜错的键会让回归门静默比对错对象。
     pub case: String,
+    /// 源名（仅供报告阅读，不参与比对）
+    ///
+    /// `#[serde(default)]`：wave1 的基线没有这个字段，读旧文件不该报错
+    /// （虽然它的键也用不上，但**读得进来**才能给出"请重新生成"的提示，
+    /// 而不是一个反序列化错误）。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub label: String,
     /// 动作是否成功
     pub ok: bool,
     /// 结果条数（搜索命中数、目录章节数、正文段落数）
@@ -102,9 +122,16 @@ impl Fingerprint {
     /// 从一批文本构造指纹。
     #[must_use]
     pub fn from_texts(case: &str, texts: &[String]) -> Self {
+        Self::with_label(case, "", texts)
+    }
+
+    /// 从一批文本构造指纹，并带一个可读标签。
+    #[must_use]
+    pub fn with_label(case: &str, label: &str, texts: &[String]) -> Self {
         let total_chars: usize = texts.iter().map(|text| text.chars().count()).sum();
         Self {
             case: case.to_string(),
+            label: label.to_string(),
             ok: true,
             entries: texts.len(),
             total_chars,
@@ -115,8 +142,15 @@ impl Fingerprint {
     /// 失败用例的指纹。
     #[must_use]
     pub fn failed(case: &str) -> Self {
+        Self::failed_with_label(case, "")
+    }
+
+    /// 失败用例的指纹，带可读标签。
+    #[must_use]
+    pub fn failed_with_label(case: &str, label: &str) -> Self {
         Self {
             case: case.to_string(),
+            label: label.to_string(),
             ok: false,
             entries: 0,
             total_chars: 0,
@@ -248,6 +282,8 @@ pub fn render_report(summary: &ReportSummary) -> String {
         .map(|item| {
             serde_json::json!({
                 "case": item.case,
+                // 可读标签（源名）；键是 URL，报告里两个都给便于人读
+                "label": item.current.label,
                 "regressed": item.regressed,
                 "baseline": item.baseline.as_ref().map(|baseline| serde_json::json!({
                     "ok": baseline.ok,
@@ -270,6 +306,7 @@ pub fn render_report(summary: &ReportSummary) -> String {
         .map(|item| {
             serde_json::json!({
                 "case": item.case,
+                "label": item.current.label,
                 "baseline": item.baseline.as_ref().map(|baseline| serde_json::json!({
                     "entries": baseline.entries,
                     "total_chars": baseline.total_chars,
@@ -356,6 +393,24 @@ pub fn run(
     };
     let first_run = baseline.is_empty();
 
+    // ## wave1 旧基线的处置（键格式变更的迁移）
+    //
+    // wave1 用**源名**作键（`我的书源/search`），本次改为 `bookSourceUrl`
+    // （`https://a.example.com/search`）。两者**不可自动映射**——源名到 URL
+    // 不是可逆转换（同一个名字可能对应多个源，反过来也不行）。
+    //
+    // 故这里只做**检测与明示**：发现旧格式就告诉用户"这份基线用不了，
+    // 请用 --write-baseline 重新生成"。不猜、不静默、不假装比对过。
+    //
+    // 判据是"键里不含 `://`"——新键必然含（书源 URL 一定有协议前缀），
+    // 而旧键是纯名字。这个判据简单且不会误伤（书源名里出现 `://` 的可能
+    // 性可忽略，且即便有，报"请重新生成"也只是多一次无害的操作）。
+    let stale_keys: Vec<String> = baseline
+        .keys()
+        .filter(|key| !key.contains("://"))
+        .cloned()
+        .collect();
+
     // 逐源跑动作，算指纹
     let mut fingerprints = Vec::new();
     for parsed in &sources {
@@ -363,12 +418,20 @@ pub fn run(
         let name = parsed.source.name.clone();
 
         // 搜索（T084 的对照动作之一）
-        let search_case = format!("{name}/search");
+        //
+        // ## 键用 `bookSourceUrl`（源 id）而非源名（2026-10-10 PM 裁决）
+        //
+        // wave1 用源名作键，当时标了 [UNCERTAIN]：改名会让基线配不上、
+        // 静默失去回归保护。PM 裁决改键。
+        //
+        // 源名仍然保留在指纹里（`label` 字段）供人读报告——**键求稳定、
+        // 标签求可读**，两者不必是同一个字段。
+        let search_case = format!("{source_id}/search");
         match run_search_fingerprint(options, &source_id, host, &hosts) {
-            Ok(texts) => fingerprints.push(Fingerprint::from_texts(&search_case, &texts)),
+            Ok(texts) => fingerprints.push(Fingerprint::with_label(&search_case, &name, &texts)),
             Err(reason) => {
-                eprintln!("[警告] {search_case} 失败：{reason}");
-                fingerprints.push(Fingerprint::failed(&search_case));
+                eprintln!("[警告] {search_case}（{name}）失败：{reason}");
+                fingerprints.push(Fingerprint::failed_with_label(&search_case, &name));
             }
         }
     }
@@ -424,6 +487,26 @@ pub fn run(
              \n注意：基线文件 {} 不存在，本次为**首轮对照**——尚无基线可比。\n\
              请用 `--write-baseline` 落盘首轮基线，后续迭代才有回归判据。\n",
             baseline_path.display()
+        );
+        return CommandOutcome::with_stdout(notice);
+    }
+
+    // 旧键格式的基线：明确告知"这份配不上"，而不是让它静默失效
+    if !stale_keys.is_empty() && !write_baseline {
+        let notice = format!(
+            "{rendered}\
+             \n注意：基线文件 {} 里有 {} 条**旧格式**条目（键为源名，本版起改用 \
+             bookSourceUrl）。\n旧键无法自动映射到新键，这些条目本次未被比对——\
+             受影响的源暂时没有回归保护。\n请用 `--write-baseline` 重新生成基线。\n\
+             旧键（前 3 条）：{}\n",
+            baseline_path.display(),
+            stale_keys.len(),
+            stale_keys
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<String>>()
+                .join("、")
         );
         return CommandOutcome::with_stdout(notice);
     }

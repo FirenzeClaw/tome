@@ -37,13 +37,26 @@ use std::sync::Arc;
 use tome_cli::flags::{parse, GlobalOptions, ParseOutcome};
 
 /// 回环合成站点（复用 `capture_synthetic.rs` 的页面文件）。
+/// 合成站点的固定地址（见 [`Site::start`] 对"为什么固定"的说明）。
+const SITE_ADDRESS: &str = "127.0.0.1:38921";
+
 struct Site {
     address: String,
 }
 
 impl Site {
+    /// 启动站点。
+    ///
+    /// # 为什么要绑**固定端口**而不是 `:0`（让 OS 随便挑一个）
+    ///
+    /// 基线要入 git，而它的键是 `bookSourceUrl`——用 `:0` 时每次运行拿到
+    /// 不同端口，键每次都变，**基线永远配不上**（回归门形同虚设）。
+    /// 固定端口让 `http://127.0.0.1:38921` 成为稳定标识。
+    ///
+    /// 选一个不常用的高端口，降低"被别的进程占住"的概率（占了会直接
+    /// 报错而不是静默用别的端口——那正是我们要的：宁可见红不可静默失效）。
     fn start(site_dir: PathBuf) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("应能绑定回环端口");
+        let listener = TcpListener::bind(SITE_ADDRESS).expect("应能绑定回环端口");
         let address = listener.local_addr().expect("应能取地址").to_string();
         std::thread::spawn(move || {
             for stream in listener.incoming() {

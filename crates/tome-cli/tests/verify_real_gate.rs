@@ -443,7 +443,10 @@ fn 已提交的基线只含指纹() {
     // 结构性检查：指纹结构里**没有**存正文的字段。
     // 用 JSON 层断言而不是结构体层，因为"将来加了个 text 字段"正是要防的事。
     let raw: serde_json::Value = serde_json::from_str(&text).expect("应是合法 JSON");
-    let allowed = ["case", "ok", "entries", "total_chars", "digest"];
+    // `label` 是源名（人可读标签）。它**可能**含第三方内容吗？源名是
+    // 书源作者起的名字（如"某某小说"），不含站点正文——与 `case` 同类。
+    // 仍保留白名单机制：新增字段时必须显式确认"它不承载第三方内容"。
+    let allowed = ["case", "label", "ok", "entries", "total_chars", "digest"];
     for item in raw.as_array().expect("应是数组") {
         let object = item.as_object().expect("每项应是对象");
         for key in object.keys() {
@@ -487,7 +490,11 @@ fn 回归门在基线被抬高时变红() {
     let (_sources_guard, sources) = make_sources_dir(&site.base_url());
     let data_guard = tempfile::tempdir().expect("应能建临时数据目录");
 
-    // 读已提交的基线，认清它的**真实键**（源名来自样本书源，不是我编的名字）
+    // 读已提交的基线，认清它的**真实键**。
+    //
+    // 键是 `bookSourceUrl`（PM 裁决后的格式），故现场源必须用**同一个
+    // bookSourceUrl** —— 这正是"同一条用例"的构造。源名不参与键，
+    // 故改名不该影响这条测试（那正是改键的目的）。
     let text = std::fs::read_to_string(&committed).expect("应能读基线");
     let mut entries: Vec<Fingerprint> = serde_json::from_str(&text).expect("应是合法指纹数组");
     let committed_case = entries
@@ -495,18 +502,24 @@ fn 回归门在基线被抬高时变红() {
         .map(|entry| entry.case.clone())
         .expect("基线不该为空");
 
-    // 现场源必须用**同一个源名**，否则键对不上，比对不起来。
-    // 这里把基线里的源名回填到现场书源上——这正是"同一条用例"的构造。
-    let source_name = committed_case
-        .split('/')
-        .next()
-        .expect("case 形如 源名/动作")
-        .to_string();
+    // 键形如 `http://host:port/search` —— 含 `://`，故不能用 split('/') 取首段。
+    // 从**右侧**切掉 `/动作` 后缀即可（动作名不含 `/`）。
+    let committed_url = committed_case
+        .rsplit_once('/')
+        .map(|(url, _action)| url.to_string())
+        .expect("case 形如 bookSourceUrl/动作");
+    assert!(
+        committed_url.contains("://"),
+        "键应是 bookSourceUrl（含协议前缀），实际 {committed_url}"
+    );
+
     let source_file = sources.join("synthetic.json");
     let mut source_value: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&source_file).expect("应能读源"))
             .expect("应是合法 JSON");
-    source_value["bookSourceName"] = serde_json::Value::String(source_name);
+    source_value["bookSourceUrl"] = serde_json::Value::String(committed_url.clone());
+    // 顺带把源名改成另一个名字：验证**改名不影响键匹配**
+    source_value["bookSourceName"] = serde_json::Value::String("改名后的源".to_string());
     std::fs::write(
         &source_file,
         serde_json::to_string_pretty(&source_value).expect("应能序列化"),
@@ -548,4 +561,149 @@ fn 回归门在基线被抬高时变红() {
         cases.iter().any(|case| case["baseline"].is_object()),
         "现场用例应与抬高后的基线键匹配上（键是 `源名/动作`）：{report}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// 基线键：bookSourceUrl 而非源名（2026-10-10 PM 裁决）
+// ---------------------------------------------------------------------------
+
+/// **源改名不影响回归保护** —— 这正是改键要解决的问题。
+///
+/// wave1 用源名作键：书源改名后基线配不上，那条源静默失去回归保护
+/// （不报错、不报警，只是不再比对）。改键后，改名只是换了 `label`，
+/// 比对照常进行，回退照样能被检出。
+#[test]
+fn 源改名后回归保护仍生效() {
+    let site = ShrinkingSite::start(5);
+    let (_sources_guard, sources) = make_sources_dir(&site.base_url());
+    let golden_guard = tempfile::tempdir().expect("应能建临时基线目录");
+    let golden = golden_guard.path().to_path_buf();
+    let data_guard = tempfile::tempdir().expect("应能建临时数据目录");
+    let data_dir = data_guard.path().to_path_buf();
+
+    // 首轮：建基线
+    let (code, stdout, stderr) = run_verify_real(&sources, &golden, true, &data_dir);
+    assert_eq!(code, 0, "建基线应成功\nstdout:{stdout}\nstderr:{stderr}");
+
+    let baseline: Vec<Fingerprint> = serde_json::from_str(
+        &std::fs::read_to_string(golden.join("fingerprint.json")).expect("应能读基线"),
+    )
+    .expect("应是合法指纹数组");
+    assert!(
+        baseline[0].case.contains("://"),
+        "键应是 bookSourceUrl，实际 {}",
+        baseline[0].case
+    );
+
+    // 改源名（不动 bookSourceUrl）
+    let source_file = sources.join("synthetic.json");
+    let mut value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&source_file).expect("应能读源"))
+            .expect("应是合法 JSON");
+    value["bookSourceName"] = serde_json::Value::String("完全换了个名字".to_string());
+    std::fs::write(
+        &source_file,
+        serde_json::to_string_pretty(&value).expect("应能序列化"),
+    )
+    .expect("应能写源");
+
+    // 内容不变 + 改名 → 仍不该判回退
+    let (code, stdout, stderr) = run_verify_real(&sources, &golden, false, &data_dir);
+    assert_eq!(
+        code, 0,
+        "改名不该影响比对结果\nstdout:{stdout}\nstderr:{stderr}"
+    );
+
+    // 现在让内容真的变少：必须仍能检出回退（保护没有因改名而失效）
+    site.shrink_to(2);
+    let (code, stdout, stderr) = run_verify_real(&sources, &golden, false, &data_dir);
+    assert_eq!(
+        code, 1,
+        "改名之后回退仍必须被检出（这正是改键的目的）\nstdout:{stdout}\nstderr:{stderr}"
+    );
+    let report_text = if stderr.contains("\"regressed\"") {
+        stderr
+    } else {
+        stdout
+    };
+    let report: serde_json::Value = serde_json::from_str(&report_text).expect("应是 JSON");
+    assert!(
+        report["regressed"].as_u64().unwrap_or(0) > 0,
+        "应报告回退：{report}"
+    );
+    // 报告里应能看到改后的标签（键是 URL，标签可读）
+    let cases = report["cases"].as_array().expect("应含 cases");
+    assert!(
+        cases[0]["baseline"].is_object(),
+        "键应能匹配上（改名不影响）"
+    );
+}
+
+/// 报告同时给出键（URL）与标签（源名）。
+#[test]
+fn 报告同时给出键与标签() {
+    let baseline_file = repo_root()
+        .join("testdata")
+        .join("baselines")
+        .join("fingerprint.json");
+    let entries: Vec<Fingerprint> =
+        serde_json::from_str(&std::fs::read_to_string(&baseline_file).expect("应能读基线"))
+            .expect("应是合法指纹数组");
+
+    let entry = entries.first().expect("基线不该为空");
+    assert!(entry.case.contains("://"), "键应是 bookSourceUrl");
+    assert!(!entry.label.is_empty(), "应带可读标签（源名），供人读报告");
+}
+
+/// 旧格式（源名作键）的基线被**明示**而非静默失效。
+#[test]
+fn 旧格式基线被明示而非静默失效() {
+    let site = ShrinkingSite::start(3);
+    let (_sources_guard, sources) = make_sources_dir(&site.base_url());
+    let golden_guard = tempfile::tempdir().expect("应能建临时基线目录");
+    let golden = golden_guard.path().to_path_buf();
+    let data_guard = tempfile::tempdir().expect("应能建临时数据目录");
+
+    // 伪造一份 wave1 格式的基线（键是源名，不含 `://`）
+    let stale = vec![Fingerprint {
+        case: "参考运行器合成样本源/search".to_string(),
+        label: String::new(),
+        ok: true,
+        entries: 6,
+        total_chars: 21,
+        digest: "917bb842292490c7".to_string(),
+    }];
+    std::fs::write(
+        golden.join("fingerprint.json"),
+        serde_json::to_string_pretty(&stale).expect("应能序列化"),
+    )
+    .expect("应能写");
+
+    let (code, stdout, stderr) = run_verify_real(&sources, &golden, false, data_guard.path());
+    let report_text = format!("{stdout}{stderr}");
+
+    assert_eq!(code, 0, "旧基线不算失败（它只是配不上）\n{report_text}");
+    assert!(
+        report_text.contains("旧格式") && report_text.contains("--write-baseline"),
+        "应明示旧格式并给出可执行指引（静默失效会让用户以为门还在）\n{report_text}"
+    );
+}
+
+/// wave1 的基线文件（无 `label` 字段）仍**读得进来**，只是键配不上。
+#[test]
+fn 旧基线文件无_label_字段仍可读() {
+    let json = r#"[
+        {
+            "case": "旧源名/search",
+            "ok": true,
+            "entries": 6,
+            "total_chars": 21,
+            "digest": "917bb842292490c7"
+        }
+    ]"#;
+    let entries: Vec<Fingerprint> =
+        serde_json::from_str(json).expect("缺 label 不该让读取失败（serde default）");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].label, "", "缺字段时应为空串");
+    assert_eq!(entries[0].entries, 6, "其余字段照常读到");
 }

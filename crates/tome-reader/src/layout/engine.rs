@@ -124,6 +124,64 @@ impl LayoutEngine {
     /// cosmic-text 的 `LayoutGlyph.start/end` 是**字节**区间，而本层的
     /// 输出契约是**字符**区间（FR-003）。换算在此发生一次，
     /// 之后全链路都是字符口径。
+    /// 排版一段带**行内样式**的文本（FR-010）。
+    ///
+    /// ## 与 [`Self::layout_paragraph`] 的关系
+    ///
+    /// 后者是"无样式"的简化入口（`styles` 为空）。本方法多接受一组
+    /// [`StyleSpan`]，并按段落级样式决定**对齐**与**字号倍数**：
+    ///
+    /// | 段落样式 | 效果 |
+    /// |---|---|
+    /// | Body | 默认对齐（两端对齐）、字号不变 |
+    /// | Heading | **居中** + 字号 × 1.6 |
+    /// | Quote | **居中** + 字号 × 0.95 |
+    /// | Strong | 无段落级效果（它是行内强调，不改对齐与字号） |
+    ///
+    /// ## 段落级样式怎么取
+    ///
+    /// 取**段首字符**生效的样式——若整段被一个 Heading 区间覆盖，
+    /// 段首字符自然命中它。这是"段落样式"在当前最小集合下的合理判定
+    /// （真正的"段落级样式"需要段落模型携带样式字段，那属后续切片的
+    /// 范围；FR-010 只要求"最小集合"可用）。
+    ///
+    /// ## 不变量（FR-010）
+    ///
+    /// 字号缩放**不改变字符区间归属**——它只改字身的度量，
+    /// 字符下标由 [`TextModel`] 决定，样式无从影响。
+    pub fn layout_styled_paragraph(
+        &mut self,
+        model: &TextModel,
+        paragraph_index: usize,
+        geometry: &Geometry,
+        styles: &[crate::layout::style::StyleSpan],
+    ) -> LayoutResult {
+        use crate::layout::style::{spec_of, style_at, InlineStyle};
+
+        // 段落级样式 = 段首字符生效的样式
+        let paragraph_style = style_at(styles, 0);
+        let spec = spec_of(paragraph_style);
+
+        // 按样式缩放字号与行高（居中由 alignment 表达）
+        let scaled = Geometry {
+            font_size_px: spec.font_size_px(geometry.font_size_px),
+            // 行高是**倍数**，字号变化时行高自动跟随（无需另外缩放）
+            line_height: geometry.line_height,
+            alignment: if spec.centered {
+                crate::rules::justify::Alignment::Centered
+            } else {
+                geometry.alignment
+            },
+            ..*geometry
+        };
+
+        // 继续走原路径（样式只改几何参数，不改文本——这是不变量的实现）
+        let result = self.layout_paragraph(model, paragraph_index, &scaled);
+
+        let _ = paragraph_style == InlineStyle::Body;
+        result
+    }
+
     pub fn layout_paragraph(
         &mut self,
         model: &TextModel,

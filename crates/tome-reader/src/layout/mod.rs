@@ -4,6 +4,7 @@
 //! |---|---|---|
 //! | [`engine`] | ShapeLine 克隆后处理引擎（禁则合并 + layout） | research R1 方案 A |
 //! | [`linebox`] | 行盒结构（data-model §4 七字段） | FR-008 / FR-012 |
+//! | [`style`] | 行内样式最小集合（标题/强调/引用/居中） | FR-010 |
 //!
 //! ## 依赖方向
 //!
@@ -19,3 +20,4 @@
 
 pub mod engine;
 pub mod linebox;
+pub mod style;

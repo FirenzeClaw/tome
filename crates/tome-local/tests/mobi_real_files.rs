@@ -441,6 +441,12 @@ fn real_huffcdic_file_verifies_the_phase_two_path() {
 /// 而不是要人去逐个文件手工检查。
 #[test]
 fn report_which_compression_paths_the_corpus_covers() {
+    // 语料目录整体缺席（CI/gitignored 未检出）时诚实跳过：该诊断的价值在本地
+    // 开发侧（CI 永远没有第三方语料）；部分缺席仍照常逐项报告并按覆盖断言。
+    if !corpus_dir().is_dir() {
+        eprintln!("SKIPPED: 真实语料目录不存在（gitignored，CI 属预期）——本诊断只在本地有意义");
+        return;
+    }
     let names = [
         "368.kf8.mobi",
         "2701.kf8.mobi",

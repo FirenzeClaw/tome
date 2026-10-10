@@ -296,41 +296,42 @@
 
 ### 组合根装配 + HTTP 日志管线
 
-- [ ] T063 [US6] tome-cli：组合根装配——构造各模块、读 config.toml、注入类型化配置子集、注入 NetHost/StoreHost 实现到 tome-js 于 `crates/tome-cli/src/root.rs`（A1/A3 接线端）
-  - [ ] tome-js 拿到真实 NetHost/StoreHost；无全局单例；无界面下可完整装配
-- [ ] T064 [US6] tome-net + tome-store：HTTP 日志管线（net 产出结构化请求/响应记录 → store http_log 持久化 → Cookie/认证头脱敏 → 可开关）于 `crates/tome-net/src/log.rs`（FR-017）
-  - [ ] Cookie/认证头在日志中脱敏（宪章 V）；日志可开关、滚动清理不无限增长
+- [x] T063 [US6] tome-cli：组合根装配——构造各模块、读 config.toml、注入类型化配置子集、注入 NetHost/StoreHost 实现到 tome-js 于 `crates/tome-cli/src/root.rs`（A1/A3 接线端）
+  - [x] tome-js 拿到真实 NetHost/StoreHost；无全局单例；无界面下可完整装配
+- [x] T064 [US6] tome-net + tome-store：HTTP 日志管线（net 产出结构化请求/响应记录 → store http_log 持久化 → Cookie/认证头脱敏 → 可开关）于 `crates/tome-net/src/log.rs`（FR-017）
+  - [x] Cookie/认证头在日志中脱敏（宪章 V）；日志可开关、滚动清理不无限增长
 
 ### tome-source 完整管线
 
-- [ ] T065 [US1] tome-source：书籍详情管线 `book_info` 于 `crates/tome-source/src/info.rs`（FR-002 详情动作）
-- [ ] T066 [US1] tome-source：目录管线 `toc`（5 万章 <1s，SC-003）于 `crates/tome-source/src/toc.rs`（FR-002 目录动作）
-- [ ] T067 [US1] tome-source：正文管线 `chapter_content`（先查 Pack 缓存→未命中抓取→崩溃安全写入→净化下游统一）于 `crates/tome-source/src/content.rs`（FR-002 正文动作）
-- [ ] T068 [US1] tome-source：图片抓取管线（封面+正文内嵌图片；来源鉴权头透传、失败重试、占位回退）于 `crates/tome-source/src/image.rs`（FR-019）
-  - [ ] 鉴权头/Cookie 透传；失败重试 + 占位回退，**不中断正文获取**（SC-014）
-  - [ ] 鉴权图片获取成功率与正文一致（SC-018）；写入 T061 图片缓存
-- [ ] T069 [US5] tome-source：净化管线接入 tome-rule 定序加工链（替换→高亮→词典）于 `crates/tome-source/src/purify.rs`（接 T051）
-- [ ] T070 [US1] tome-source：换源 `change_source`——三级进度映射（特征段 90% 相似度→标题近似→降级提示）于 `crates/tome-source/src/change_source.rs`（FR-010b）
-  - [ ] 返回 `ChangeSourceOutcome` 标明采用哪一级及其结果（可观测）
-  - [ ] 特征段匹配用 `read_progress.anchor_text` 在新源邻域章节缓存内搜索
-- [ ] T071 [US1] tome-source：源可用性检查（单源 + 批量流式）于 `crates/tome-source/src/check.rs`（FR-011）
-- [ ] T072 [US1] tome-source：发现导航与分页于 `crates/tome-source/src/discover.rs`（FR-013）
-- [ ] T073 [US1] tome-source：搜索流式接口落地（`Stream + CancelToken`，单源失败为流内条目）于 `crates/tome-source/src/search_stream.rs`（A6/FR-012）
-  - [ ] 多源并行；增量返回；可取消；任一源失败不影响其余（SC-006）
+- [x] T065 [US1] tome-source：书籍详情管线 `book_info` 于 `crates/tome-source/src/info.rs`（FR-002 详情动作）
+- [x] T066 [US1] tome-source：目录管线 `toc`（5 万章 <1s，SC-003）于 `crates/tome-source/src/toc.rs`（FR-002 目录动作）
+- [x] T067 [US1] tome-source：正文管线 `chapter_content`（先查 Pack 缓存→未命中抓取→崩溃安全写入→净化下游统一）于 `crates/tome-source/src/content.rs`（FR-002 正文动作）
+- [x] T068 [US1] tome-source：图片抓取管线（封面+正文内嵌图片；来源鉴权头透传、失败重试、占位回退）于 `crates/tome-source/src/image.rs`（FR-019）
+  - [x] 鉴权头/Cookie 透传；失败重试 + 占位回退，**不中断正文获取**（SC-014）
+  - [x] 鉴权图片获取成功率与正文一致（SC-018）；写入 T061 图片缓存
+- [x] T069 [US5] tome-source：净化管线接入 tome-rule 定序加工链（替换→高亮→词典）于 `crates/tome-source/src/purify.rs`（接 T051）
+- [x] T070 [US1] tome-source：换源 `change_source`——三级进度映射（特征段 90% 相似度→标题近似→降级提示）于 `crates/tome-source/src/change_source.rs`（FR-010b）
+  - [x] 返回 `ChangeSourceOutcome` 标明采用哪一级及其结果（可观测）
+  - [x] 特征段匹配用 `read_progress.anchor_text` 在新源邻域章节缓存内搜索
+- [x] T071 [US1] tome-source：源可用性检查（单源 + 批量流式）于 `crates/tome-source/src/check.rs`（FR-011）
+- [x] T072 [US1] tome-source：发现导航与分页于 `crates/tome-source/src/discover.rs`（FR-013）
+- [x] T073 [US1] tome-source：搜索流式接口落地（`Stream + CancelToken`，单源失败为流内条目）于 `crates/tome-source/src/search_stream.rs`（A6/FR-012）
+  - [x] 多源并行；增量返回；可取消；任一源失败不影响其余（SC-006）
 
 ### ContentProvider 网络 adapter + 锚点
 
-- [ ] T074 [US6] tome-source：实现 ContentProvider seam 的**网络书 adapter**（缓存或抓取；净化管线下游统一应用）+ `resolve_anchor` + `prefetch` 于 `crates/tome-source/src/provider.rs`（A4）
-  - [ ] 网络书经同一 seam 提供目录/正文/锚点解析
-- [ ] T075 [US4] tome-source：锚点不变性参数化验证——同一位置在任意排版参数组合下 `resolve_anchor` 解析为同一锚点值于 `crates/tome-source/tests/anchor_invariance.rs`（SC-008）
-  - [ ] 无界面参数化验证；回读指向同一处文本（100%）
+- [x] T074 [US6] tome-source：实现 ContentProvider seam 的**网络书 adapter**（缓存或抓取；净化管线下游统一应用）+ `resolve_anchor` + `prefetch` 于 `crates/tome-source/src/provider.rs`（A4）
+  - [x] 网络书经同一 seam 提供目录/正文/锚点解析
+- [x] T075 [US4] tome-source：锚点不变性参数化验证——同一位置在任意排版参数组合下 `resolve_anchor` 解析为同一锚点值于 `crates/tome-source/tests/anchor_invariance.rs`（SC-008）
+  - [x] 无界面参数化验证；回读指向同一处文本（100%）
 
 > **⛔ 检查点：S1-4 之后（存储与管线）**
-> - [ ] 完整阅读路径端到端；崩溃安全故障注入通过
-> - [ ] Pack 容量开销 ≤1.01×；两种缓存可独立清理
-> - [ ] 锚点不变性参数化验证通过；Cookie 持久化重启保留
-> - [ ] 组合根装配成立（无全局单例）；HTTP 日志脱敏生效；图片失败不中断正文
-> - [ ] 人工审查后进入下一阶段
+> - [x] 完整阅读路径端到端；崩溃安全故障注入通过
+> - [x] Pack 容量开销 ≤1.01×；两种缓存可独立清理
+> - [x] 锚点不变性参数化验证通过；Cookie 持久化重启保留
+> - [x] 组合根装配成立（无全局单例）；HTTP 日志脱敏生效；图片失败不中断正文
+> - [x] 人工审查后进入下一阶段
+>   - PM 注记（2026-10-10）：wave2 session 在 CLI 接线收尾时中断（turn interrupted，603K ctx 退役）；T063-T075 全部 commit 完整，中断处为帮助文本未更新，PM 已补全并验收（1705 测试绿、退出码/契约面核验通过）。
 
 ---
 

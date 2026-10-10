@@ -25,7 +25,6 @@ use tome_reader::paginate::config::{
     DEFAULT_FONT_SIZE_PX, DEFAULT_GUTTER_PX, DEFAULT_LINE_HEIGHT, DEFAULT_MEASURE_EM,
     DEFAULT_MEASURE_MAX_EM, FONT_SIZE_RANGE, LINE_HEIGHT_RANGE,
 };
-
 // ===========================================================================
 // 默认值（MASTER §5.1）
 // ===========================================================================
@@ -403,4 +402,109 @@ fn line_height_px_is_font_size_scaled() {
         "实测 {}",
         config.geometry.line_height_px()
     );
+}
+
+// ===========================================================================
+// T018：全局默认 vs 单书覆盖（裁决 OQ#12→A 的作用域语义）
+// ===========================================================================
+
+/// **未设为这本书设置** → 落回全局默认，且标记为非覆盖。
+#[test]
+fn resolve_falls_back_to_global_default_when_book_has_no_config() {
+    let global = ReadingConfig::default_ma();
+    let resolved = ReadingConfig::resolve_for_book(&global, None).expect("未设置应成功");
+
+    assert_eq!(resolved.config, global, "未设置时生效的应是全局默认");
+    assert!(!resolved.is_book_override, "不得标记为单书覆盖");
+}
+
+/// **显式为这本书设置** → 覆盖全局默认。
+#[test]
+fn resolve_uses_book_override_when_set() {
+    let global = ReadingConfig::default_ma();
+
+    let mut personal = ReadingConfig::default_ma();
+    personal.geometry.font_size_px = 24;
+    personal.presentation.theme_id = ThemeId::Obsidian;
+    let json = personal.to_json().expect("应能序列化");
+
+    let resolved = ReadingConfig::resolve_for_book(&global, Some(&json)).expect("显式设置应生效");
+
+    assert_eq!(resolved.config, personal, "单书覆盖应压过全局默认");
+    assert_eq!(resolved.config.geometry.font_size_px, 24);
+    assert_eq!(resolved.config.presentation.theme_id, ThemeId::Obsidian);
+    assert!(resolved.is_book_override, "应标记为单书覆盖");
+}
+
+/// **单书覆盖即使用户只改了呈现参数，也不影响几何的继承语义**。
+///
+/// ## 这条测试的取向
+///
+/// 覆盖是**整份替换**而非逐字段合并。理由是逐字段合并需要"未设置"与
+/// "设为默认值"可区分——JSON 里两者长得一样（都是那个字段的值），
+/// 于是"用户把字号调回 19"会被理解成"没设置字号"从而跟回全局。
+/// 整份替换没有这个歧义。
+#[test]
+fn book_override_replaces_whole_config_not_field_merge() {
+    let mut global = ReadingConfig::default_ma();
+    global.geometry.font_size_px = 30; // 全局是 30
+
+    // 单书只把主题改成夜，字号保持默认 19
+    let mut personal = ReadingConfig::default_ma();
+    personal.presentation.theme_id = ThemeId::Obsidian;
+    let json = personal.to_json().expect("应能序列化");
+
+    let resolved = ReadingConfig::resolve_for_book(&global, Some(&json)).expect("应成功");
+    assert_eq!(
+        resolved.config.geometry.font_size_px, 19,
+        "覆盖是整份替换：单书没写 30，就应是它自己的 19，而不是继承全局的 30"
+    );
+    assert_eq!(resolved.config.presentation.theme_id, ThemeId::Obsidian);
+}
+
+/// **损坏的单书覆盖报错**（不静默回退——那会让用户以为设置"没保存"）。
+#[test]
+fn broken_book_override_reports_error_not_silent_fallback() {
+    let global = ReadingConfig::default_ma();
+
+    let error = ReadingConfig::resolve_for_book(&global, Some("{ not json"))
+        .expect_err("损坏的 read_config 应报错");
+    assert_eq!(
+        error.message_id(),
+        "error.reader.read_config_parse",
+        "须是解析类错误标识，实测：{error}"
+    );
+
+    // 合法 JSON 但字段越界 → 字段类错误（两种失败可区分）
+    let mut bad = ReadingConfig::default_ma();
+    bad.geometry.font_size_px = 99;
+    let bad_json = serde_json::to_string(&bad).expect("序列化本身应成功（无校验）");
+    let error =
+        ReadingConfig::resolve_for_book(&global, Some(&bad_json)).expect_err("越界配置应被拒");
+    assert_eq!(error.field(), Some("font_size"));
+}
+
+/// 覆盖生效后**改全局默认不追溯影响已设置的书**（作用域的实质）。
+#[test]
+fn changing_global_does_not_affect_books_with_override() {
+    let mut global = ReadingConfig::default_ma();
+    global.geometry.font_size_px = 14;
+
+    let mut personal = ReadingConfig::default_ma();
+    personal.geometry.font_size_px = 24;
+    let json = personal.to_json().expect("应能序列化");
+
+    // 全局又变了一次
+    let mut changed_global = global;
+    changed_global.geometry.font_size_px = 30;
+
+    let resolved = ReadingConfig::resolve_for_book(&changed_global, Some(&json)).expect("应成功");
+    assert_eq!(
+        resolved.config.geometry.font_size_px, 24,
+        "全局默认的后续变化不得影响已显式设置的书"
+    );
+
+    // 而未设置的书跟随全局的新值
+    let followed = ReadingConfig::resolve_for_book(&changed_global, None).expect("应成功");
+    assert_eq!(followed.config.geometry.font_size_px, 30);
 }

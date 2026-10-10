@@ -220,6 +220,46 @@ impl BookDao {
         })
     }
 
+    /// 设置该书的排版配置（`Book.read_config`，002 §FR-013 的 schema 载体）。
+    ///
+    /// # 为什么是单列更新而不是 `update_book`
+    ///
+    /// `update_book` 写全部 17 列。用它来设一个配置字段意味着：调用方先读出
+    /// 整行（此时它快照了一份**别的字段**），改一处，再整行写回。并发场景下
+    /// 那份快照可能已经陈旧——写入会顺手把别人刚更新的 `latest_chapter_title`
+    /// 之类改回去。用户看到的现象是"改了个字号，最新章节标题退回去了"，
+    /// 而两次操作在代码上毫无关联。
+    ///
+    /// 单列 UPDATE 把这次写入的影响面收窄到它自己，从而让
+    /// "设置排版配置"不影响任何其他字段成为**结构性事实**。
+    ///
+    /// # `None` 的语义（裁决 OQ#12→A）
+    ///
+    /// `None` = 该书**跟随全局默认**。它与 `Some(默认配置的 JSON)` 有区别：
+    /// 前者在 UI 上显示"跟随全局"、后者显示"已为本书设置"。故本方法
+    /// MUST 把 `None` 写成 SQL NULL，而不是写一个默认配置的副本。
+    ///
+    /// # 存储层不解析这个字符串
+    ///
+    /// 001 契约明文"内容由 S2 排版层解释，此处不透明"。存储层若解析它，
+    /// 就产生了第二个 schema 定义点——S2 改字段时这里要跟着改，而它本不该
+    /// 知道那些字段。校验在 `tome-reader::paginate::config`。
+    pub fn set_read_config(&self, book_id: i64, json: Option<&str>) -> Result<(), StoreError> {
+        let json = json.map(str::to_owned);
+        self.db.write(move |connection| {
+            let affected = connection
+                .execute(
+                    "UPDATE book SET read_config=?2 WHERE id=?1",
+                    rusqlite::params![book_id, json],
+                )
+                .map_err(sql)?;
+            if affected == 0 {
+                return Err(StoreError::not_found(format!("book#{book_id}")));
+            }
+            Ok(())
+        })
+    }
+
     /// 更新书籍元信息（按 id 定位；身份字段 `origin`/`origin_id` 不改）。
     ///
     /// # 为什么身份字段不在更新范围内

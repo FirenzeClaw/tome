@@ -396,30 +396,66 @@ impl ReadingConfig {
         Ok(config)
     }
 
-    /// 从 `Book.read_config` 的**可选**文本加载，未设置时回退全局默认
-    /// （裁决 OQ#12→A 的作用域语义）。
+    /// 解析一本书**实际生效**的配置：全局默认 + 单书覆盖（裁决 OQ#12→A）。
     ///
-    /// ## 返回 `(配置, 是否来自单书覆盖)`
+    /// ## 作用域语义（FR-013 的括号条款）
     ///
-    /// 第二个值让调用方能把"这本书没有自己的配置"与"它有配置且恰好等于
-    /// 默认值"区分开——两者的 UI 呈现不同（前者显示"跟随全局"，后者显示
-    /// "已为本书设置"）。
+    /// | `read_config` | 生效配置 | `is_book_override` |
+    /// |---|---|---|
+    /// | `None` | `global`（参数传入的那份） | `false` |
+    /// | `Some(json)` | 该书自己的配置 | `true` |
     ///
-    /// ## 配置非法时的处置
+    /// `global` 由调用方作为参数传入而非本模块持有一个全局单例：全局默认
+    /// 的来源（用户设置文件）属组合根关切，本层不该持有可变全局状态——
+    /// 那会让测试之间互相污染，且让"同一进程里两个不同的全局默认"无法表达。
     ///
-    /// 回退全局默认并**报出**原因（不静默）：`read_config` 是用户可手工
-    /// 编辑的文本，损坏是可能的。静默用默认值会让用户以为自己的设置"没保存"。
-    pub fn from_book_read_config(
+    /// ## 覆盖是**整份替换**，不是逐字段合并
+    ///
+    /// 逐字段合并需要一个"该字段未被设置"的表示。JSON 里 `"font_size_px":19`
+    /// 与"没写这个字段"可以区分，但"用户把字号**调回** 19"与"用户没设置字号"
+    /// 就无法区分了——于是用户显式调回默认值的操作会被理解成"跟随全局"，
+    /// 全局一改这本书就跟着变。整份替换没有这个歧义：有配置就用它，全用它。
+    ///
+    /// ## 配置损坏时的处置
+    ///
+    /// **报错，不静默回退**。`read_config` 是用户可手工编辑的文本（001 契约
+    /// 定义为不透明字符串），损坏是可能的。静默用默认值会让用户以为自己的
+    /// 设置"没保存"——那是比报错更差的体验。调用方拿到错误后可以决定提示
+    /// 方式（本层只给可本地化标识，FR-058）。
+    pub fn resolve_for_book(
+        global: &Self,
         read_config: Option<&str>,
-    ) -> Result<(Self, bool), ReaderConfigError> {
+    ) -> Result<ResolvedConfig, ReaderConfigError> {
         match read_config {
-            None => Ok((Self::default_ma(), false)),
-            Some(text) => {
-                let config = Self::from_json(text)?;
-                Ok((config, true))
-            }
+            None => Ok(ResolvedConfig {
+                config: *global,
+                is_book_override: false,
+            }),
+            Some(text) => Ok(ResolvedConfig {
+                config: Self::from_json(text)?,
+                is_book_override: true,
+            }),
         }
     }
+}
+
+/// 一次配置解析的结果：生效配置 + 它的来源。
+///
+/// ## 为什么不用 `(ReadingConfig, bool)`
+///
+/// 元组让调用点写成 `resolve_for_book(g, r).0` / `.1`——两个位置的语义
+/// 无从自证，而 `bool` 尤其容易被读反（`true` 是"有覆盖"还是"跟随全局"？）。
+/// 命名字段把这个问题消掉，且日后加"覆盖来自哪个版本"之类的信息时
+/// 不必改所有调用点。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ResolvedConfig {
+    /// 实际生效的配置（覆盖或全局默认）。
+    pub config: ReadingConfig,
+    /// 该配置是否来自 `Book.read_config` 的单书覆盖。
+    ///
+    /// 供 UI 区分"跟随全局"与"已为本书设置"——两者的呈现不同，
+    /// 即使用户设置的恰好是默认值。
+    pub is_book_override: bool,
 }
 
 /// 配置的解析/校验错误。
@@ -583,12 +619,12 @@ mod tests {
         assert!(error.message_id().is_ascii());
     }
 
-    /// 未设置 `read_config` → 全局默认，且标记为"非单书覆盖"。
+    /// 未设置 `read_config` → 传入的全局默认，且标记为"非单书覆盖"。
     #[test]
     fn missing_read_config_falls_back_to_global_default() {
-        let (config, overridden) =
-            ReadingConfig::from_book_read_config(None).expect("未设置应成功");
-        assert_eq!(config, ReadingConfig::default_ma());
-        assert!(!overridden, "未设置时不得标记为单书覆盖");
+        let global = ReadingConfig::default_ma();
+        let resolved = ReadingConfig::resolve_for_book(&global, None).expect("未设置应成功");
+        assert_eq!(resolved.config, global);
+        assert!(!resolved.is_book_override, "未设置时不得标记为单书覆盖");
     }
 }

@@ -23,16 +23,16 @@
 
 **Purpose**: crate 骨架、错误契约、语料脚手架。**无用户故事标签。**
 
-- [ ] T001 创建 `crates/tome-reader/` crate（Cargo.toml + src/lib.rs）——依赖仅 tome-core + cosmic-text 0.19 + unicode-segmentation；wgpu/swash/etagere 依赖挂 `render` feature 门控（默认关，headless 构建不含图形栈）
-  - [ ] `cargo build -p tome-reader`（feature off）与 `--features render` 两种构建均通过
-  - [ ] feature off 时依赖树不含 wgpu/winit 等图形包（`cargo tree` 断言）
-- [ ] T002 [P] tome-core 增补 `Theme` 纯值类型于 `crates/tome-core/src/model/theme.rs`（裁决 OQ#11→D）——承载 design-system/MASTER.md §2.1/2.2 全部语义色、§3 字体三角色、§4 间距/圆角/阴影/动效常量；零图形依赖
-  - [ ] 字段与 MASTER.md token 表逐一对应（无遗漏断言）；昼/夜两实例构造单测
-  - [ ] `cargo test -p tome-core` 通过；`cargo tree -p tome-core` 仍零图形依赖
-- [ ] T003 [P] tome-reader 错误类型 + →ErrorKind 映射表于 `crates/tome-reader/src/error.rs`（FR-057/058）——含 `UnsupportedCapability` 能力标识命名约定（`offscreenRendering` 等）、`panic=abort` 下错误路径设计注释（不得以 catch_unwind 为处理手段）
-  - [ ] 全部变体映射 ErrorKind 的测试；**无面向用户自然语言硬编码**（grep 断言形态）
-- [ ] T004 [P] 排版语料脚手架于 `crates/tome-reader/tests/corpus/`——JSON 条目 = 输入正文 + 几何参数 + 期望（分页结构/规则命中/禁则例外），与 001 `tests/corpus/` 同风格；`basis` 依据字段强制（类型系统拒绝缺依据条目）
-  - [ ] 加载器单测；≥3 条示例条目（禁则/挤压/混排各一）
+- [x] T001 创建 `crates/tome-reader/` crate（Cargo.toml + src/lib.rs）——依赖仅 tome-core + cosmic-text 0.19 + unicode-segmentation；wgpu/swash/etagere 依赖挂 `render` feature 门控（默认关，headless 构建不含图形栈）
+  - [x] `cargo build -p tome-reader`（feature off）与 `--features render` 两种构建均通过
+  - [x] feature off 时依赖树不含 wgpu/winit 等图形包（`cargo tree` 断言）
+- [x] T002 [P] tome-core 增补 `Theme` 纯值类型于 `crates/tome-core/src/model/theme.rs`（裁决 OQ#11→D）——承载 design-system/MASTER.md §2.1/2.2 全部语义色、§3 字体三角色、§4 间距/圆角/阴影/动效常量；零图形依赖
+  - [x] 字段与 MASTER.md token 表逐一对应（无遗漏断言）；昼/夜两实例构造单测
+  - [x] `cargo test -p tome-core` 通过；`cargo tree -p tome-core` 仍零图形依赖
+- [x] T003 [P] tome-reader 错误类型 + →ErrorKind 映射表于 `crates/tome-reader/src/error.rs`（FR-057/058）——含 `UnsupportedCapability` 能力标识命名约定（`offscreenRendering` 等）、`panic=abort` 下错误路径设计注释（不得以 catch_unwind 为处理手段）
+  - [x] 全部变体映射 ErrorKind 的测试；**无面向用户自然语言硬编码**（grep 断言形态）
+- [x] T004 [P] 排版语料脚手架于 `crates/tome-reader/tests/corpus/`——JSON 条目 = 输入正文 + 几何参数 + 期望（分页结构/规则命中/禁则例外），与 001 `tests/corpus/` 同风格；`basis` 依据字段强制（类型系统拒绝缺依据条目）
+  - [x] 加载器单测；≥3 条示例条目（禁则/挤压/混排各一）
 
 ---
 
@@ -40,23 +40,24 @@
 
 **Purpose**: 用最小骨架验证 R5 全部 7 项技术风险（die 早 die 便宜）；产物 `spikes/s2/` 为一次性验证代码，**不进主 workspace**。
 
-- [ ] T005 R5-1：ShapeWord 合并行为验证于 `spikes/s2/src/word_merge.rs`——`Buffer::line_shape` 取 ShapeLine 克隆体 → 合并相邻 ShapeWord → `layout()`，断言断点遵守合并边界且 decorations 不破坏（research R1）
-  - [ ] 合并后 layout 断点只在 word 边界（多组参数断言）
-  - [ ] 结论写入 `spikes/s2/BASELINE.md`；**若证伪：停止并上报 PM**（备选方案 C 自写 layout 层，须用户批准才执行）
-- [ ] T006 [P] R5-2：hinting 对 x_advance 挤压的量化影响于 `spikes/s2/src/hinting.rs`——同参数开/关 hinting 各排一版对比；R5-7：贪心换行+挤压的排版质量评测（次优断点出现率口径）
-  - [ ] 两组数据写入 BASELINE.md；默认关 hinting 的决策被数据确认（或上报 PM）
-- [ ] T007 [P] R5-3：cosmic-text 全栈体积对照（空壳 vs 接入，workspace 同款 release profile）；R5-4：Windows-gnu + wgpu 构建与离屏初始化验证
-  - [ ] 体积净增量实测值 + 构建/初始化结果写入 BASELINE.md
-- [ ] T008 [P] R5-5：字体子集实产于 `assets/fonts/`——skera（备选 fonttools）子集化思源宋体 CN 区域 OTF（6500 字档=通用规范一级 3500+二级+常用标点+基本西文）→ **改家族名去 "Source"**（OFL RFN 合规，research R3）→ `TomeSerifCN-subset.otf` + `OFL.txt` + `FONTS.sha256` 入 git
-  - [ ] 产物 ≤5MB；name 表不含 "Source" 家族名（校验测试）；sha256 清单在案
-- [ ] T009 [P] R5-6：离屏渲染探针 + 单基线容差初判于 `spikes/s2/src/offscreen_probe.rs`——离屏渲染一页样本，ubuntu/lavapipe 生成基线，本机以 YIQ 0.6 比对
-  - [ ] 探针可跑并打印后端名；容差校准结论（单基线可行性）写入 BASELINE.md
+- [x] T005 R5-1：ShapeWord 合并行为验证于 `spikes/s2/src/word_merge.rs`——`Buffer::line_shape` 取 ShapeLine 克隆体 → 合并相邻 ShapeWord → `layout()`，断言断点遵守合并边界且 decorations 不破坏（research R1）
+  - [x] 合并后 layout 断点只在 word 边界（多组参数断言）
+  - [x] 结论写入 `spikes/s2/BASELINE.md`；**若证伪：停止并上报 PM**（备选方案 C 自写 layout 层，须用户批准才执行）
+- [x] T006 [P] R5-2：hinting 对 x_advance 挤压的量化影响于 `spikes/s2/src/hinting.rs`——同参数开/关 hinting 各排一版对比；R5-7：贪心换行+挤压的排版质量评测（次优断点出现率口径）
+  - [x] 两组数据写入 BASELINE.md；默认关 hinting 的决策被数据确认（或上报 PM）
+- [x] T007 [P] R5-3：cosmic-text 全栈体积对照（空壳 vs 接入，workspace 同款 release profile）；R5-4：Windows-gnu + wgpu 构建与离屏初始化验证
+  - [x] 体积净增量实测值 + 构建/初始化结果写入 BASELINE.md
+- [x] T008 [P] R5-5：字体子集实产于 `assets/fonts/`——skera（备选 fonttools）子集化思源宋体 CN 区域 OTF（6500 字档=通用规范一级 3500+二级+常用标点+基本西文）→ **改家族名去 "Source"**（OFL RFN 合规，research R3）→ `TomeSerifCN-subset.otf` + `OFL.txt` + `FONTS.sha256` 入 git
+  - [x] 产物 ≤5MB；name 表不含 "Source" 家族名（校验测试）；sha256 清单在案
+- [x] T009 [P] R5-6：离屏渲染探针 + 单基线容差初判于 `spikes/s2/src/offscreen_probe.rs`——离屏渲染一页样本，ubuntu/lavapipe 生成基线，本机以 YIQ 0.6 比对
+  - [x] 探针可跑并打印后端名；容差校准结论（单基线可行性）写入 BASELINE.md
 
 > **⛔ 检查点：S2-0 之后（可行性门）**
-> - [ ] R5 七项全部有实测数据（BASELINE.md）
-> - [ ] ShapeWord 合并行为证实（否则已上报 PM 并获批备选路径）
-> - [ ] 字体子集 ≤5MB 且合规入仓
-> - [ ] **人工审查 spike 数据后再继续**
+> - [x] R5 七项全部有实测数据（BASELINE.md）
+> - [x] ShapeWord 合并行为证实（否则已上报 PM 并获批备选路径）
+> - [x] 字体子集 ≤5MB 且合规入仓
+> - [x] **人工审查 spike 数据后再继续**
+>   - PM 注记（2026-10-10）：S2-0 门审查通过——R5 七项无一项证伪：ShapeWord 合并证实（方案 A）、hinting 量化机制修正（在 layout 层，默认关 hinting 决策获数据支撑）、全栈净增 5.33MiB、Windows-gnu+wgpu 离屏证实、字体子集 2.18MiB RFN 合规（FONTS.sha256 经 PM 干净上下文独立复核 MATCH）、单基线容差本机逐比特相同、贪心换行纯中文 0% 次优。三条装置缺陷（假绿）已固化进 BASELINE §10.1。
 
 ---
 

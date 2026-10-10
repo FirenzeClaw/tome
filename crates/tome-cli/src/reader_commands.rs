@@ -25,10 +25,10 @@
 use std::path::Path;
 
 use tome_core::ErrorKind;
-use tome_reader::layout::engine::{Geometry, LayoutEngine};
 use tome_reader::layout::linebox::LineBox;
-use tome_reader::rules::justify::Alignment;
-use tome_reader::text::model::TextModel;
+use tome_reader::paginate::config::{ParagraphMode, ReadingConfig, ReadingMode, SpreadMode};
+use tome_reader::paginate::page::Paginator;
+use tome_reader::paginate::spread::Viewport;
 use tome_reader::text::paragraph;
 
 use crate::commands::CommandOutcome;
@@ -152,8 +152,17 @@ pub fn run_layout(options: &GlobalOptions, command: &Command) -> CommandOutcome 
         }
     };
 
-    // --- 几何参数（CLI 覆盖默认值）---
+    // --- 几何参数（CLI 选项覆盖默认值）---
+    //
+    // 从 T017 的 `ReadingConfig` 出发而不是手搓：几何参数的**默认值与校验**
+    // 都是 schema 的一部分，CLI 不该有第二份。选项只做覆盖。
+    //
+    // `LayoutOptions` 保留为 CLI 的**视图模型**：宽/高是"阅读区可用尺寸"
+    // （FR-014 的口径），它不是 `GeometryConfig` 的字段（几何子集描述的是
+    // 版心与字号，可用尺寸来自外壳布局），故由 CLI 自己承载并用于构造
+    // `Viewport`。
     let mut layout_options = LayoutOptions::default();
+    let mut geometry = ReadingConfig::default_ma().geometry;
     if let Some(value) = width {
         layout_options.width_px = *value;
     }
@@ -161,102 +170,137 @@ pub fn run_layout(options: &GlobalOptions, command: &Command) -> CommandOutcome 
         layout_options.height_px = *value;
     }
     if let Some(value) = font_size {
-        layout_options.font_size_px = *value;
+        // `f32` → `u16`：`flags` 已在校验阶段拒绝非整数与越界值（退出码 2），
+        // 故此处的转换不会丢信息；仍走一次 `round` 以免浮点表示误差。
+        geometry.font_size_px = value.round().max(0.0) as u16;
     }
     if let Some(value) = line_height {
-        layout_options.line_height = *value;
+        geometry.line_height = *value;
     }
     if let Some(value) = measure_em {
-        layout_options.measure_em = *value;
+        geometry.measure_em = *value;
     }
     if let Some(value) = gutter {
-        layout_options.gutter_px = *value;
+        geometry.gutter_px = value.round().max(0.0) as u16;
+    }
+    if let Some(mode) = paragraph_mode.as_deref() {
+        geometry.paragraph_mode = match mode {
+            "gap" => ParagraphMode::Gap { em: 0.4 },
+            _ => ParagraphMode::Indent { em: 2.0 },
+        };
+    }
+    if let Some(mode) = spread.as_deref() {
+        geometry.spread_mode = match mode {
+            "double" => SpreadMode::ForceSpread,
+            "single" => SpreadMode::ForceSingle,
+            _ => SpreadMode::Auto,
+        };
+    }
+    geometry.reading_mode = match mode.as_deref() {
+        Some("scroll") => ReadingMode::Scroll,
+        _ => ReadingMode::Paged,
+    };
+
+    // 白名单校验：非法几何报结构化错误（与 `flags` 的用法错误区分开——
+    // 那是"参数写错"，这是"参数组合非法"）
+    if let Err(field) = geometry.validate() {
+        return CommandOutcome::failure(
+            &ErrorKind::Configuration,
+            &format!("几何参数 `{field}` 非法（见 ReadingConfig 的白名单范围）"),
+        );
     }
 
-    // --- 单双页判据（MASTER §5.2 的 em 制公式）---
-    //
-    // 本阶段只用于决定版心宽度；完整的单双页语义（手动覆盖三态、
-    // 书页语义）属 T020/T021。
-    let threshold =
-        2.0 * layout_options.measure_em * layout_options.font_size_px + layout_options.gutter_px;
-    let auto_double = layout_options.width_px >= threshold;
-    let columns = match spread.as_deref() {
-        Some("double") => 2,
-        Some("single") => 1,
-        _ => usize::from(auto_double) + 1,
+    let viewport = Viewport::new(layout_options.width_px, layout_options.height_px);
+
+    // --- 排版与分页（一条管线：`paginate` 内部含逐段排版）---
+    let mut paginator = Paginator::new();
+    let paginated = match paginator.paginate(&text, &geometry, &viewport) {
+        Ok(result) => result,
+        Err(error) => {
+            return CommandOutcome::failure(&error.kind(), &format!("分页失败：{error}"));
+        }
     };
 
-    // --- 排版 ---
-    let geometry = Geometry {
-        measure_px: layout_options.measure_width_px(columns),
-        font_size_px: layout_options.font_size_px,
-        line_height: layout_options.line_height,
-        alignment: Alignment::Justified,
-    };
-
+    // 段落报告：从页序列里还原行盒（`Paginator` 已把段内区间换算成章内区间）
     let split = paragraph::split(&text);
-    let mut engine = LayoutEngine::new();
-
     let mut paragraph_reports = Vec::new();
-    let mut all_exceptions = Vec::new();
-    let mut degraded_words = 0usize;
-
     for para in &split.paragraphs {
-        let model = TextModel::new(para.text.clone());
-        let result = engine.layout_paragraph(&model, para.index, &geometry);
-        degraded_words += result.degraded_words;
-        all_exceptions.extend(result.exceptions.iter().cloned());
-
+        let lines: Vec<serde_json::Value> = paginated
+            .pages
+            .iter()
+            .flat_map(|page| page.lines.iter())
+            .filter(|page_line| page_line.line.paragraph_index == para.index)
+            .map(|page_line| line_to_json(&page_line.line))
+            .collect();
         paragraph_reports.push(serde_json::json!({
             "paragraph_index": para.index,
             "char_start": para.char_start,
             "char_len": para.char_len(),
             "from_heuristic": para.from_heuristic,
-            "lines": result.lines.iter().map(line_to_json).collect::<Vec<_>>(),
+            "lines": lines,
         }));
     }
 
-    // --- 锚点命中（`--anchor` 时）---
-    let anchor_hit = anchor.map(|offset| {
-        // 全文偏移 → 段落 + 段内偏移
-        let mut remaining = offset;
-        for para in &split.paragraphs {
-            if remaining <= para.char_len() {
-                return serde_json::json!({
-                    "char_offset": offset,
-                    "paragraph_index": para.index,
-                    "offset_in_paragraph": remaining,
-                    "visible": true,
-                });
-            }
-            remaining -= para.char_len() + 1; // +1 为换行符
-        }
-        serde_json::json!({
-            "char_offset": offset,
-            "paragraph_index": serde_json::Value::Null,
-            "offset_in_paragraph": serde_json::Value::Null,
-            "visible": false,
+    let all_exceptions = &paginated.rule_exceptions;
+    let degraded_words = paginated.degraded_words;
+
+    // --- 页序列（T019/T021：真实页，不再是空数组）---
+    let pages_json: Vec<serde_json::Value> = paginated
+        .pages
+        .iter()
+        .map(|page| {
+            serde_json::json!({
+                "page_index": page.page_in_chapter,
+                "char_start": page.char_range.start,
+                "char_len": page.char_len(),
+                "is_padding": page.is_padding,
+                "side": page.side.map(|side| side.as_str()),
+                "lines": page.lines.iter().map(|page_line| serde_json::json!({
+                    // 契约 §2.1 的 `char_start` 在页内是**章内**口径
+                    "char_start": page_line.chapter_char_range.start,
+                    "char_len": page_line.chapter_char_range.end - page_line.chapter_char_range.start,
+                    "paragraph_index": page_line.line.paragraph_index,
+                })).collect::<Vec<_>>(),
+            })
         })
+        .collect();
+
+    // --- 锚点命中（`--anchor` 时）---
+    let anchor_hit = anchor.map(|offset| match paginated.resolve_anchor(offset) {
+        Some(resolution) => serde_json::json!({
+            "char_offset": resolution.char_offset,
+            "page_index": resolution.page_index(),
+            "offset_in_page": resolution.offset_in_page(),
+            "visible": resolution.is_visible(),
+        }),
+        None => serde_json::json!({
+            "char_offset": offset,
+            "page_index": serde_json::Value::Null,
+            "offset_in_page": serde_json::Value::Null,
+            "visible": false,
+        }),
     });
 
     let payload = serde_json::json!({
         "chapter_index": chapter_index,
         "mode": mode.as_deref().unwrap_or("paginated"),
         "geometry": {
-            "font_size": layout_options.font_size_px,
-            "line_height": layout_options.line_height,
-            "measure_em": layout_options.measure_em,
-            "gutter": layout_options.gutter_px,
+            "font_size": geometry.font_size_px,
+            "line_height": geometry.line_height,
+            "measure_em": geometry.measure_em,
+            "gutter": geometry.gutter_px,
             "width": layout_options.width_px,
             "height": layout_options.height_px,
             "paragraph_mode": paragraph_mode.as_deref().unwrap_or("indent"),
             "spread": spread.as_deref().unwrap_or("auto"),
-            "columns": columns,
-            "measure_px": geometry.measure_px,
+            "columns": paginated.spread.columns.count(),
+            "measure_px": paginated.spread.measure_px,
+            "override_active": paginated.spread.override_active,
         },
         "paragraphs": paragraph_reports,
-        // `[WIP]` 分页与滚动流属 T019/T025，本阶段输出空数组（不伪造）
-        "pages": [],
+        // 真实页序列（T019/T021）。`scroll` 仍为空——滚动流属 Phase 5
+        // （T025/T026），此处**不伪造**。
+        "pages": pages_json,
         "scroll": {
             "content_height": serde_json::Value::Null,
             "viewports": [],
@@ -284,7 +328,7 @@ pub fn run_layout(options: &GlobalOptions, command: &Command) -> CommandOutcome 
                 "章节 {} · {} · 版心 {:.0}px · {} 段\n",
                 chapter_index,
                 payload["mode"].as_str().unwrap_or("paginated"),
-                geometry.measure_px,
+                paginated.spread.measure_px,
                 split.paragraphs.len()
             ));
             let total_lines: usize = paragraph_reports
@@ -292,6 +336,11 @@ pub fn run_layout(options: &GlobalOptions, command: &Command) -> CommandOutcome 
                 .map(|para| para["lines"].as_array().map_or(0, std::vec::Vec::len))
                 .sum();
             out.push_str(&format!("共 {total_lines} 行\n"));
+            out.push_str(&format!(
+                "共 {} 页（{} 栏）\n",
+                paginated.pages.len(),
+                paginated.spread.columns.count()
+            ));
             if !all_exceptions.is_empty() {
                 out.push_str(&format!("禁则例外 {} 条\n", all_exceptions.len()));
             }

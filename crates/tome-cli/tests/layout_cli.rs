@@ -196,9 +196,11 @@ fn layout_golden_fields_for_fixed_input() {
     assert_eq!(lines[0]["paragraph_index"], 0);
 
     // 分页与滚动属后续切片——**空数组而非伪造**
-    assert!(value["pages"]
-        .as_array()
-        .is_some_and(|pages| pages.is_empty()));
+    //
+    // `[NOTE]` 本断言在 T019 之后**已过时并被替换**：`pages` 现在产出真实页。
+    // 见下方 `layout_pages_tile_chapter_exactly` 与
+    // `layout_roll_produces_real_pages`。此处只保留 `scroll` 仍是空的断言
+    // ——滚动流属 Phase 5（T025/T026）。
     assert!(value["scroll"]["viewports"]
         .as_array()
         .is_some_and(|viewports| viewports.is_empty()));
@@ -446,4 +448,215 @@ fn layout_exposes_split_diagnostic() {
     }
     assert_eq!(split["split_mode"], "NewlineOnly", "本例用换行分段");
     assert_eq!(split["heuristic_applied"], false);
+}
+
+// ===========================================================================
+// T019/T021：页序列经 CLI 的真实产出（SC-006 的端到端形态）
+// ===========================================================================
+
+/// **页区间拼接与正文逐字符相等**（SC-006 经 CLI 的端到端验证）。
+///
+/// ## 为什么 CLI 层也要测这条
+///
+/// 库内测试（`pagination_lossless.rs`）已证过同一性质。CLI 侧的差别在于
+/// **输出的区间是序列化过的**：JSON 里的 `char_start`/`char_len` 若在序列化
+/// 时算错（如把行内区间当页区间、或漏掉 `is_padding` 的过滤），库层测试
+/// 看不见。故这里按**契约 §2.1 的 JSON 字段**重建正文并比对。
+#[test]
+fn layout_pages_tile_chapter_exactly() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let path = dir.path().join("tile.txt");
+    let text = "他的手指在书页边缘停了很久。那一行字写的是「山有木兮木有枝」，\
+                后面跟着一个逗号，逗号之后是半句话。\n\
+                书页翻开的时候，光线正好落在那一行字上，把墨色照得发亮。\n\
+                她说：「真的吗？」我说：「当然，」然后他笑了，笑声在屋子里荡开。";
+    std::fs::write(&path, text).expect("写临时正文");
+
+    let characters: Vec<char> = text.chars().collect();
+    let mut checked = 0usize;
+
+    for (width, height, font_size) in [
+        ("228", "200", "19"),
+        ("342", "400", "19"),
+        ("1432", "200", "19"),
+        ("228", "300", "30"),
+    ] {
+        let (code, stdout, stderr) = run_layout(&[
+            "layout",
+            "--text",
+            path.to_str().unwrap(),
+            "--width",
+            width,
+            "--height",
+            height,
+            "--font-size",
+            font_size,
+        ]);
+        assert_eq!(code, 0, "{width}x{height}/{font_size}px stderr: {stderr}");
+
+        let value: serde_json::Value = serde_json::from_str(&stdout).expect("应输出 JSON");
+        let pages = value["pages"].as_array().expect("pages 是数组");
+        assert!(!pages.is_empty(), "pages 不得为空（T019 后应产出真实页）");
+
+        let mut reconstructed = String::new();
+        for page in pages {
+            let is_padding = page["is_padding"].as_bool().expect("is_padding 是 bool");
+            let start = page["char_start"].as_u64().expect("char_start") as usize;
+            let len = page["char_len"].as_u64().expect("char_len") as usize;
+
+            if is_padding {
+                assert_eq!(len, 0, "留白页不得认领字符（SC-006 的口径）");
+                continue;
+            }
+            reconstructed.extend(characters[start..start + len].iter());
+        }
+
+        assert_eq!(
+            reconstructed, text,
+            "{width}x{height}/{font_size}px：页区间拼接与正文不符（丢字或重字）"
+        );
+        checked += 1;
+    }
+    assert_eq!(checked, 4);
+}
+
+/// **`--spread single` 在宽窗下仍产出单页**（FR-015 的手动覆盖经 CLI）。
+#[test]
+fn layout_force_single_overrides_wide_window() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let text = write_sample(dir.path());
+
+    let (code, stdout, _) = run_layout(&[
+        "layout",
+        "--text",
+        text.to_str().unwrap(),
+        "--width",
+        "1432",
+        "--spread",
+        "single",
+    ]);
+    assert_eq!(code, 0);
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(
+        value["geometry"]["columns"], 1,
+        "--spread single 在宽窗下必须压过判据"
+    );
+    for page in value["pages"].as_array().unwrap() {
+        assert!(
+            page["side"].is_null(),
+            "单页模式下不得有左右归属（裁决 OQ#5→A）"
+        );
+    }
+}
+
+/// **`--spread auto` 在宽窗下产出双页且带左右归属**（FR-016 的书页语义）。
+#[test]
+fn layout_auto_spread_marks_sides_in_wide_window() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let text = write_sample(dir.path());
+
+    let (code, stdout, _) = run_layout(&[
+        "layout",
+        "--text",
+        text.to_str().unwrap(),
+        "--width",
+        "1432",
+    ]);
+    assert_eq!(code, 0);
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(value["geometry"]["columns"], 2, "1432px 应判双页");
+    let pages = value["pages"].as_array().unwrap();
+    assert!(!pages.is_empty());
+    for (index, page) in pages.iter().enumerate() {
+        let expected = if index % 2 == 0 { "left" } else { "right" };
+        assert_eq!(
+            page["side"], expected,
+            "双页模式下第 {index} 页应为 {expected}（左偶右奇）"
+        );
+    }
+}
+
+/// **`--anchor` 报告页内定位**（FR-017 经 CLI 的形态）。
+#[test]
+fn layout_anchor_reports_page_location() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let text = write_sample(dir.path());
+
+    let (code, stdout, stderr) = run_layout(&[
+        "layout",
+        "--text",
+        text.to_str().unwrap(),
+        "--width",
+        "228",
+        "--height",
+        "200",
+        "--anchor",
+        "30",
+    ]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    let hit = &value["anchor_hit"];
+    assert_eq!(hit["char_offset"], 30, "锚点值必须原样报告（FR-017）");
+    assert_eq!(hit["visible"], true, "锚点字符应可见");
+    let page_index = hit["page_index"].as_u64().expect("应有页序号") as usize;
+
+    // 该页的区间确实包含锚点
+    let pages = value["pages"].as_array().unwrap();
+    let start = pages[page_index]["char_start"].as_u64().unwrap() as usize;
+    let len = pages[page_index]["char_len"].as_u64().unwrap() as usize;
+    assert!(
+        (start..start + len).contains(&30),
+        "anchor_hit 的 page_index={page_index} 区间 {start}..{} 不含锚点 30",
+        start + len
+    );
+}
+
+/// 越界锚点被**钳制**且不 panic（spec §Edge Cases）。
+#[test]
+fn layout_out_of_range_anchor_is_clamped() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let text = write_sample(dir.path());
+
+    let (code, stdout, stderr) = run_layout(&[
+        "layout",
+        "--text",
+        text.to_str().unwrap(),
+        "--width",
+        "228",
+        "--height",
+        "200",
+        "--anchor",
+        "999999",
+    ]);
+    assert_eq!(code, 0, "越界锚点不得导致失败，stderr: {stderr}");
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let hit = &value["anchor_hit"];
+    assert_eq!(hit["visible"], false, "钳制到章末的位置不算可见");
+    assert!(
+        hit["page_index"].as_u64().is_some(),
+        "仍应给出所在的（末）页"
+    );
+}
+
+/// **页序列的确定性经 CLI**（同参数两次运行逐字节相同，含 pages）。
+#[test]
+fn layout_pages_are_deterministic() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let text = write_sample(dir.path());
+    let path = text.to_str().unwrap();
+
+    for width in ["228", "1432"] {
+        let args = [
+            "layout", "--text", path, "--width", width, "--height", "200",
+        ];
+        let (_, first, _) = run_layout(&args);
+        let (_, second, _) = run_layout(&args);
+        assert_eq!(
+            first, second,
+            "版心 {width}px 下含 pages 的完整输出必须逐字节相同"
+        );
+    }
 }

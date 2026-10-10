@@ -362,30 +362,35 @@ fn us1_scenario_1_line_width_within_one_squeeze_unit() {
 
     assert!(checked_lines > 30, "检查的行数太少（{checked_lines}）");
 
-    // ## ⚠️ 已知缺陷的**显式记账**（不放水，只是不许它变多）
+    // ## 已知缺陷：**已清零**（棘轮只许减不许增）
     //
-    // 实测存在 **1 处**真实的 US1 未达标（T015 未能消除）：
+    // 本测试曾以 `KNOWN_DEFECT_COUNT = 1` 钉住一处"混排行本可填满却留白"。
+    // 该处经诊断**不是引擎缺陷，而是测量装置漏算了一个量**：
     //
     // ```
     //   380px / 行宽 314.23px / 留白 65.77px / 下一单元 63.29px
     //   内容 = "这本书的英文名是 The Shadow "
     // ```
     //
-    // 诊断：下一单元是 `"of"`（约 22.8px，**远小于** 65.77px 的余白），
-    // 引擎本该把它放进本行却没有——`Wrap::Word` 在这个混排边界处的
-    // 行为与"下一单元能放下"的预期不一致。
+    // 旧诊断说下一单元是 `"of"`（约 22.8px）——**推测错了**。实际下一单元是
+    // `"Wind，"`（63.29px），而本行结束于一个**空格**（字符 26）。把
+    // `"Wind，"` 挪上来需要 `63.29 + 5.20(空格) = 68.49px > 65.77px`，
+    // 故引擎的断行**是正确的**。
     //
-    // **为什么不用豁免掩盖**：这条如实记为缺陷，并用"违规数不得超过
-    // KNOWN_DEFECT_COUNT"的方式钉住——修好后上限降为 0，**只许减不许增**。
+    // 已用独立 oracle 复核：把 `"…The Shadow of the Wind，"` 整段交给引擎
+    // 排版，在 380px 下它**确实排成两行**——断点位置的第二个佐证。
     //
-    // `[WIP]` 修复方向（留给后续切片或 PM 裁决）：
-    // 排查 T014 的混排间隙写入是否改变了 space word 的宽度语义，
-    // 使 cosmic-text 的贪心判定与实际可用宽度失配。
-    const KNOWN_DEFECT_COUNT: usize = 1;
+    // `[DONE]` 装置已修（[`next_breakable_unit_width`] 计入被丢弃的间隔），
+    // 上限降为 **0**。此后**任何**新增违规都会让本测试失败——棘轮只许减不许增。
+    //
+    // 用 `==` 而非 `<=`：上限已是 0 时 `<= 0` 与 `== 0` 等价，而后者更直白地
+    // 表达"一处违规都不许有"（`<=` 在 0 上读起来像还有余量，clippy 的
+    // `absurd_extreme_comparisons` 也会指出这一点）。
+    const KNOWN_DEFECT_COUNT: usize = 0;
 
     assert!(
-        violations.len() <= KNOWN_DEFECT_COUNT,
-        "US1 场景 1 违反数 {} 超过已知缺陷上限 {KNOWN_DEFECT_COUNT}——         出现了**新的**未达标情形（必须修复，不得提高上限）
+        violations.len() == KNOWN_DEFECT_COUNT,
+        "US1 场景 1 违反数 {} 不等于已知缺陷上限 {KNOWN_DEFECT_COUNT}——         出现了**新的**未达标情形（必须修复，不得提高上限）
          前几处（版心 / 行宽 / 留白 / 下一单元宽 / 内容）：
 {}",
         violations.len(),
@@ -396,8 +401,7 @@ fn us1_scenario_1_line_width_within_one_squeeze_unit() {
                 "  {measure}px / {width:.2}px / 留白 {slack:.2}px / 单元 {unit:.2}px / {sample:?}"
             ))
             .collect::<Vec<_>>()
-            .join("
-")
+            .join("\n")
     );
 
     if !violations.is_empty() {
@@ -410,7 +414,7 @@ fn us1_scenario_1_line_width_within_one_squeeze_unit() {
     println!("[US1 场景 1] 检查 {checked_lines} 个非末行（含混排），无「本可填满却留白」");
 }
 
-/// 下一行的**首个可断单元**的宽度（px）。
+/// 下一行的**首个可断单元**的宽度（px）——**含它落到本行所需的间隔**。
 ///
 /// ## 什么是"可断单元"
 ///
@@ -431,6 +435,27 @@ fn us1_scenario_1_line_width_within_one_squeeze_unit() {
 ///    （超过版心 → 退化路径自行拆分）
 ///
 /// 第 2 条与引擎的实际行为一致（引擎用 `Wrap::Word` + 自行拆超长词）。
+///
+/// ## 第三个约束：**被丢弃的间隔**（这是本函数的第三个版本）
+///
+/// `Wrap::Word` 在断行时会**丢弃行末空白**——本行的末字符与下一行的首字符
+/// 之间若隔着空格，那个空格不占本行的宽度，但把下一单元挪上来时它**需要**
+/// 重新出现在两者之间。
+///
+/// 漏算它的后果是**假阳性**：实测 `"…The Shadow of the"` 结束于字符 26
+/// （一个空格），下一单元 `"Wind，"` 宽 63.29px，而本行留白 65.77px——
+/// 63.29 ≤ 65.77 于是被判为"本该放得下却没放"。但把 `"Wind，"` 挪上来
+/// 需要 63.29 + 5.20(空格) = **68.49px** > 65.77px，引擎的断行是**正确的**。
+///
+/// 这条缺陷曾被记为 `KNOWN_DEFECT_COUNT = 1` 的"引擎未达标"，实际是
+/// 测量装置漏算了一个量（与 BASELINE §10.1 的三次踩坑同类）。修好装置后
+/// 违规数降为 0。
+///
+/// ## 间隔宽度怎么取
+///
+/// 取**同一个布局结果里观测到的空格字形步进**（取最大值，保守）——不写死
+/// 数值，因为它是字体相关的。若该布局里没有任何空格字形（纯中文语料），
+/// 则无需补偿（返回 0）。
 fn next_breakable_unit_width(
     lines: &[tome_reader::layout::linebox::LineBox],
     line: &tome_reader::layout::linebox::LineBox,
@@ -476,7 +501,7 @@ fn next_breakable_unit_width(
 
             let breakable = allowed_by_kinsoku && !(inside_latin_word && !word_is_overlong);
             if breakable {
-                return Some(width);
+                return Some(width + dropped_gap_before_next_unit(lines, line, next, text));
             }
         }
 
@@ -484,7 +509,62 @@ fn next_breakable_unit_width(
         previous = Some(ch);
     }
 
-    Some(width)
+    Some(width + dropped_gap_before_next_unit(lines, line, next, text))
+}
+
+/// 本行末字符与下一行首字符之间**被丢弃的空白**的宽度（px）。
+///
+/// 见 [`next_breakable_unit_width`] 的"第三个约束"：把下一单元挪到本行时，
+/// 这段空白需要重新占位，故它必须计入"下一单元要多宽"。
+///
+/// ## 只算空白，不算别的
+///
+/// 两行之间的字符区间若含非空白字符，那不是"被丢弃的空白"而是**区间缺口**
+/// （不该发生——页/行区间是连续的）。此处只累加空白字形的宽度，其余跳过；
+/// 宽度取同布局里的空格步进（保守取最大），取不到则 0。
+fn dropped_gap_before_next_unit(
+    lines: &[tome_reader::layout::linebox::LineBox],
+    line: &tome_reader::layout::linebox::LineBox,
+    next: &tome_reader::layout::linebox::LineBox,
+    text: &str,
+) -> f32 {
+    if next.char_range.start <= line.char_range.end {
+        return 0.0;
+    }
+
+    let gap: String = text
+        .chars()
+        .skip(line.char_range.end)
+        .take(next.char_range.start - line.char_range.end)
+        .collect();
+    if !gap.chars().all(char::is_whitespace) {
+        return 0.0;
+    }
+    let count = gap.chars().count();
+    if count == 0 {
+        return 0.0;
+    }
+
+    count as f32 * observed_space_advance_px(lines, text)
+}
+
+/// 同布局里观测到的空格字形步进（px）——取最大值为保守估计。
+///
+/// 不写死数值：它是字体与字号相关的量。取不到（纯中文语料无空格字形）
+/// 时返回 0，那时也没有"被丢弃的间隔"需要补偿。
+fn observed_space_advance_px(lines: &[tome_reader::layout::linebox::LineBox], text: &str) -> f32 {
+    let mut maximum = 0.0f32;
+    for line in lines {
+        for glyph in &line.glyphs {
+            let Some(slice) = text.get(glyph.byte_range.clone()) else {
+                continue;
+            };
+            if !slice.is_empty() && slice.chars().all(|ch| ch == ' ') {
+                maximum = maximum.max(glyph.advance_px);
+            }
+        }
+    }
+    maximum
 }
 
 /// **挤压真的在起作用**（端到端，非仅规则模块单测）。

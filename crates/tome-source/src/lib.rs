@@ -39,7 +39,9 @@
 
 pub mod action;
 pub mod change_source;
+pub mod check;
 pub mod content;
+pub mod discover;
 pub mod error;
 pub mod image;
 pub mod info;

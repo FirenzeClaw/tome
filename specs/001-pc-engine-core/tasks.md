@@ -235,33 +235,34 @@
 
 ### JSONPath（serde_json_path + Jayway shim）
 
-- [ ] T045 [US2] tome-rule：JSONPath 引擎接入 serde_json_path 于 `crates/tome-rule/src/jsonpath.rs`（research R3）
-- [ ] T046 [US2] tome-rule：Jayway→RFC9535 词法感知重写 shim（脚本索引/`min()`系终端函数/`.length()`/`in/nin`系/`=~`/内联脚本）于 `crates/tome-rule/src/jsonpath_shim.rs`
-  - [ ] 重写器跟踪字符串字面量/转义引号/括号嵌套深度，不破坏含 `=`/`(` 的过滤器
-- [ ] T047 [US2] tome-rule：JSONPath 结果适配（definite/indefinite 扁平化对齐 Jayway 结果形状）+ `min/max/avg/stddev/sum` 经 `#[function]` 注册于 `crates/tome-rule/src/jsonpath_fn.rs`
+- [x] T045 [US2] tome-rule：JSONPath 引擎接入 serde_json_path 于 `crates/tome-rule/src/jsonpath.rs`（research R3）
+- [x] T046 [US2] tome-rule：Jayway→RFC9535 词法感知重写 shim（脚本索引/`min()`系终端函数/`.length()`/`in/nin`系/`=~`/内联脚本）于 `crates/tome-rule/src/jsonpath_shim.rs`
+  - [x] 重写器跟踪字符串字面量/转义引号/括号嵌套深度，不破坏含 `=`/`(` 的过滤器
+- [x] T047 [US2] tome-rule：JSONPath 结果适配（definite/indefinite 扁平化对齐 Jayway 结果形状）+ `min/max/avg/stddev/sum` 经 `#[function]` 注册于 `crates/tome-rule/src/jsonpath_fn.rs`
 
 ### XPath（自研 1.0 子集，共享 DOM）
 
-- [ ] T048 [US2] tome-rule：XPath 子集 lexer + parser 于 `crates/tome-rule/src/xpath/parse.rs`（research R2：自研，跑在自建 DOM，不用 sxd-xpath 两棵树）
-- [ ] T049 [US2] tome-rule：XPath 求值器（轴/节点测试/谓词/常用函数 `contains() position() last() count() starts-with()`；对齐 JsoupXpath 扩展 `allText()/html()/outerHtml()/num()/text()/node()`）于 `crates/tome-rule/src/xpath/eval.rs`
-  - [ ] 与 CSS 走同一棵 DOM（结果不系统性分叉）
+- [x] T048 [US2] tome-rule：XPath 子集 lexer + parser 于 `crates/tome-rule/src/xpath/parse.rs`（research R2：自研，跑在自建 DOM，不用 sxd-xpath 两棵树）
+- [x] T049 [US2] tome-rule：XPath 求值器（轴/节点测试/谓词/常用函数 `contains() position() last() count() starts-with()`；对齐 JsoupXpath 扩展 `allText()/html()/outerHtml()/num()/text()/node()`）于 `crates/tome-rule/src/xpath/eval.rs`
+  - [x] 与 CSS 走同一棵 DOM（结果不系统性分叉）
 
 ### Jsoup 专有伪类 + 组合符全量 + 差分语料挂载
 
-- [ ] T050 [US2] tome-rule：Jsoup 专有伪类（`:contains/:containsOwn/:matches/:eq/:lt/:gt`/`[attr~=regex]` 正则重载/`[^attrPrefix]`/`[*]`）于 `crates/tome-rule/src/css_pseudo.rs`
-  - [ ] `[attr~=regex]` 语义重载特判（CSS `~=` 是空白分词，Jsoup 是正则——同一条规则两边不同，须特判）
-  - [ ] **Jsoup 版本对齐目标钉死为 1.2x**，非标准伪类实现清单成文（`crates/tome-rule/src/css_pseudo.rs` 头注释引用）
-- [ ] T051 [US5] tome-rule：内容加工链定序（替换规则 → 高亮规则求值 → 词典规则求值，对所有消费者一致）于 `crates/tome-rule/src/pipeline.rs`（FR-014/FR-015/FR-016）
-  - [ ] 顺序固定且可测；单条规则出错跳过并记录，不中断其余（US5 场景 4）
-- [ ] T052 [US2] tome-rule：合成差分语料挂载——`tests/corpus/` 覆盖 FR-005b 能力清单 + 各语法点（每语法点至少一最小用例：输入→期望输出）
-  - [ ] 语料覆盖 CSS/JSONPath/XPath/正则/JS 五类 + 组合符 + 替换链
-  - [ ] **期望值依据成文**：以 research.md R5/R3 的语义差异表为依据，逐条注明来源（crate 版本 / Java 行为文档 / 书源规则原文），不靠实现者直觉填期望值
+- [x] T050 [US2] tome-rule：Jsoup 专有伪类（`:contains/:containsOwn/:matches/:eq/:lt/:gt`/`[attr~=regex]` 正则重载/`[^attrPrefix]`/`[*]`）于 `crates/tome-rule/src/css_pseudo.rs`
+  - [x] `[attr~=regex]` 语义重载特判（CSS `~=` 是空白分词，Jsoup 是正则——同一条规则两边不同，须特判）
+  - [x] **Jsoup 版本对齐目标钉死为 1.2x**，非标准伪类实现清单成文（`crates/tome-rule/src/css_pseudo.rs` 头注释引用）
+- [x] T051 [US5] tome-rule：内容加工链定序（替换规则 → 高亮规则求值 → 词典规则求值，对所有消费者一致）于 `crates/tome-rule/src/pipeline.rs`（FR-014/FR-015/FR-016）
+  - [x] 顺序固定且可测；单条规则出错跳过并记录，不中断其余（US5 场景 4）
+- [x] T052 [US2] tome-rule：合成差分语料挂载——`tests/corpus/` 覆盖 FR-005b 能力清单 + 各语法点（每语法点至少一最小用例：输入→期望输出）
+  - [x] 语料覆盖 CSS/JSONPath/XPath/正则/JS 五类 + 组合符 + 替换链
+  - [x] **期望值依据成文**：以 research.md R5/R3 的语义差异表为依据，逐条注明来源（crate 版本 / Java 行为文档 / 书源规则原文），不靠实现者直觉填期望值
 
 > **⛔ 检查点：S1-3 之后（规则保真——兼容性门）**
-> - [ ] 合成语料差分通过率 ≥95%（SC-002a）
-> - [ ] CSS/JSONPath/XPath/正则/JS 各语法点均有用例
-> - [ ] Jsoup 版本对齐目标已钉死；非标准伪类清单已实现
-> - [ ] 人工审查后进入下一阶段
+> - [x] 合成语料差分通过率 ≥95%（SC-002a）
+> - [x] CSS/JSONPath/XPath/正则/JS 各语法点均有用例
+> - [x] Jsoup 版本对齐目标已钉死；非标准伪类清单已实现
+> - [x] 人工审查后进入下一阶段
+>   - PM 注记（2026-10-10）：补漏任务「Default 多段语法解析器」已完成——`crates/tome-rule/src/default.rs`（46 测试），语料 default 14→84 条，全集 284/284=100%。`A@@B` 中缀语义无公开依据，按前缀处理并标 [UNCERTAIN]，待 S1-6 真实基线裁决。
 
 ---
 

@@ -30,7 +30,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use tome_cli::commands::run_with_js;
+use tome_cli::commands::{run_with_js, HostCapabilities};
 use tome_cli::flags::{parse, ParseOutcome};
 use tome_core::{ErrorKind, HeaderMap, NetHost, RequestSpec, Response};
 
@@ -124,7 +124,7 @@ fn run_cli_passing_js_host(
                 import_args
             }),
             host.as_ref(),
-            None,
+            HostCapabilities::none(),
             &mut std::io::Cursor::new(json.as_bytes().to_vec()),
         );
         assert_eq!(import.exit_code, 0, "导入书源应成功：{}", import.stderr);
@@ -135,13 +135,19 @@ fn run_cli_passing_js_host(
         panic!("参数应解析成功，实际 {parsed:?}");
     };
 
-    let js_host: Option<Arc<dyn NetHost>> = if pass_js_host {
-        Some(host.clone() as Arc<dyn NetHost>)
+    // 只给网络能力：测试不涉及脚本的缓存/Cookie 持久化（那条路径由
+    // `root.rs` 的测试覆盖），故存储留空——此时脚本的 cachePut 会得到
+    // 结构化能力错误，正是本文件要验证的行为之一。
+    let hosts = if pass_js_host {
+        HostCapabilities {
+            net: Some(host.clone() as Arc<dyn NetHost>),
+            store_factory: None,
+        }
     } else {
-        None
+        HostCapabilities::none()
     };
     let mut stdin = std::io::Cursor::new(Vec::new());
-    let outcome = run_with_js(&options, &command, host.as_ref(), js_host, &mut stdin);
+    let outcome = run_with_js(&options, &command, host.as_ref(), hosts, &mut stdin);
     Outcome {
         exit_code: outcome.exit_code,
         stdout: outcome.stdout,

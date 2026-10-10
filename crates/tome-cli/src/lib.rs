@@ -37,8 +37,10 @@
 pub mod commands;
 pub mod flags;
 pub mod js_host;
+pub mod root;
 
 pub use commands::{build_executor, run, CommandOutcome};
 pub use flags::{
     exit_code_for, parse, Command, GlobalOptions, NetworkMode, OutputFormat, ParseOutcome,
 };
+pub use root::{AppRoot, ConfigProxyOverride, StoreHostFactory};

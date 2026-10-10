@@ -26,7 +26,7 @@
 use std::io::Read;
 use std::path::Path;
 
-use tome_core::{ErrorKind, NetHost};
+use tome_core::{ErrorKind, NetHost, StoreHost};
 use tome_source::source::{load_from_channel, LoadOutcome, ParsedSource};
 use tome_source::{search, SourceError};
 
@@ -78,25 +78,81 @@ pub fn run(
     host: &dyn NetHost,
     stdin_reader: &mut dyn Read,
 ) -> CommandOutcome {
-    run_with_js(options, command, host, None, stdin_reader)
+    run_with_js(
+        options,
+        command,
+        host,
+        HostCapabilities::none(),
+        stdin_reader,
+    )
 }
 
-/// 与 [`run`] 相同，但额外接受一个**可共享的**网络宿主句柄。
+/// 注入给 JS 沙箱的宿主能力（A1 的接线端）。
+///
+/// # 为什么打包成一个结构而不是两个 `Option` 参数
+///
+/// 网络与存储是**一起注入**的：JS 引擎建出来时两者都已就位（或都没有）。
+/// 分开传会让"给了网络但忘了存储"成为一种可表达的状态，而那只会制造
+/// 一类无意义的调试——何况每加一种宿主能力（如后续的 `MarkupHost`）
+/// 就要多一个参数。打包后新增能力只改结构体。
+///
+/// ## `None` 表示什么
+///
+/// "本次运行不提供宿主能力"。含 JS 的源此时会得到**结构化能力错误**
+/// （FR-006，可被书源的 `try/catch` 捕获），而不是静默跑不起来。
+/// 那让"忘了注入"这件事在第一次运行时暴露。
+#[derive(Clone, Default)]
+pub struct HostCapabilities {
+    /// 网络能力（JS 侧持 `Arc`，因为要跨线程）
+    pub net: Option<std::sync::Arc<dyn NetHost>>,
+    /// 存储能力构造器（按书源 id 建实例——缓存与 Cookie 按源分区）
+    ///
+    /// # 为什么是构造器而不是一个实例
+    ///
+    /// `SqliteStoreHost` 绑定**单个书源**（见 `tome_store::host`）。
+    /// 一次运行要跑多个源，故存的应是"给定源 id 造一个宿主"的能力。
+    pub store_factory: Option<std::sync::Arc<crate::root::StoreHostFactory>>,
+}
+
+impl std::fmt::Debug for HostCapabilities {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("HostCapabilities")
+            .field("has_net", &self.net.is_some())
+            .field("has_store", &self.store_factory.is_some())
+            .finish()
+    }
+}
+
+impl HostCapabilities {
+    /// 无宿主能力（测试与纯计算场景）。
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// 只为某个书源取存储宿主。
+    pub fn store_host_for(&self, source_id: &str) -> Option<std::sync::Arc<dyn StoreHost>> {
+        self.store_factory
+            .as_ref()
+            .map(|factory| factory.for_source(source_id).as_store_host())
+    }
+}
+
+/// 与 [`run`] 相同，但额外接受**可共享的宿主能力**（T063）。
 ///
 /// # 为什么需要它
 ///
-/// 含 JS 的书源需要把宿主能力交给 JS 引擎，而
-/// [`tome_core::NetHost`] 在 JS 侧以 `Arc<dyn NetHost>` 持有。
-/// `&dyn NetHost` 借不出一个 `Arc`，故由组合根（`main.rs`）把执行器
-/// 以 `Arc` 形式传进来。
+/// 含 JS 的书源需要把网络与存储交给 JS 引擎，而两者在 JS 侧都以
+/// `Arc<dyn Trait>` 持有。`&dyn NetHost` 借不出一个 `Arc`，故由组合根
+/// （`main.rs` 的 [`AppRoot`]）把能力以 `Arc` 形式传进来。
 ///
-/// 不传时（`None`）含 JS 的源会得到**结构化能力错误**——而不是
+/// 不传时含 JS 的源会得到**结构化能力错误**（FR-006）——而不是
 /// "静默跑不起来"。那让"忘了传"这件事在第一次运行时就暴露。
 pub fn run_with_js(
     options: &GlobalOptions,
     command: &Command,
     host: &dyn NetHost,
-    js_host: Option<std::sync::Arc<dyn NetHost>>,
+    hosts: HostCapabilities,
     stdin_reader: &mut dyn Read,
 ) -> CommandOutcome {
     match command {
@@ -118,13 +174,13 @@ pub fn run_with_js(
             source_file.as_deref(),
             keyword,
             host,
-            js_host,
+            hosts,
         ),
         Command::Run {
             source_id,
             action,
             input,
-        } => run_action(options, source_id, action, input.as_deref(), host, js_host),
+        } => run_action(options, source_id, action, input.as_deref(), host, hosts),
         Command::Verify { corpus, report } => run_verify(corpus, report.as_deref()),
     }
 }
@@ -291,7 +347,7 @@ fn run_action(
     action: &str,
     input: Option<&str>,
     host: &dyn NetHost,
-    js_host: Option<std::sync::Arc<dyn NetHost>>,
+    hosts: HostCapabilities,
 ) -> CommandOutcome {
     match action {
         "search" => {
@@ -303,7 +359,7 @@ fn run_action(
 ".to_string(),
                 };
             };
-            run_search(options, Some(source_id), None, keyword, host, js_host)
+            run_search(options, Some(source_id), None, keyword, host, hosts)
         }
         // ## 后续切片的动作：报**能力错误**（退出码 3）而不是用法错误
         //
@@ -465,7 +521,7 @@ fn run_search(
     source_file: Option<&Path>,
     keyword: &str,
     host: &dyn NetHost,
-    js_host: Option<std::sync::Arc<dyn NetHost>>,
+    hosts: HostCapabilities,
 ) -> CommandOutcome {
     // 载入书源：S1-1 阶段从文件读（存储落地在后续切片，见模块文档）。
     let sources = match load_sources_for_search(options, source_id, source_file, host) {
@@ -484,11 +540,17 @@ fn run_search(
     // 而 `&dyn NetHost` 无法克隆成 `Arc`。故调用方需在能给出 `Arc` 时
     // 经 `run_with_js` 传入；给不出时（测试里的借入宿主）JS 引擎没有
     // 网络能力——那时含 JS 的源会得到**结构化能力错误**，而不是静默失败。
-    let engine = match js_host {
+    let engine = match &hosts.net {
         Some(js_host) => {
             let js_host = js_host.clone();
+            let store_factory = hosts.store_factory.clone();
             let factory: search::JsEngineFactory<'_> = std::sync::Arc::new(move |source| {
-                crate::js_host::build_source_engine(source, Some(js_host.clone()))
+                // 存储**按源**建实例：缓存与 Cookie 按 source_id 分区，
+                // 共享一个会让 A 源的登录 token 被 B 源读到。
+                let store = store_factory
+                    .as_ref()
+                    .map(|factory| factory.for_source(&source.id).as_store_host());
+                crate::js_host::build_source_engine(source, Some(js_host.clone()), store)
             });
             search::SearchEngine::with_js(&sources, host, factory)
         }

@@ -11,7 +11,7 @@
 //!
 //! # 它做三件事
 //!
-//! 1. **建引擎**：为某个书源建 `SourceJsEngine`，并把宿主能力（网络）
+//! 1. **建引擎**：为某个书源建 `SourceJsEngine`，并把宿主能力（网络 + 存储）
 //!    注入进去（[`build_source_engine`]）。
 //! 2. **注册宿主函数**：把 `java.*` 的八类 API 挂到全局
 //!    （[`register_host_api`]）。
@@ -48,18 +48,25 @@ use tome_source::SourceError;
 pub fn build_source_engine(
     source: &tome_core::Source,
     net: Option<Arc<dyn NetHost>>,
+    store: Option<Arc<dyn StoreHost>>,
 ) -> Result<tome_source::js::SourceJsEngine, SourceError> {
-    // 存储能力：S1-2 阶段用内存替身（真实 store 在 S1-4）。
+    // ## 存储能力由组合根注入（T063）
     //
-    // ## 为什么必须用**每源独立**的替身
+    // 此前这里硬编码 `tome_js::MemoryStoreHost`——进程内内存替身，退出即丢，
+    // 于是脚本的 `java.setCookie` **不会**真的落盘（FR-026 的"重启后保留
+    // 登录态"在脚本路径上是空头支票）。
     //
-    // 替身是进程内共享的缓存；若所有源共用一个，A 源的缓存会被 B 源读到
-    // ——而书源的缓存常存着登录 token，那会变成跨源的信息泄漏。
-    // 故每个引擎配一个自己的替身。
-    let store: Arc<dyn StoreHost> = Arc::new(tome_js::MemoryStoreHost::new());
-
+    // 现在改为由调用方传入：组合根给的是 `tome_store::SqliteStoreHost`
+    // （按书源分区），测试给的是内存替身。本函数不关心是哪一个——
+    // 那正是接缝存在的意义（A1）。
+    //
+    // ## 为什么保留"不传"这条路径
+    //
+    // `None` 表示"本次运行不提供存储能力"。此时脚本的 `java.cachePut` /
+    // `setCookie` 抛**结构化能力错误**（FR-006），书源的 `try/catch`
+    // 能据此降级——而不是拿到一个"写成功了但其实没落盘"的假象。
     let engine =
-        tome_source::js::SourceJsEngine::for_source(source.id.clone(), source, net, Some(store))?;
+        tome_source::js::SourceJsEngine::for_source(source.id.clone(), source, net, store)?;
 
     // 注册宿主函数与上下文对象（必须在脚本求值之前）。
     engine.with_context(|ctx| {
@@ -180,13 +187,13 @@ fn markup_host() -> Arc<dyn tome_js::api::data::MarkupHost> {
 pub fn build_mainjs_runner(
     source: &tome_core::Source,
     net: Option<Arc<dyn NetHost>>,
+    store: Option<Arc<dyn StoreHost>>,
 ) -> Result<tome_rule::mainjs::MainJsRunner, SourceError> {
     let script = source
         .js
         .as_deref()
         .ok_or_else(|| SourceError::incomplete(source.id.clone(), "纯脚本源缺少 js/mainJs 字段"))?;
 
-    let store: Arc<dyn StoreHost> = Arc::new(tome_js::MemoryStoreHost::new());
     let context = tome_js::JsContext::for_source(source.id.clone()).with_source_request_config(
         source.charset.clone(),
         source
@@ -194,7 +201,13 @@ pub fn build_mainjs_runner(
             .and_then(|millis| u32::try_from(millis).ok()),
     );
 
-    let mut bridge = tome_js::HostBridge::bare(context).with_store(store);
+    // 与 `build_source_engine` 同理：存储能力由组合根注入（T063）。
+    // 纯脚本源（`SourceKind::Js`）同样会用到 `java.cachePut` 与 Cookie，
+    // 故它也必须拿到真实存储——否则整类源在重启后丢失登录态。
+    let mut bridge = match store {
+        Some(store) => tome_js::HostBridge::bare(context).with_store(store),
+        None => tome_js::HostBridge::bare(context),
+    };
     if let Some(net) = net {
         bridge = bridge.with_net(net);
     }

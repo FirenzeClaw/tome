@@ -403,7 +403,12 @@ mod tests {
     /// 交错请求两个源：总耗时应由"各自次数"决定，而不是"总次数"。
     #[test]
     fn interleaved_keys_scale_independently() {
-        let interval = Duration::from_millis(40);
+        // 两个源各自 3 次请求，各需 (3-1)×100=200ms；若被错误地串成一列，
+        // 会需要 (6-1)×100=500ms。取 350ms 为界可把两种情况分开。
+        // 区间取值放大的原因：共享 CI runner（尤其 macOS arm64）的睡眠调度
+        // 噪声单次可达数十 ms，40ms 区间的判定 margin 会被噪声吞掉（CI 实测
+        // macOS 上 150ms 阈值 flaky）；放大区间让 margin 远大于噪声。
+        let interval = Duration::from_millis(100);
         let limiter = RateLimiter::new();
         limiter.set_interval("source-a", interval);
         limiter.set_interval("source-b", interval);
@@ -415,10 +420,8 @@ mod tests {
         }
         let elapsed = started.elapsed();
 
-        // 两个源各自 3 次请求，各需 (3-1)×40=80ms；若被错误地串成一列，
-        // 会需要 (6-1)×40=200ms。取 150ms 为界可把两种情况分开。
         assert!(
-            elapsed < Duration::from_millis(150),
+            elapsed < Duration::from_millis(350),
             "交错耗时 {elapsed:?} 表明两个源被串成了一列"
         );
     }

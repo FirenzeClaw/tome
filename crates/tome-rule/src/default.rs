@@ -176,21 +176,46 @@ pub fn parse(rule: &str) -> Result<DefaultRule, RuleError> {
         _ => (false, trimmed),
     };
 
+    // ## 段的切分：**只按单个 `@`**，不把 `@@` 当分隔符
+    //
+    // `@@` 按公开文档是"Default 规则的**前缀标记**"（「Default 规则需要以
+    // `@@` 开头」），用于在 `{{}}` 里与其他语法区分；公开的书源开发文档里
+    // 它的用法也一律是前缀（`java.getElement("@@tag.a.0")`、
+    // `{{@@td.N@text##…}}`）。
+    //
+    // 故此处先把**开头的** `@@` 剥掉（与 `dispatch_prefix` 的处理一致），
+    // 再把剩下的按单个 `@` 切段。
+    //
+    // `[UNCERTAIN]` 关于 `A@@B` 的**中缀**形态：社区书源里偶见
+    // `#list li@@a@text` 这类写法，但它们无法从公开文档得到权威语义
+    // （文档只把 `@@` 定义为前缀）。本实现按"开头的 `@@` 是前缀"处理，
+    // 中缀的 `@@` 会被 `split('@')` 切出一个空段并被跳过——于是
+    // `A@@B` 等价于 `A@B`。这是**无据的退让**而非有据的设计，
+    // 记录在此以免被误当作已确认的语义。若 S1-6 的真实基线显示该形态
+    // 确有不同语义，应以基线证据修正。
+    let body = body.strip_prefix("@@").unwrap_or(body);
     let parts: Vec<&str> = body.split('@').map(str::trim).collect();
 
     // 末段是否为访问器
     //
     // 公开文档：「`@` 的最后一段为获取内容,如 text,textNodes,ownText,href,src,
     // html,all 等」。故末段若是**已知访问器名**，它是访问器而非选择段。
+    //
+    // ## 必须用 `parse_suffix_text` 而不是 `RuleSuffix::parse`
+    //
+    // 前者额外认 `attr(名称)` 形态（`a@attr(data-id)`）。用后者会让
+    // Default 路径上 `attr(...)` 不可用——它会被当成选择段喂给 CSS，
+    // 报"选择器解析失败"，而同一写法在 `@css:` 路径上却能工作。
+    // 两条路径的访问器清单必须逐字一致（公开文档列的是**一份**清单）。
     let (selector_parts, accessor) = match parts.last() {
-        Some(last) => match crate::css_post::RuleSuffix::parse(last) {
+        Some(last) => match crate::css_post::parse_suffix_text(last) {
             // 已知访问器名 → 它是访问器（`!last.is_empty()` 排除空串：
-            // `RuleSuffix::parse("")` 给 `Unspecified`，但空末段只意味着
+            // `parse_suffix_text("")` 给 `Unspecified`，但空末段只意味着
             // 规则以 `@` 结尾，不是访问器）
             Some(suffix) if !last.is_empty() => (&parts[..parts.len() - 1], Some(suffix)),
             // 空串或未知名（如 `class.odd@cat`）→ 不是访问器，整段都是选择段。
             // 未知名走这里而不是报错：`@cat` 可能是作者想写 `@attr(cat)` 的
-            // 简写，而"按无访问器处理"会让它落到"类型 cat 不支持"的明确错误上。
+            // 简写，而"按无访问器处理"会让它落到一个明确的选择器错误上。
             _ => (&parts[..], None),
         },
         None => (&parts[..], None),
@@ -480,61 +505,57 @@ fn descend(
     let mut current: Vec<NodeRef> = starts.to_vec();
 
     for (position, segment) in segments.iter().enumerate() {
-        let mut next = Vec::new();
+        let is_first = position == 0;
+        // 反序只作用在**首段**（见下方说明），且要作用于它**选出全部之后、
+        // 施加位置之前**。故这里把它并入"每个父节点的子结果"处理之前。
+        let reversed_here = has_reversed && is_first;
 
-        if segment.kind == SegmentKind::Children {
-            // `children` 不走 CSS：它的语义是"所有直接子**元素**"，
-            // 而 `> *` 是相对选择器，servo 不接受它作为独立选择器
-            // （CSS 规范里 `>` 必须以组合符的形态跟在主体之后）。
-            // 直接按 DOM 取子元素既准确又更省一次选择器编译。
-            for node in &current {
-                next.extend(node.children().filter(|child| child.is_element()));
+        // ## 位置必须**逐父节点**施加，而不是在拼接后的总列表上
+        //
+        // 公开文档把位置定义为**段的一部分**（「第三段是位置,class,tag,id 等
+        // 会获取到多个,所以要加位置」）。段是"在上一段结果的**各自子树内**"
+        // 求的（见本函数前文的依据），故它的位置也应当在**各自子树的命中集**
+        // 上施加——`class.book@class.name.0@text` 的含义是"每本书取它自己的
+        // 第 0 个 .name"，而不是"把所有 .name 拼起来取全局第 0 个"。
+        //
+        // 若在拼接后的总列表上施加位置，前一本书的命中会被后一本书的命中
+        // "挤掉"——那是与"逐段下钻"自相矛盾的：中间段的位置已经是逐父节点
+        // 施加的（`descend` 每段都对 `current` 的每个元素分别选），
+        // 末段若改成全局就会前后不一致。
+        let mut propagated: Vec<NodeRef> = Vec::new();
+        for node in &current {
+            // 每个父节点各自求一遍这一段的命中
+            let mut hits: Vec<NodeRef> = if segment.kind == SegmentKind::Children {
+                // `children` 不走 CSS：它的语义是"所有直接子**元素**"，
+                // 而 `> *` 是相对选择器，servo 不接受它作为独立选择器
+                // （CSS 规范里 `>` 必须以组合符的形态跟在主体之后）。
+                // 直接按 DOM 取子元素既准确又更省一次选择器编译。
+                node.children().filter(|child| child.is_element()).collect()
+            } else {
+                let selector = crate::css::compile(&segment_to_css(segment))?;
+                crate::css::select(node, &selector)
+            };
+
+            // 反序在这一层的命中集上施加（与 `css_post` 的"先反序再取位置"同序）
+            if reversed_here {
+                hits.reverse();
             }
-        } else {
-            let selector = crate::css::compile(&segment_to_css(segment))?;
-            for node in &current {
-                // 每段在**各自**子树内求，结果按段序拼接（保持文档序）
-                next.extend(crate::css::select(node, &selector));
-            }
+            // 位置在这一层的命中集上施加
+            let hits = segment.slice.apply_nodes(hits);
+            propagated.extend(hits);
         }
 
         // 去重：同一节点可能经不同父节点多次命中（子树重叠时）。
         // 用 arena 的节点 id 判定身份（`NodeRef` 的 `PartialEq` 已按 id 比较）。
-        let mut deduped: Vec<NodeRef> = Vec::with_capacity(next.len());
-        for node in next {
+        let mut deduped: Vec<NodeRef> = Vec::with_capacity(propagated.len());
+        for node in propagated {
             if !deduped.iter().any(|existing| existing.id() == node.id()) {
                 deduped.push(node);
             }
         }
         current = deduped;
-
-        // ## 反序与位置的次序：**先反序、再在倒置后的列表上取位置**
-        //
-        // 公开文档说两件事：
-        //
-        // > 获取列表的最前面加上负号 `-` 可以使列表倒置
-        // > 第三段是位置…如不加位置会获取所有
-        //
-        // 而 `-` 写在**整条规则的最前面**，故它是规则级的前缀（不是段级的）。
-        // 与 [`crate::css_post`] 的 `evaluate_css_body` 对齐：那里把选择到的
-        // 全部节点先 `reverse`，**再**施加切片。本模块用同一次序——
-        // 两处的 `-` 与位置的相对次序因此一致（这是有意的，见模块文档）。
-        //
-        // ## 为什么反序作用在**首段**产出上
-        //
-        // 首段是"最初选出的那个列表"——它就是 `css_post` 里"选择器选到的
-        // 全部节点"。后续段是在它基础上逐级下钻，故倒置应在下钻**之前**，
-        // 这样"倒过来之后取第 0 个"才等于"原来的最后一个"。
-        // 单段规则时首段即唯一段，与 `css_post` 的行为逐字一致。
-        if has_reversed && position == 0 {
-            current.reverse();
-        }
-        // 位置在**段内**施加（在（可能已倒置的）段产出之上）
-        current = segment.slice.apply_nodes(current);
     }
 
-    // 单段规则时上面已处理；多段时末段的反序也已处理——但若 segments 为空，
-    // 反序无处施加。空规则本就产出空（见 `evaluate_with_nodes`），故此处不必额外处理。
     Ok(current)
 }
 
@@ -696,6 +717,44 @@ mod tests {
             SegmentKind::Raw("li.i>a".to_string())
         );
         assert_eq!(parsed.accessor, Some(crate::css_post::RuleSuffix::Text));
+    }
+
+    // ---------- 解析：`@@` 前缀 ----------
+
+    #[test]
+    fn 开头的双_at_是前缀标记() {
+        // 公开文档：「Default 规则需要以 @@ 开头」——`@@` 是**前缀标记**，
+        // 用于在 `{{}}` 里与其他语法区分（`{{@@td.N@text##…}}`）。
+        // 公开书源开发文档里它的用法也一律是前缀
+        // （`java.getElement("@@tag.a.0")`）。
+        let plain = parse("class.odd@tag.a@text").expect("应解析成功");
+        let prefixed = parse("@@class.odd@tag.a@text").expect("应解析成功");
+        assert_eq!(
+            plain.segments, prefixed.segments,
+            "前缀标记不该改变段的语义"
+        );
+        assert_eq!(plain.accessor, prefixed.accessor);
+    }
+
+    #[test]
+    fn 双_at_前缀可端到端求值() {
+        let html = r#"<ul><li class="odd"><a href="/1">一</a></li></ul>"#;
+        assert_eq!(run(html, "@@class.odd@tag.a@href"), vec!["/1"]);
+    }
+
+    #[test]
+    fn 中缀双_at_按无据退让处理并已标注() {
+        // `[UNCERTAIN]`：公开文档只把 `@@` 定义为**前缀**，没有中缀
+        // `A@@B` 的权威语义。本实现的退让是"中缀的 `@@` 等价于 `@`"
+        // （切出的空段被跳过）。这条测试把**当前行为**钉住，
+        // 以免它被误当作已确认的语义——若将来有基线证据表明语义不同，
+        // 这里会失败并提醒去核对。
+        let infix = parse("class.odd@@tag.a@text").expect("应解析成功");
+        let plain = parse("class.odd@tag.a@text").expect("应解析成功");
+        assert_eq!(
+            infix.segments, plain.segments,
+            "当前实现里中缀 `@@` 等价于 `@`（无据退让，见 parse 的文档）"
+        );
     }
 
     // ---------- 解析：位置 ----------
@@ -992,6 +1051,63 @@ mod tests {
         let nodes = select_nodes(&document, "class.odd").expect("应求值成功");
         assert_eq!(nodes.len(), 2);
         assert!(nodes.iter().all(|node| node.node_name() == "li"));
+    }
+
+    // ---------- 回归：两处被语料编写发现的缺陷 ----------
+
+    #[test]
+    fn attr访问器与_css_路径行为一致() {
+        // 回归：`attr(名称)` 在 Default 路径上曾不可用——访问器检测用的是
+        // `RuleSuffix::parse`，它不认 `attr(...)`，于是 `a@attr(data-id)` 被
+        // 当成选择段喂给 CSS 并报"选择器解析失败"，而同一写法在 `@css:`
+        // 路径上正常。
+        //
+        // 公开文档列的是**一份**访问器清单，两条路径必须逐字一致。
+        let html = r#"<a href="/u" title="t" data-id="7">文字</a>"#;
+        assert_eq!(run(html, "a@attr(data-id)"), vec!["7"]);
+        assert_eq!(run(html, "a@attr(href)"), vec!["/u"]);
+        // 带引号的写法也应接受（与 `css_post` 的宽容一致）
+        assert_eq!(run(html, r#"a@attr("data-id")"#), vec!["7"]);
+        // 属性不存在 → 空
+        assert_eq!(run(html, "a@attr(nope)"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn 末段的位置逐父节点施加而不是全局() {
+        // 回归：末段的位置曾在**拼接后的总列表**上施加，于是前一本书的命中
+        // 被后一本书的命中挤掉——与"逐段下钻"自相矛盾（中间段的位置一直
+        // 是逐父节点施加的）。
+        //
+        // 公开文档把位置定义为**段的一部分**，而段是在各自子树内求的，
+        // 故位置也在各自子树的命中集上施加。
+        let html = r#"<div class="book"><span class="name">A</span><span class="name">B</span></div>
+                      <div class="book"><span class="name">C</span><span class="name">D</span></div>"#;
+        assert_eq!(
+            run(html, "class.book@class.name.0@text"),
+            vec!["A", "C"],
+            "每本书各取自己的第 0 个 .name"
+        );
+        assert_eq!(
+            run(html, "class.book@class.name.-1@text"),
+            vec!["B", "D"],
+            "每本书各取自己的倒数第 1 个"
+        );
+        // 与中间段的位置行为一致（后者一直是逐父节点的）
+        assert_eq!(
+            run(html, "class.book.0@class.name@text"),
+            vec!["A", "B"],
+            "首段取第 0 本书后，它的两个 .name 都给"
+        );
+    }
+
+    #[test]
+    fn 末段位置与中间段位置行为对称() {
+        // 对称性的直接断言：把位置放在中间段还是末段，结果应一致
+        let html = r#"<div class="m"><i>x</i><i>y</i></div><div class="m"><i>z</i><i>w</i></div>"#;
+        assert_eq!(run(html, "class.m@tag.i.1@text"), vec!["y", "w"]);
+        assert_eq!(run(html, "class.m.1@tag.i@text"), vec!["z", "w"]);
+        // 两者都是"逐父节点"的：前者每个 m 取自己的第 1 个 i，
+        // 后者取第 1 个 m 的全部 i
     }
 
     // ---------- 边界 ----------

@@ -656,7 +656,13 @@ fn split_suffix(text: &str) -> (&str, RuleSuffix) {
 }
 
 /// 解析后缀文本，支持 `attr(name)` 形态。
-fn parse_suffix_text(text: &str) -> Option<RuleSuffix> {
+///
+/// 公开给 [`crate::default`] 用：Default 语法的末段访问器与 `@css:` 的后缀
+/// **是同一套名字**（公开文档：「`@` 的最后一段为获取内容,如 text,textNodes,
+/// ownText,href,src,html,all 等」），故两处必须用同一个解析器。
+/// 各写一份会让 `attr(...)` 这类形态在一侧可用、另一侧报错——那正是
+/// 本函数被公开出来的原因。
+pub fn parse_suffix_text(text: &str) -> Option<RuleSuffix> {
     let trimmed = text.trim();
     if let Some(argument) = trimmed
         .strip_prefix("attr(")

@@ -4,103 +4,131 @@
     "kind": "html",
     "input": "<div class=\"o\"><a>t</a></div>",
     "rule": "div.o a@text",
-    "expected": ["t"],
-    "basis": "书源规则公开说明（社区流通的《书源规则说明》：无前缀规则跟随 Legado 预设语法，或直接 CSS 选择器）"
+    "expected": [
+      "t"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：无前缀规则跟随预设语法，或直接 CSS 选择器）"
   },
   {
     "name": "default:无前缀标签选择器",
     "kind": "html",
     "input": "<ul><li class=\"odd\"><a>1</a></li><li class=\"even\"><a>2</a></li></ul>",
     "rule": "li.odd@text",
-    "expected": ["1"],
-    "basis": "书源规则公开说明（社区流通的《书源规则说明》：无前缀规则按 CSS 选择器解析）"
+    "expected": [
+      "1"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：无前缀规则按 CSS 选择器解析）"
   },
   {
     "name": "default:显式双at前缀",
     "kind": "html",
     "input": "<div>a</div>",
     "rule": "@@div@text",
-    "expected": ["a"],
-    "basis": "书源规则公开说明（社区流通的《书源规则说明》：Default 规则需要以 @@ 开头）"
+    "expected": [
+      "a"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：Default 规则需要以 @@ 开头）"
   },
   {
     "name": "default:显式双at前缀加后代选择器",
     "kind": "html",
     "input": "<div><a>1</a></div>",
     "rule": "@@div a@text",
-    "expected": ["1"],
-    "basis": "书源规则公开说明（社区流通的《书源规则说明》：Default 规则需要以 @@ 开头）"
+    "expected": [
+      "1"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：Default 规则需要以 @@ 开头）"
   },
   {
     "name": "default:显式双at前缀无后缀",
     "kind": "html",
     "input": "<div><a>1</a><a>2</a></div>",
     "rule": "@@div a",
-    "expected": ["1", "2"],
-    "basis": "书源规则公开说明（社区流通的《书源规则说明》：Default 规则需要以 @@ 开头，未指定后缀时取文本）"
+    "expected": [
+      "1",
+      "2"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：Default 规则需要以 @@ 开头，未指定后缀时取文本）"
   },
   {
     "name": "default:显式双at前缀的类选择器",
     "kind": "html",
     "input": "<p class=\"a\">x</p><p>y</p>",
     "rule": "@@.a@text",
-    "expected": ["x"],
-    "basis": "书源规则公开说明（社区流通的《书源规则说明》：Default 规则需要以 @@ 开头）"
+    "expected": [
+      "x"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：Default 规则需要以 @@ 开头）"
   },
   {
     "name": "default:点号索引第三段位置",
     "kind": "html",
     "input": "<ul><li>a</li><li>b</li></ul>",
     "rule": "li.0@text",
-    "expected": ["a"],
-    "basis": "书源规则公开说明（社区流通的《书源规则说明》：每段规则第三段是位置，正着数从0开始）"
+    "expected": [
+      "a"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：每段规则第三段是位置，正着数从 0 开始）"
   },
   {
     "name": "default:点号负索引",
     "kind": "html",
     "input": "<ul><li>a</li><li>b</li></ul>",
     "rule": "li.-1@text",
-    "expected": ["b"],
-    "basis": "书源规则公开说明（社区流通的《书源规则说明》：-1为倒数第一个）"
+    "expected": [
+      "b"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：-1 为倒数第一个）"
   },
   {
     "name": "default:方括号索引",
     "kind": "html",
     "input": "<ul><li>a</li><li>b</li></ul>",
     "rule": "li[0]@text",
-    "expected": ["a"],
-    "basis": "书源规则公开说明（社区流通的《书源规则说明》：数组写法 tag.li[0:10]）"
+    "expected": [
+      "a"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：数组写法 tag.li[0:10]）"
   },
   {
     "name": "default:无前缀加属性后缀",
     "kind": "html",
     "input": "<a href=\"/u\">x</a>",
     "rule": "a@href",
-    "expected": ["/u"],
-    "basis": "书源规则公开说明（社区流通的《书源规则说明》：最后一段取内容，@href 取属性值）"
+    "expected": [
+      "/u"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：最后一段取内容，@href 取属性值）"
   },
   {
     "name": "default:无前缀加替换链",
     "kind": "html",
     "input": "<div>a</div>",
     "rule": "div@text##a##A",
-    "expected": ["A"],
-    "basis": "书源规则公开说明（社区流通的《书源规则说明》：规则后接 ##正则##替换）"
+    "expected": [
+      "A"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：规则后接 ##正则##替换）"
   },
   {
     "name": "default:反序标记加无前缀规则",
     "kind": "html",
     "input": "<div class=\"o\"><a>t</a></div>",
     "rule": "-div.o a@text",
-    "expected": ["t"],
-    "basis": "书源规则公开说明（社区流通的《书源规则说明》：列表规则首字符 - 表示反序）"
+    "expected": [
+      "t"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：列表规则首字符 - 表示反序）"
   },
   {
     "name": "default:选择器列表在无前缀形态下同样生效",
     "kind": "html",
     "input": "<ul><li>a</li><li>b</li></ul>",
     "rule": ".x,li@text",
-    "expected": ["a", "b"],
+    "expected": [
+      "a",
+      "b"
+    ],
     "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
   },
   {
@@ -108,7 +136,737 @@
     "kind": "html",
     "input": "<ul><li>a</li><li>b</li><li>c</li></ul>",
     "rule": "li[!0:0]@text",
-    "expected": ["b", "c"],
-    "basis": "书源规则公开说明（社区流通的《书源规则说明》：!是排除）"
+    "expected": [
+      "b",
+      "c"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：! 是排除）"
+  },
+  {
+    "name": "default:类段按类名选并逐段下钻到标签",
+    "kind": "html",
+    "input": "<html><body><ul><li class=\"odd\"><a href=\"/b/1\">第一本</a></li><li class=\"even\"><a href=\"/b/2\">第二本</a></li><li class=\"odd\"><a href=\"/b/3\">第三本</a></li></ul></body></html>",
+    "rule": "class.odd@tag.a@text",
+    "expected": [
+      "第一本",
+      "第三本"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：第一段是类型如 class/id/tag/text/children，@ 为分隔符）"
+  },
+  {
+    "name": "default:id段按id选并下钻",
+    "kind": "html",
+    "input": "<div id=\"list\"><dd><a href=\"/1\">一</a></dd><dd><a href=\"/2\">二</a></dd></div>",
+    "rule": "id.list@tag.dd@tag.a@text",
+    "expected": [
+      "一",
+      "二"
+    ],
+    "basis": "书源规则公开说明与公开书源开发文档（ColorTxt「找书（Legado 书源）开发文档」§3：id.list@dd@a 中间段须保留全部匹配节点，否则只解析到第一个 dd）"
+  },
+  {
+    "name": "default:tag段不加位置取全部",
+    "kind": "html",
+    "input": "<html><body><ul><li class=\"odd\"><a href=\"/b/1\">第一本</a></li><li class=\"even\"><a href=\"/b/2\">第二本</a></li><li class=\"odd\"><a href=\"/b/3\">第三本</a></li></ul></body></html>",
+    "rule": "tag.a@text",
+    "expected": [
+      "第一本",
+      "第二本",
+      "第三本"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：如不加位置会获取所有）"
+  },
+  {
+    "name": "default:text段按自身文本片段选",
+    "kind": "html",
+    "input": "<div><a>下一章</a><a>目录</a></div>",
+    "rule": "text.下一章@text",
+    "expected": [
+      "下一章"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：text 可以根据文本内容获取，text. 第二段为文本内容的一部分）"
+  },
+  {
+    "name": "default:text段按文本片段选且不要求整串相同",
+    "kind": "html",
+    "input": "<div><a>目录</a><a>其他</a></div>",
+    "rule": "text.目@text",
+    "expected": [
+      "目录"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：text. 第二段为文本内容的一部分）"
+  },
+  {
+    "name": "default:children段取直接子标签",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li></ul>",
+    "rule": "tag.ul@children@text",
+    "expected": [
+      "a",
+      "b"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：children 获取所有子标签，不需要第二段和第三段）"
+  },
+  {
+    "name": "default:children段在多段中间下钻",
+    "kind": "html",
+    "input": "<div class=\"card\"><p>A</p><p>B</p></div><div class=\"card\"><p>C</p></div>",
+    "rule": "class.card@children@text",
+    "expected": [
+      "A",
+      "B",
+      "C"
+    ],
+    "basis": "书源规则公开说明与公开书源开发文档（ColorTxt「找书（Legado 书源）开发文档」§3：中间选择器须保留全部匹配节点，否则只会解析到第一个）"
+  },
+  {
+    "name": "default:不加位置取全部",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li><li>c</li></ul>",
+    "rule": "tag.li@text",
+    "expected": [
+      "a",
+      "b",
+      "c"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：如不加位置会获取所有）"
+  },
+  {
+    "name": "default:位置0取第一个",
+    "kind": "html",
+    "input": "<html><body><ul><li class=\"odd\"><a href=\"/b/1\">第一本</a></li><li class=\"even\"><a href=\"/b/2\">第二本</a></li><li class=\"odd\"><a href=\"/b/3\">第三本</a></li></ul></body></html>",
+    "rule": "class.odd.0@tag.a@text",
+    "expected": [
+      "第一本"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：位置正着数从 0 开始，0 是第一个）"
+  },
+  {
+    "name": "default:位置取中间一个",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li><li>c</li></ul>",
+    "rule": "tag.li.1@text",
+    "expected": [
+      "b"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：位置正着数从 0 开始）"
+  },
+  {
+    "name": "default:位置-1取倒数第一个",
+    "kind": "html",
+    "input": "<html><body><ul><li class=\"odd\"><a href=\"/b/1\">第一本</a></li><li class=\"even\"><a href=\"/b/2\">第二本</a></li><li class=\"odd\"><a href=\"/b/3\">第三本</a></li></ul></body></html>",
+    "rule": "class.odd.-1@tag.a@text",
+    "expected": [
+      "第三本"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：-1 为倒数第一个）"
+  },
+  {
+    "name": "default:位置-2取倒数第二个",
+    "kind": "html",
+    "input": "<html><body><ul><li class=\"odd\"><a href=\"/b/1\">第一本</a></li><li class=\"even\"><a href=\"/b/2\">第二本</a></li><li class=\"odd\"><a href=\"/b/3\">第三本</a></li></ul></body></html>",
+    "rule": "class.odd.-2@tag.a@text",
+    "expected": [
+      "第一本"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：-2 为倒数第二个）"
+  },
+  {
+    "name": "default:位置越界产出空",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li><li>c</li></ul>",
+    "rule": "tag.li.5@text",
+    "expected": [],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：位置是索引，超出匹配数无对应元素）"
+  },
+  {
+    "name": "default:负位置越界产出空",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li><li>c</li></ul>",
+    "rule": "tag.li.-5@text",
+    "expected": [],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：负数为倒数序号，超出匹配数无对应元素）"
+  },
+  {
+    "name": "default:位置施加在末段选择的列表上",
+    "kind": "html",
+    "input": "<html><body><ul><li class=\"odd\"><a href=\"/b/1\">第一本</a></li><li class=\"even\"><a href=\"/b/2\">第二本</a></li><li class=\"odd\"><a href=\"/b/3\">第三本</a></li></ul></body></html>",
+    "rule": "class.odd@tag.a.0@text",
+    "expected": [
+      "第一本",
+      "第三本"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」）：位置是段的一部分；段在各自子树内求（多段下钻依据见公开书源开发文档 §3），故位置逐父节点施加"
+  },
+  {
+    "name": "default:排除区间头部",
+    "kind": "html",
+    "input": "<ul><li class=\"odd\">A</li><li class=\"even\">B</li><li class=\"odd\">C</li><li class=\"odd\">D</li></ul>",
+    "rule": "class.odd.!0:1@text",
+    "expected": [
+      "D"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：! 是排除，序号用 : 隔开，0 是第 1 个，区间为闭区间）"
+  },
+  {
+    "name": "default:排除单个位置",
+    "kind": "html",
+    "input": "<ul><li class=\"odd\">A</li><li class=\"even\">B</li><li class=\"odd\">C</li><li class=\"odd\">D</li></ul>",
+    "rule": "class.odd.!1:1@text",
+    "expected": [
+      "A",
+      "D"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：! 是排除，后面的序号用 : 隔开，0 是第 1 个）"
+  },
+  {
+    "name": "default:排除区间负序号",
+    "kind": "html",
+    "input": "<ul><li class=\"odd\">A</li><li class=\"even\">B</li><li class=\"odd\">C</li><li class=\"odd\">D</li></ul>",
+    "rule": "class.odd.!-1:-1@text",
+    "expected": [
+      "A",
+      "C"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：负数为倒数序号，-1 最后一个，-2 倒数第 2 个）"
+  },
+  {
+    "name": "default:排除区间在标签段上",
+    "kind": "html",
+    "input": "<ul><li>A</li><li>B</li><li>C</li><li>D</li></ul>",
+    "rule": "tag.li.!0:1@text",
+    "expected": [
+      "C",
+      "D"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：! 是排除，有些位置不符合需要排除）"
+  },
+  {
+    "name": "default:排除区间负序号在标签段上",
+    "kind": "html",
+    "input": "<ul><li>A</li><li>B</li><li>C</li><li>D</li></ul>",
+    "rule": "tag.li.!-2:-1@text",
+    "expected": [
+      "A",
+      "B"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：负数为倒数序号）"
+  },
+  {
+    "name": "default:反序使列表倒置",
+    "kind": "html",
+    "input": "<html><body><ul><li class=\"odd\"><a href=\"/b/1\">第一本</a></li><li class=\"even\"><a href=\"/b/2\">第二本</a></li><li class=\"odd\"><a href=\"/b/3\">第三本</a></li></ul></body></html>",
+    "rule": "-class.odd@tag.a@text",
+    "expected": [
+      "第三本",
+      "第一本"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：获取列表的最前面加上负号 - 可以使列表倒置）"
+  },
+  {
+    "name": "default:反序对单段规则同样生效",
+    "kind": "html",
+    "input": "<html><body><ul><li class=\"odd\"><a href=\"/b/1\">第一本</a></li><li class=\"even\"><a href=\"/b/2\">第二本</a></li><li class=\"odd\"><a href=\"/b/3\">第三本</a></li></ul></body></html>",
+    "rule": "-tag.a@text",
+    "expected": [
+      "第三本",
+      "第二本",
+      "第一本"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：有些网站目录列表是倒的，前面加个负号可变为正的）"
+  },
+  {
+    "name": "default:反序与位置共存时先反序再取位置",
+    "kind": "html",
+    "input": "<html><body><ul><li class=\"odd\"><a href=\"/b/1\">第一本</a></li><li class=\"even\"><a href=\"/b/2\">第二本</a></li><li class=\"odd\"><a href=\"/b/3\">第三本</a></li></ul></body></html>",
+    "rule": "-class.odd.0@tag.a@text",
+    "expected": [
+      "第三本"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：先加负号倒置列表，第三段位置再在倒置后的列表上取值）"
+  },
+  {
+    "name": "default:反序与负位置共存",
+    "kind": "html",
+    "input": "<html><body><ul><li class=\"odd\"><a href=\"/b/1\">第一本</a></li><li class=\"even\"><a href=\"/b/2\">第二本</a></li><li class=\"odd\"><a href=\"/b/3\">第三本</a></li></ul></body></html>",
+    "rule": "-class.odd.-1@tag.a@text",
+    "expected": [
+      "第一本"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：列表先倒置，-1 再取倒置后列表的最后一个）"
+  },
+  {
+    "name": "default:反序标记在双at前缀规则上同样生效",
+    "kind": "html",
+    "input": "<ul><li class=\"odd\">A</li><li class=\"odd\">B</li></ul>",
+    "rule": "-@@class.odd@text",
+    "expected": [
+      "B",
+      "A"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：列表规则首字符 - 表示反序，@@ 是 Default 的前缀标记）"
+  },
+  {
+    "name": "default:访问器text取归一化文本",
+    "kind": "html",
+    "input": "<a href=\"/u\" title=\"t\">前<b>中</b>后</a>",
+    "rule": "tag.a@text",
+    "expected": [
+      "前中后"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：@ 的最后一段为获取内容，如 text 等）"
+  },
+  {
+    "name": "default:访问器ownText只看直接子级文本",
+    "kind": "html",
+    "input": "<a href=\"/u\" title=\"t\">前<b>中</b>后</a>",
+    "rule": "tag.a@ownText",
+    "expected": [
+      "前后"
+    ],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs：Element#ownText 只取元素直接子级的文本）"
+  },
+  {
+    "name": "default:访问器textNodes给出直接子文本节点列表",
+    "kind": "html",
+    "input": "<a href=\"/u\" title=\"t\">前<b>中</b>后</a>",
+    "rule": "tag.a@textNodes",
+    "expected": [
+      "前",
+      "后"
+    ],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs：Element#textNodes 返回直接子文本节点列表）"
+  },
+  {
+    "name": "default:访问器html为内部HTML",
+    "kind": "html",
+    "input": "<a href=\"/u\" title=\"t\">前<b>中</b>后</a>",
+    "rule": "tag.a@html",
+    "expected": [
+      "前<b>中</b>后"
+    ],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs：Element#html 返回元素内部 HTML）"
+  },
+  {
+    "name": "default:访问器all为外部HTML",
+    "kind": "html",
+    "input": "<a href=\"/u\" title=\"t\">前<b>中</b>后</a>",
+    "rule": "tag.a@all",
+    "expected": [
+      "<a href=\"/u\" title=\"t\">前<b>中</b>后</a>"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：@ 的最后一段为获取内容，如 all 等）"
+  },
+  {
+    "name": "default:访问器href取属性值",
+    "kind": "html",
+    "input": "<a href=\"/u\" title=\"t\">前<b>中</b>后</a>",
+    "rule": "tag.a@href",
+    "expected": [
+      "/u"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：@ 的最后一段为获取内容，如 href、src 等）"
+  },
+  {
+    "name": "default:访问器src在无src属性时产出空",
+    "kind": "html",
+    "input": "<a href=\"/u\" title=\"t\">前<b>中</b>后</a>",
+    "rule": "tag.a@src",
+    "expected": [],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：@ 的最后一段取内容，取不到的属性不产出值）"
+  },
+  {
+    "name": "default:访问器src取属性值",
+    "kind": "html",
+    "input": "<img src=\"/i.png\"><img src=\"/j.png\">",
+    "rule": "tag.img@src",
+    "expected": [
+      "/i.png",
+      "/j.png"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：@ 的最后一段为获取内容，如 src 等）"
+  },
+  {
+    "name": "default:多段下钻在各自子树内求且保留全部中间节点",
+    "kind": "html",
+    "input": "<div class=\"book\"><span class=\"name\">A</span></div><div class=\"book\"><span class=\"name\">B</span><span class=\"name\">C</span></div>",
+    "rule": "class.book@class.name@text",
+    "expected": [
+      "A",
+      "B",
+      "C"
+    ],
+    "basis": "书源规则公开说明与公开书源开发文档（ColorTxt「找书（Legado 书源）开发文档」§3：中间选择器须保留全部匹配节点，否则只会解析到第一个）"
+  },
+  {
+    "name": "default:多段下钻首段位置只取一个父节点",
+    "kind": "html",
+    "input": "<div class=\"book\"><span class=\"name\">A</span></div><div class=\"book\"><span class=\"name\">B</span><span class=\"name\">C</span></div>",
+    "rule": "class.book.0@class.name@text",
+    "expected": [
+      "A"
+    ],
+    "basis": "书源规则公开说明与公开书源开发文档（ColorTxt「找书（Legado 书源）开发文档」§3：多段是逐段嵌套下钻，首段位置限定父节点，后续段在其子树内取全部）"
+  },
+  {
+    "name": "default:多段下钻与朴素整页求值结果不同",
+    "kind": "html",
+    "input": "<div class=\"book\"><span class=\"name\">A</span></div><div class=\"book\"><span class=\"name\">B</span><span class=\"name\">C</span></div>",
+    "rule": "class.book.1@class.name@text",
+    "expected": [
+      "B",
+      "C"
+    ],
+    "basis": "书源规则公开说明与公开书源开发文档（ColorTxt「找书（Legado 书源）开发文档」§3：逐段嵌套下钻——第二段的 .name 只在前一段选中的 book 子树内取，故得到 B、C 而非整页的 A）"
+  },
+  {
+    "name": "default:多段下钻中间段位置逐子树施加",
+    "kind": "html",
+    "input": "<div class=\"o\"><div class=\"m\"><i>x</i><i>y</i></div><div class=\"m\"><i>z</i><i>w</i></div></div>",
+    "rule": "class.m.1@tag.i@text",
+    "expected": [
+      "z",
+      "w"
+    ],
+    "basis": "书源规则公开说明与公开书源开发文档（ColorTxt「找书（Legado 书源）开发文档」§3：多段逐段嵌套下钻——中间段的.位置选中第 2 个 .m，末段在该子树内取全部 i，故 z、w）"
+  },
+  {
+    "name": "default:多段下钻中间段负位置逐子树施加",
+    "kind": "html",
+    "input": "<div class=\"o\"><div class=\"m\"><i>x</i><i>y</i></div><div class=\"m\"><i>z</i><i>w</i></div></div>",
+    "rule": "class.m.-1@tag.i@text",
+    "expected": [
+      "z",
+      "w"
+    ],
+    "basis": "书源规则公开说明与公开书源开发文档（ColorTxt「找书（Legado 书源）开发文档」§3：多段逐段嵌套下钻，中间段 -1 取该段列表倒数第一个 .m，末段在其子树内取全部 i）"
+  },
+  {
+    "name": "default:多段下钻末段位置取唯一子树内的值",
+    "kind": "html",
+    "input": "<div class=\"book\"><span class=\"name\">A</span></div><div class=\"book\"><span class=\"name\">B</span></div>",
+    "rule": "class.book@class.name.0@text",
+    "expected": [
+      "A",
+      "B"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」）：位置是段的一部分；段在各自子树内求（多段下钻依据见公开书源开发文档 §3），故位置逐父节点施加"
+  },
+  {
+    "name": "default:多段下钻末段-1取唯一子树内的值",
+    "kind": "html",
+    "input": "<div class=\"book\"><span class=\"name\">A</span></div><div class=\"book\"><span class=\"name\">B</span></div>",
+    "rule": "class.book@class.name.-1@text",
+    "expected": [
+      "A",
+      "B"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」）：位置是段的一部分；段在各自子树内求（多段下钻依据见公开书源开发文档 §3），故位置逐父节点施加"
+  },
+  {
+    "name": "default:多段下钻不重复计同一节点",
+    "kind": "html",
+    "input": "<div class=\"a\"><div class=\"a\"><span class=\"t\">x</span></div></div>",
+    "rule": "class.a@class.a@class.t@text",
+    "expected": [
+      "x"
+    ],
+    "basis": "书源规则公开说明与公开书源开发文档（ColorTxt「找书（Legado 书源）开发文档」§3：子树查询包含起点自身，重叠命中同一节点时结果不重复）"
+  },
+  {
+    "name": "default:三段下钻目录形态",
+    "kind": "html",
+    "input": "<div id=\"list\"><dd><a href=\"/1\">一</a><a href=\"/2\">二</a></dd><dd><a href=\"/3\">三</a></dd></div>",
+    "rule": "id.list@tag.dd@tag.a@href",
+    "expected": [
+      "/1",
+      "/2",
+      "/3"
+    ],
+    "basis": "书源规则公开说明与公开书源开发文档（ColorTxt「找书（Legado 书源）开发文档」§3：id.list@dd@a 中间段须保留全部匹配节点，否则目录只会解析到第一个 dd）"
+  },
+  {
+    "name": "default:替换链正则与替换",
+    "kind": "html",
+    "input": "<div>a</div>",
+    "rule": "div@text##a##A",
+    "expected": [
+      "A"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：如需要正则替换在最后加上 ##正则表达式##替换内容）"
+  },
+  {
+    "name": "default:替换链相对地址补前缀",
+    "kind": "html",
+    "input": "<a href=\"/u\">x</a>",
+    "rule": "a@href##^##https://x.com",
+    "expected": [
+      "https://x.com/u"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：##正则表达式##替换内容，^ 锚点为相对地址补前缀的惯用写法）"
+  },
+  {
+    "name": "default:替换链分组引用",
+    "kind": "html",
+    "input": "<a href=\"/u\">x</a>",
+    "rule": "a@href##^(.*)$##https://x.com$1",
+    "expected": [
+      "https://x.com/u"
+    ],
+    "basis": "research.md R5 的正则语义差异表（替换串中 $1 为捕获组引用）"
+  },
+  {
+    "name": "default:替换内容为空时第二个双井号可省略",
+    "kind": "html",
+    "input": "<a href=\"/book/1.html\">x</a>",
+    "rule": "a@href##\\.html",
+    "expected": [
+      "/book/1"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：替换内容为空时，第二个 ## 可以省略）"
+  },
+  {
+    "name": "default:替换内容为空且保留第二个双井号",
+    "kind": "html",
+    "input": "<a href=\"/book/1.html\">x</a>",
+    "rule": "a@href##\\.html##",
+    "expected": [
+      "/book/1"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：替换内容为空时第二个 ## 可省略，故显式给出空替换内容等价）"
+  },
+  {
+    "name": "default:替换链逐值施加而非拼接后施加",
+    "kind": "html",
+    "input": "<a href=\"/1\">x</a><a href=\"/2\">y</a>",
+    "rule": "a@href##^##https://x.com",
+    "expected": [
+      "https://x.com/1",
+      "https://x.com/2"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：替换作用于取到的内容值，故每个地址各自被补前缀）"
+  },
+  {
+    "name": "default:裸CSS子组合符加href",
+    "kind": "html",
+    "input": "<div class=\"cls\"><a href=\"/1\">x</a></div>",
+    "rule": ".cls>a@href",
+    "expected": [
+      "/1"
+    ],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax：子组合符 > 与类选择器）"
+  },
+  {
+    "name": "default:裸CSS的nth-child伪类",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li><li>c</li></ul>",
+    "rule": "li:nth-child(2)@text",
+    "expected": [
+      "b"
+    ],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax：:nth-child(n) 为第 n 个子元素，1 基）"
+  },
+  {
+    "name": "default:裸CSS的eq伪类",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li><li>c</li></ul>",
+    "rule": "li:eq(1)@text",
+    "expected": [
+      "b"
+    ],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax：:eq(n) 按 0 基索引取第 n 个）"
+  },
+  {
+    "name": "default:裸CSS类加子标签",
+    "kind": "html",
+    "input": "<ul><li class=\"i\"><a href=\"/1\">一</a></li><li class=\"i\"><a href=\"/2\">二</a></li></ul>",
+    "rule": "li.i>a@text",
+    "expected": [
+      "一",
+      "二"
+    ],
+    "basis": "书源规则公开说明与公开书源开发文档（ColorTxt「找书（Legado 书源）开发文档」§3：裸 CSS 写法与 class./tag. 前缀同归 default 引擎）"
+  },
+  {
+    "name": "default:裸CSS的not伪类",
+    "kind": "html",
+    "input": "<ul><li class=\"i\">a</li><li>b</li><li class=\"i\">c</li></ul>",
+    "rule": "li:not(.i)@text",
+    "expected": [
+      "b"
+    ],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax：:not(selector) 排除匹配项）"
+  },
+  {
+    "name": "default:裸CSS尾点号索引",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li><li>c</li></ul>",
+    "rule": "li.0@text",
+    "expected": [
+      "a"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：第三段是位置，正着数从 0 开始）"
+  },
+  {
+    "name": "default:裸CSS尾点号负索引",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li><li>c</li></ul>",
+    "rule": "li.-1@text",
+    "expected": [
+      "c"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：-1 为倒数第一个）"
+  },
+  {
+    "name": "default:裸CSS方括号索引",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li><li>c</li></ul>",
+    "rule": "li[0]@text",
+    "expected": [
+      "a"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：数组写法 tag.li[0:10]）"
+  },
+  {
+    "name": "default:裸CSS方括号负索引",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li><li>c</li></ul>",
+    "rule": "li[-1]@text",
+    "expected": [
+      "c"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：-1 为倒数第一个）"
+  },
+  {
+    "name": "default:裸CSS方括号区间",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li><li>c</li><li>d</li></ul>",
+    "rule": "li[1:2]@text",
+    "expected": [
+      "b",
+      "c"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：数组写法 0:10 取区间，端点为闭区间）"
+  },
+  {
+    "name": "default:裸CSS方括号排除",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li><li>c</li></ul>",
+    "rule": "li[!0:0]@text",
+    "expected": [
+      "b",
+      "c"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：! 是排除，序号用 : 隔开）"
+  },
+  {
+    "name": "default:文档原文示例多段形态",
+    "kind": "html",
+    "input": "<html><body><ul><li class=\"odd\"><a href=\"/b/1\">第一本</a></li><li class=\"even\"><a href=\"/b/2\">第二本</a></li><li class=\"odd\"><a href=\"/b/3\">第三本</a></li></ul></body></html>",
+    "rule": "class.odd.0@tag.a.0@text",
+    "expected": [
+      "第一本"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」的原文示例：class.odd.0@tag.a.0@text）"
+  },
+  {
+    "name": "default:双at前缀多段取href",
+    "kind": "html",
+    "input": "<html><body><ul><li class=\"odd\"><a href=\"/b/1\">第一本</a></li><li class=\"even\"><a href=\"/b/2\">第二本</a></li><li class=\"odd\"><a href=\"/b/3\">第三本</a></li></ul></body></html>",
+    "rule": "@@class.odd@tag.a@href",
+    "expected": [
+      "/b/1",
+      "/b/3"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：Default 规则需要以 @@ 开头，@@ 是前缀标记不改变段的语义）"
+  },
+  {
+    "name": "default:双at前缀裸CSS同样生效",
+    "kind": "html",
+    "input": "<div class=\"o\"><a href=\"/h\">t</a></div>",
+    "rule": "@@.o>a@href",
+    "expected": [
+      "/h"
+    ],
+    "basis": "书源规则公开说明与公开书源开发文档（ColorTxt「找书（Legado 书源）开发文档」§3：裸 CSS 写法亦归 default 引擎，@@ 为该引擎的前缀标记）"
+  },
+  {
+    "name": "default:类名前缀带空格为后代组合符",
+    "kind": "html",
+    "input": "<div class=\"a\"><b>内层</b></div>",
+    "rule": "class.a b@text",
+    "expected": [
+      "内层"
+    ],
+    "basis": "公开书源开发文档（ColorTxt「找书（Legado 书源）开发文档」§3：Default 对齐 Jsoup 选择器语义，空格为后代组合符）"
+  },
+  {
+    "name": "default:无匹配产出空列表",
+    "kind": "html",
+    "input": "<html><body><ul><li class=\"odd\"><a href=\"/b/1\">第一本</a></li></ul></body></html>",
+    "rule": "class.missing@tag.a@text",
+    "expected": [],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：规则按类型与名称匹配，无匹配元素时不产出值）"
+  },
+  {
+    "name": "default:末段无匹配产出空列表",
+    "kind": "html",
+    "input": "<html><body><ul><li class=\"odd\"><a href=\"/b/1\">第一本</a></li></ul></body></html>",
+    "rule": "class.odd@tag.missing@text",
+    "expected": [],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：每段按名称匹配，末段无匹配元素时不产出值）"
+  },
+  {
+    "name": "default:根上children段取文档根直接子元素文本",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li></ul>",
+    "rule": "children@text",
+    "expected": [
+      "ab"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」：children 获取所有子标签，不需要第二段和第三段）"
+  },
+  {
+    "name": "default:attr访问器与css路径一致",
+    "kind": "html",
+    "input": "<a href=\"/u\" data-id=\"7\">文字</a>",
+    "rule": "a@attr(data-id)",
+    "expected": [
+      "7"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」）：末段为获取内容，访问器清单与 @css: 后缀共用一份（含 attr(名称)）"
+  },
+  {
+    "name": "default:末段位置逐父节点施加",
+    "kind": "html",
+    "input": "<div class=\"book\"><span class=\"name\">A</span><span class=\"name\">B</span></div><div class=\"book\"><span class=\"name\">C</span><span class=\"name\">D</span></div>",
+    "rule": "class.book@class.name.0@text",
+    "expected": [
+      "A",
+      "C"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」）：位置是段的一部分，而段在各自子树内求（多段下钻依据见公开书源开发文档 §3）"
+  },
+  {
+    "name": "default:末段负位置逐父节点施加",
+    "kind": "html",
+    "input": "<div class=\"book\"><span class=\"name\">A</span><span class=\"name\">B</span></div><div class=\"book\"><span class=\"name\">C</span><span class=\"name\">D</span></div>",
+    "rule": "class.book@class.name.-1@text",
+    "expected": [
+      "B",
+      "D"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」）：-1 为倒数第一个，且位置逐父节点施加（同上）"
+  },
+  {
+    "name": "default:首段位置与末段位置行为对称",
+    "kind": "html",
+    "input": "<div class=\"book\"><span class=\"name\">A</span><span class=\"name\">B</span></div><div class=\"book\"><span class=\"name\">C</span><span class=\"name\">D</span></div>",
+    "rule": "class.book.0@class.name@text",
+    "expected": [
+      "A",
+      "B"
+    ],
+    "basis": "书源规则公开说明（《Legado 书源规则说明》§1「JSOUP之Default」）：位置是段的一部分，逐段下钻时逐父节点施加（公开书源开发文档 §3 的中间段差旅清单）"
   }
 ]

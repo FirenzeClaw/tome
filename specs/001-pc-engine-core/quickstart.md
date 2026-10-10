@@ -16,9 +16,49 @@ S1 的产物是**无界面的引擎库 + 命令行验证器**，不是用户可�
 
 ## 工具链
 
-- Rust `1.98.0`（stable-**x86_64-pc-windows-gnu**，本机）/ 三平台目标 Win10+/mac12+/现代 Linux
-- 构建：`cargo build`；测试：`cargo test`；Lint：`cargo clippy -- -D warnings`；格式：`cargo fmt --check`
+- Rust `1.99.0`（stable-**x86_64-pc-windows-gnu**，本机，由 `rust-toolchain.toml` 钉版 channel=stable）/ 三平台目标 Win10+/mac12+/现代 Linux。MSRV 声明 `rust-version = "1.98"` 尚未经 1.98 实测
+- 构建：`cargo build --workspace`；测试：`cargo test --workspace`；Lint：`cargo clippy --workspace --all-targets -- -D warnings`；格式：`cargo fmt --all -- --check`；文档：`cargo doc --no-deps --workspace`（零警告是 T099 的门）
 - **Windows 目标必须用 `x86_64-pc-windows-gnu`**（rquickjs 对 msvc 是 experimental）
+
+## 五分钟跑通（用干净数据目录）
+
+以下命令逐条实跑通过（T098 验证，2026-10-10）。关键是**每条都带 `--data-dir`**
+指向临时目录——默认路径会写用户真实数据目录，验证时不该污染它。
+
+```bash
+DD=/tmp/tome-qs          # 干净数据目录（首次运行时为空）
+
+# 1. 导入一份书源（自备 JSON；格式见 spec.md 的书源字段说明）
+cargo run -p tome-cli -- --data-dir $DD source import my-source.json
+
+# 2. 确认已落注册表
+cargo run -p tome-cli -- --data-dir $DD source list
+
+# 3. 搜索（需要能访问书源声明的站点）
+cargo run -p tome-cli -- --data-dir $DD search <source-id> "关键词"
+
+# 4. 目录与正文
+cargo run -p tome-cli -- --data-dir $DD toc <source-id> <book-url>
+cargo run -p tome-cli -- --data-dir $DD content <source-id> <chapter-url>
+```
+
+**不想联网也能验证全链路**：先 `--record <dir>` 录一次，之后 `--replay <dir>
+--offline` 重放。回放是**真离线**——把站点关掉再跑，结果照常来自录制。
+
+## 差分测试入口（兼容性门）
+
+```bash
+# 合成语料（入仓库，覆盖 FR-005b 能力清单）——不达标退出码 1
+cargo run -p tome-cli -- verify --corpus tests/corpus/
+
+# 上游参考运行器：只黑盒运行，绝不读源码（详见 tools/ref-runner/CLEANROOM.md）
+bash tools/ref-runner/ref-runner.sh probe
+```
+
+真实书源的对照数据**不入仓库**（`.gitignore` 排除 `testdata/captures/`）——
+干净检出下该目录不存在，需要时按 `AGENTS.md`「差分测试与对照数据」一节的
+`--ignored` 测试重新生成。
+
 
 ## 硬性护栏（违反即阻断合并）
 
@@ -43,11 +83,19 @@ tome/
 │   ├── tome-store/   # SQLite + 迁移 + DAO + Pack 容器 + 图片缓存 + 配置 TOML
 │   ├── tome-source/  # 书源管线：搜索/发现/详情/目录/正文/净化/换源/源检查
 │   ├── tome-local/   # TXT/EPUB/MOBI 解析 + 库根扫描
-│   └── tome-cli/     # CLI 验证器（差分测试入口）
-└── tests/
-    ├── corpus/       # 合成差分语料（入仓库，覆盖 FR-005b 清单）
-    └── fixtures/     # 测试夹具（HTML/JSON/EPUB/TXT 样本）
+│   ├── tome-cli/     # CLI 验证器（差分测试入口）
+│   └── tome-reader/  # [S2 排版层] 骨架已在，实现由 S2 规格推进——引擎不依赖它
+├── tests/
+│   └── corpus/       # 合成差分语料（入仓库，覆盖 FR-005b 清单）
+├── testdata/
+│   ├── baselines/    # 回归基线指纹（入仓库，不含第三方内容）
+│   └── captures/     # 对照数据与合成站点（**gitignore**，干净检出下不存在）
+└── tools/ref-runner/ # 上游参考运行器（只黑盒运行，见其 CLEANROOM.md）
 ```
+
+各 crate 另有自己的 `tests/` 目录（集成测试就地放）；测试夹具随用它的
+crate 走，没有全局 `tests/fixtures/`。
+
 
 ## 实现顺序（依赖图自底向上）
 

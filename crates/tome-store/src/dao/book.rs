@@ -21,7 +21,7 @@
 //! 仍未用 `sqlx` 风格的批量插入语法：SQLite 的 `VALUES (...),(...)` 有参数
 //! 上限（默认 999，编译期常量），5 万章要分 200 批，反而比预编译循环更绕。
 
-use rusqlite::{Connection, Row};
+use rusqlite::Row;
 
 use tome_core::{Book, BookOrigin, Chapter, LibraryRoot};
 

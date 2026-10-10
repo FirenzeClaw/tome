@@ -44,7 +44,7 @@ use crate::error::{from_io, StoreError};
 /// 的主键分量，但它让"没有 domain"与"domain 为空串"无法区分，也让后续真要
 /// 落多 domain 时无法分辨哪些是占位。用显式标记 `script`（表示"由脚本
 /// `setCookie` 写入、无 HTTP domain 语义"）留出区分空间。
-const SCRIPT_COOKIE_DOMAIN: &str = "script";
+pub const SCRIPT_COOKIE_DOMAIN: &str = "script";
 
 /// 真实存储支撑的 [`StoreHost`]。
 ///

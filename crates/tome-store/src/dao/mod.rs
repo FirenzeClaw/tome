@@ -17,4 +17,6 @@ pub mod source;
 pub mod trace;
 
 pub use book::BookDao;
+pub use misc::MiscDao;
 pub use source::SourceDao;
+pub use trace::TraceDao;

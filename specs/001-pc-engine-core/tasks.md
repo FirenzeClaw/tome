@@ -397,24 +397,24 @@
 
 ### 错误本地化 + CLI 完整命令面 + 无头验证 + CI 收口
 
-- [ ] T092 [US6] tome-core + tome-cli：ErrorKind → 中英文案映射面（引擎只产标识，文案在上层/CLI 资源）于 `crates/tome-cli/src/i18n.rs`（FR-044/SC-016）
-  - [ ] 引擎错误 100% 可映射中英文案；无单语言可读错误
-- [ ] T093 [US6] tome-cli：补齐命令面（`info`/`toc`/`content`/`run --trace`/`local`/`data`/`source check`/`source list --group/--enabled`/`data delete`/搜索关键词管理）+ 全局 flag（`--format human`/`--data-dir`/`--config`/`--offline`）于 `crates/tome-cli/src/`（contracts/cli.md，FR-001 分组启停 + FR-018 关键词管理 + FR-035 删除入口）
-  - [ ] `run --trace` 输出规则求值轨迹（逐步中间值，FR-037）
-  - [ ] 书源分组与启停可经 CLI 操作；搜索关键词可收藏与复用；`data delete` 可完整删除用户数据
-- [ ] T094 [US6] 无头运行验证：在无图形环境（无窗口系统）下经 CLI 调用引擎全部能力于 `crates/tome-cli/tests/headless.rs`（FR-036/SC-011）
-  - [ ] 无图形环境下全能力可调且无图形相关失败（100%）
-- [ ] T095 [US6] CI：三平台 release 产物 + 体积基线监控于 `.github/workflows/release.yml`（SC-009/SC-010）
-  - [ ] 三平台产物可运行；体积基线入 CI 监控
-- [ ] T096 [US6] CI：依赖图断言——`cargo build -p tome-core` 在无上层 crate 时独立通过；`tome-js`/`tome-net`/`tome-store`/`tome-rule` 互不依赖（星型无环）于 `.github/workflows/ci.yml`（FR-039/宪章 IV）
-  - [ ] 手动引入反向依赖时 CI 变红（验证断言有效）
+- [x] T092 [US6] tome-core + tome-cli：ErrorKind → 中英文案映射面（引擎只产标识，文案在上层/CLI 资源）于 `crates/tome-cli/src/i18n.rs`（FR-044/SC-016）
+  - [x] 引擎错误 100% 可映射中英文案；无单语言可读错误
+- [x] T093 [US6] tome-cli：补齐命令面（`info`/`toc`/`content`/`run --trace`/`local`/`data`/`source check`/`source list --group/--enabled`/`data delete`/搜索关键词管理）+ 全局 flag（`--format human`/`--data-dir`/`--config`/`--offline`）于 `crates/tome-cli/src/`（contracts/cli.md，FR-001 分组启停 + FR-018 关键词管理 + FR-035 删除入口）
+  - [x] `run --trace` 输出规则求值轨迹（逐步中间值，FR-037）
+  - [x] 书源分组与启停可经 CLI 操作；搜索关键词可收藏与复用；`data delete` 可完整删除用户数据
+- [x] T094 [US6] 无头运行验证：在无图形环境（无窗口系统）下经 CLI 调用引擎全部能力于 `crates/tome-cli/tests/headless.rs`（FR-036/SC-011）
+  - [x] 无图形环境下全能力可调且无图形相关失败（100%）
+- [x] T095 [US6] CI：三平台 release 产物 + 体积基线监控于 `.github/workflows/release.yml`（SC-009/SC-010）
+  - [x] 三平台产物可运行；体积基线入 CI 监控
+- [x] T096 [US6] CI：依赖图断言——`cargo build -p tome-core` 在无上层 crate 时独立通过；`tome-js`/`tome-net`/`tome-store`/`tome-rule` 互不依赖（星型无环）于 `.github/workflows/ci.yml`（FR-039/宪章 IV）
+  - [x] 手动引入反向依赖时 CI 变红（验证断言有效）
 
 > **⛔ 检查点：S1-6 之后（S1 完成）**
-> - [ ] SC-002b 真实书源回归基线已记录
-> - [ ] 三平台 CI 产物；体积基线在监控
-> - [ ] spec 全部 SC 可度量项通过；宪章合规复检通过
-> - [ ] 人工审查 + 干净室轴审查通过
-> - [ ] 上游参考运行器接线的干净室约定已成文并执行（运行器怎么跑 / 产物落盘位置 / 核对人）
+> - [x] SC-002b 真实书源回归基线已记录
+> - [x] 三平台 CI 产物；体积基线在监控
+> - [x] spec 全部 SC 可度量项通过；宪章合规复检通过
+> - [x] 人工审查 + 干净室轴审查通过
+> - [x] 上游参考运行器接线的干净室约定已成文并执行（运行器怎么跑 / 产物落盘位置 / 核对人）
 
 ---
 

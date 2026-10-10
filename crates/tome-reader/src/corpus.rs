@@ -217,34 +217,61 @@ pub enum CorpusError {
 }
 
 impl fmt::Display for CorpusError {
+    /// ## 为什么这里也是**标识 + 诊断**而不是中文文案
+    ///
+    /// T004 初版在这里写了中文提示（"语料格式错误：…""用例 `x` 的 basis 为空…"），
+    /// 随后 T003 的 FR-058 扫描在 `cargo test --workspace` 下把它抓了出来。
+    /// **扫描是对的、初版是错的**——FR-058 管的是"引擎产出的错误"，而
+    /// `CorpusError` 经 `tome_reader::corpus` 的公开 API 产出，属引擎产物。
+    ///
+    /// "它是构建期/测试期工具不是运行时错误"这个辩解不成立：
+    /// 分类是**上游要按它分支**的契约（哪个文件、哪条用例、哪条校验失败），
+    /// 而文案是**给人看的**。把两者混在一句中文里，等于让上游无法稳定分支。
+    ///
+    /// 故改为与 [`crate::error`] 同构：**稳定标识在前、诊断细节在后**。
+    /// 标识是可 grep 的契约，细节（路径、用例名、serde 报错原文）供人定位。
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Parse { source, detail } => {
-                let where_ = source
-                    .as_ref()
-                    .map_or_else(String::new, |path| format!("{}：", path.display()));
-                write!(formatter, "{where_}语料格式错误：{detail}")
-            }
-            Self::DuplicateName { name } => {
-                write!(
+            Self::Parse { source, detail } => match source {
+                Some(path) => write!(
                     formatter,
-                    "语料里有重复的用例名 `{name}`——重名会让失败报告无从定位"
-                )
+                    "error.reader.corpus.parse: {}: {detail}",
+                    path.display()
+                ),
+                None => write!(formatter, "error.reader.corpus.parse: {detail}"),
+            },
+            Self::DuplicateName { name } => {
+                write!(formatter, "error.reader.corpus.duplicate_name: {name}")
             }
             Self::EmptyBasis { name } => {
-                write!(formatter, "用例 `{name}` 的 basis 为空——期望值依据必须成文")
+                write!(formatter, "error.reader.corpus.empty_basis: {name}")
             }
             Self::MissingCategoryPrefix { name } => write!(
                 formatter,
-                "用例 `{name}` 缺类别前缀——名字须形如 `kinsoku:xxx`（分类统计按它分组）"
+                "error.reader.corpus.missing_category_prefix: {name}"
             ),
-            Self::EmptyDirectory { path } => {
-                write!(
-                    formatter,
-                    "语料目录 {} 下没有任何 .json 文件",
-                    path.display()
-                )
-            }
+            Self::EmptyDirectory { path } => write!(
+                formatter,
+                "error.reader.corpus.empty_directory: {}",
+                path.display()
+            ),
+        }
+    }
+}
+
+impl CorpusError {
+    /// 本错误的**可本地化标识**（稳定契约，供上层查文案表）。
+    ///
+    /// 与 [`crate::error::ReaderError::message_id`] 同一约定：标识是契约，
+    /// 措辞不是——改措辞即破坏性变更。
+    #[must_use]
+    pub fn message_id(&self) -> &'static str {
+        match self {
+            Self::Parse { .. } => "error.reader.corpus.parse",
+            Self::DuplicateName { .. } => "error.reader.corpus.duplicate_name",
+            Self::EmptyBasis { .. } => "error.reader.corpus.empty_basis",
+            Self::MissingCategoryPrefix { .. } => "error.reader.corpus.missing_category_prefix",
+            Self::EmptyDirectory { .. } => "error.reader.corpus.empty_directory",
         }
     }
 }

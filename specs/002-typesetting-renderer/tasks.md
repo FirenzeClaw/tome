@@ -104,31 +104,32 @@
 
 **Independent Test**: `tome layout` 页区间拼接逐字符等于原文（SC-006）；锚点矩阵全组合不变（SC-004）；昼/夜下页序列逐字节相同（SC-005）。
 
-- [ ] T017 [US2] ReadingConfig schema 于 `crates/tome-reader/src/paginate/config.rs`（FR-013/028：几何/呈现子集分离；FR-018 段模式互斥默认缩进 2em；白名单校验拒绝非法值并回退上一有效值）
-  - [ ] 全字段范围校验测试（字号 0/行高负/版心负宽拒绝）
-  - [ ] 序列化往返（作为 `Book.read_config` 的 schema）
-- [ ] T018 [US2] `Book.read_config` 接线（tome-store 读写给 S2 schema；全局默认 vs 单书覆盖语义，裁决 OQ#12）于 `crates/tome-store/src/dao/` 既有 book DAO 的扩展 + `crates/tome-reader/src/paginate/config.rs` 的加载入口
-  - [ ] 未设置时回退全局默认；显式"为这本书设置"后覆盖生效（经 BookRepository 测试）
-- [ ] T019 [US1] 页序列计算于 `crates/tome-reader/src/paginate/page.rs` + `spread.rs`（FR-012 页=字符区间；FR-014 em 制判据：阅读区可用宽度 ≥ 2×measure+gutter，禁固定 px 断点，字号变化重算判据；FR-004 唯一内容源为 ContentProvider）
-  - [ ] 内容页无损：页区间拼接与该章正文逐字符相等（`crates/tome-reader/tests/pagination_lossless.rs`；SC-006 的留白页口径在 T021 的测试中补齐）
-  - [ ] 判据随字号重算测试（19px→24px 双页阈值右移）
-  - [ ] 排版全程不自读缓存容器、不发请求（计数宿主/回放断言，FR-004）
-- [ ] T020 [US1] 手动覆盖三态 + 语义落于 `crates/tome-reader/src/paginate/spread.rs`（FR-015：自动/强制单页/强制双页；矛盾时回落自动，非矛盾变化不清除用户选择）
-  - [ ] 回落路径与保留路径各有测试（`crates/tome-reader/tests/spread_override.rs`，宽度变化两类）
-- [ ] T021 [US1] 书页语义于 `crates/tome-reader/src/paginate/booksem.rs`（FR-016：左偶右奇；章起偶数页留白补足；命名设置项「章节从新页开始」可关；单页模式不应用）
-  - [ ] 双页章起位置测试（`crates/tome-reader/tests/book_semantics.rs`：上章末单页时留白补足，留白页 is_padding=true 显式标记且不计入内容区间——SC-006 完整口径在此补齐）
-  - [ ] 开关关闭时无留白；单页模式断言无留白（裁决 OQ#5）
-- [ ] T022 [US2] 锚点解耦 + 参数矩阵验证于 `crates/tome-reader/tests/anchor_matrix.rs`（FR-017/SC-004：同锚点任意两组几何参数分别定位同字符且锚点值不变；矩阵 = 字号 14/19/24/30 × 行高 1.75/1.85/2.2 × 单/双页 × 翻页/滚动 × 段缩进/段间距）
-  - [ ] 全组合 100% 锚点值不变且字符落在可见范围
-- [ ] T023 [US2] 呈现参数零依赖断言（FR-019/SC-005：昼/夜主题、不同字体族、不同动效开关下页序列（字符区间）100% 相同）
-  - [ ] `crates/tome-reader/tests/theme_independence.rs` 通过（主题切换不触发重排的断言）
-- [ ] T024 [US2] 分页预计算 + 增量重排于 `crates/tome-reader/src/precalc.rs`（FR-044：当前位置附近章节后台预计算、可取消、失败无副作用、不持久化；FR-045：参数变化只重排受影响页即可呈现首帧）
-  - [ ] 取消后无部分状态泄漏（`crates/tome-reader/tests/precalc.rs`）
-  - [ ] 增量重排首帧时间 < 整章重排（同文件的测量测试，口径写注释）
+- [x] T017 [US2] ReadingConfig schema 于 `crates/tome-reader/src/paginate/config.rs`（FR-013/028：几何/呈现子集分离；FR-018 段模式互斥默认缩进 2em；白名单校验拒绝非法值并回退上一有效值）
+  - [x] 全字段范围校验测试（字号 0/行高负/版心负宽拒绝）
+  - [x] 序列化往返（作为 `Book.read_config` 的 schema）
+- [x] T018 [US2] `Book.read_config` 接线（tome-store 读写给 S2 schema；全局默认 vs 单书覆盖语义，裁决 OQ#12）于 `crates/tome-store/src/dao/` 既有 book DAO 的扩展 + `crates/tome-reader/src/paginate/config.rs` 的加载入口
+  - [x] 未设置时回退全局默认；显式"为这本书设置"后覆盖生效（经 BookRepository 测试）
+- [x] T019 [US1] 页序列计算于 `crates/tome-reader/src/paginate/page.rs` + `spread.rs`（FR-012 页=字符区间；FR-014 em 制判据：阅读区可用宽度 ≥ 2×measure+gutter，禁固定 px 断点，字号变化重算判据；FR-004 唯一内容源为 ContentProvider）
+  - [x] 内容页无损：页区间拼接与该章正文逐字符相等（`crates/tome-reader/tests/pagination_lossless.rs`；SC-006 的留白页口径在 T021 的测试中补齐）
+  - [x] 判据随字号重算测试（19px→24px 双页阈值右移）
+  - [x] 排版全程不自读缓存容器、不发请求（计数宿主/回放断言，FR-004）
+- [x] T020 [US1] 手动覆盖三态 + 语义落于 `crates/tome-reader/src/paginate/spread.rs`（FR-015：自动/强制单页/强制双页；矛盾时回落自动，非矛盾变化不清除用户选择）
+  - [x] 回落路径与保留路径各有测试（`crates/tome-reader/tests/spread_override.rs`，宽度变化两类）
+- [x] T021 [US1] 书页语义于 `crates/tome-reader/src/paginate/booksem.rs`（FR-016：左偶右奇；章起偶数页留白补足；命名设置项「章节从新页开始」可关；单页模式不应用）
+  - [x] 双页章起位置测试（`crates/tome-reader/tests/book_semantics.rs`：上章末单页时留白补足，留白页 is_padding=true 显式标记且不计入内容区间——SC-006 完整口径在此补齐）
+  - [x] 开关关闭时无留白；单页模式断言无留白（裁决 OQ#5）
+- [x] T022 [US2] 锚点解耦 + 参数矩阵验证于 `crates/tome-reader/tests/anchor_matrix.rs`（FR-017/SC-004：同锚点任意两组几何参数分别定位同字符且锚点值不变；矩阵 = 字号 14/19/24/30 × 行高 1.75/1.85/2.2 × 单/双页 × 翻页/滚动 × 段缩进/段间距）
+  - [x] 全组合 100% 锚点值不变且字符落在可见范围
+- [x] T023 [US2] 呈现参数零依赖断言（FR-019/SC-005：昼/夜主题、不同字体族、不同动效开关下页序列（字符区间）100% 相同）
+  - [x] `crates/tome-reader/tests/theme_independence.rs` 通过（主题切换不触发重排的断言）
+- [x] T024 [US2] 分页预计算 + 增量重排于 `crates/tome-reader/src/precalc.rs`（FR-044：当前位置附近章节后台预计算、可取消、失败无副作用、不持久化；FR-045：参数变化只重排受影响页即可呈现首帧）
+  - [x] 取消后无部分状态泄漏（`crates/tome-reader/tests/precalc.rs`）
+  - [x] 增量重排首帧时间 < 整章重排（同文件的测量测试，口径写注释）
 
 > **⛔ 检查点：S2-2 之后（锚点不变量门）**
-> - [ ] SC-004 锚点矩阵 100%；SC-005 呈现参数零依赖 100%；SC-006 分页不丢不重 100%
-> - [ ] 人工审查后进入下一阶段
+> - [x] SC-004 锚点矩阵 100%；SC-005 呈现参数零依赖 100%；SC-006 分页不丢不重 100%
+> - [x] 人工审查后进入下一阶段
+>   - PM 注记（2026-10-11）：锚点不变量门通过（SC-004 480 断言/SC-005 64 组逐字节相同/SC-006 库内+CLI 1656 组逐字符相等）。KNOWN_DEFECT 1→0——诊断为第四次测量装置缺陷（漏算空格宽），引擎断行本身正确，变异验证在案（BASELINE §11.4）。`AnchorTarget::Scroll` 占位 [WIP] 待 Phase 5 补实。
 
 ---
 

@@ -13,10 +13,12 @@
 
 pub mod book;
 pub mod misc;
+pub mod read_record;
 pub mod source;
 pub mod trace;
 
 pub use book::BookDao;
 pub use misc::MiscDao;
+pub use read_record::{DailyTotals, ReadRecordStats, ReadTotals};
 pub use source::SourceDao;
 pub use trace::TraceDao;

@@ -298,7 +298,6 @@ fn real_files_are_not_falsely_flagged_as_drm() {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // T077：EPUB 真实文件验证
 // ---------------------------------------------------------------------------
@@ -339,10 +338,7 @@ fn real_epub_yields_metadata_toc_and_resources() {
     }
 
     // 内嵌资源（FR-021 明确要求解析）。
-    assert!(
-        !parsed.resources.is_empty(),
-        "应解析出内嵌资源清单"
-    );
+    assert!(!parsed.resources.is_empty(), "应解析出内嵌资源清单");
 
     // 正文：按目录里的条目名读一章，必须是可读文本（不含标签）。
     let first = &parsed.toc[0];

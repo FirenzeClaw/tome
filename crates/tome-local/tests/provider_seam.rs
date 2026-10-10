@@ -30,7 +30,6 @@
 
 #![expect(
     clippy::expect_used,
-    clippy::panic,
     reason = "测试辅助函数无法就绪时应让所属测试立即失败，错误传播只会加噪音"
 )]
 
@@ -68,11 +67,7 @@ fn source_for(path: &Path) -> Arc<LocalSource> {
         &rules,
     );
     let toc = tome_local::txt::to_chapters(&parsed.toc, 1);
-    Arc::new(LocalSource::new(
-        path.to_path_buf(),
-        LocalFormat::Txt,
-        toc,
-    ))
+    Arc::new(LocalSource::new(path.to_path_buf(), LocalFormat::Txt, toc))
 }
 
 /// 一个用固定替换规则做净化的 cleaner。
@@ -130,7 +125,11 @@ fn provider_with(dir: &Path, content: &str, cleaner: Arc<dyn Cleaner>) -> LocalC
 #[test]
 fn toc_is_available_through_the_seam_trait() {
     let dir = tempfile::tempdir().expect("临时目录");
-    let provider = provider_with(dir.path(), SAMPLE, Arc::new(tome_local::provider::NoCleaner));
+    let provider = provider_with(
+        dir.path(),
+        SAMPLE,
+        Arc::new(tome_local::provider::NoCleaner),
+    );
 
     // 通过 `dyn ContentProvider` 调用——这正是上层看到的形态。
     let as_seam: &dyn ContentProvider = &provider;
@@ -155,18 +154,13 @@ fn cleaning_is_applied_under_the_seam() {
         }),
     );
 
-    let content = provider
-        .chapter_content(&sample_book(), 0)
-        .expect("取正文");
+    let content = provider.chapter_content(&sample_book(), 0).expect("取正文");
     assert!(
         content.content.contains("已净化"),
         "净化规则应生效，实际 {:?}",
         content.content
     );
-    assert!(
-        !content.content.contains("甲甲甲"),
-        "被替换的原文不该残留"
-    );
+    assert!(!content.content.contains("甲甲甲"), "被替换的原文不该残留");
 }
 
 /// 两个 adapter 的净化**配置相同则行为相同**——本地侧的可验证部分。
@@ -180,7 +174,11 @@ fn the_same_cleaning_config_produces_the_same_shape() {
     let provider = provider_with(dir.path(), SAMPLE, Arc::clone(&config) as Arc<dyn Cleaner>);
 
     let expected: Vec<ChapterContent> = (0..3)
-        .map(|index| provider.chapter_content(&sample_book(), index).expect("取正文"))
+        .map(|index| {
+            provider
+                .chapter_content(&sample_book(), index)
+                .expect("取正文")
+        })
         .collect();
 
     // 每一章都应经同一份配置处理：出现替换标记、且形态一致（index 与 title 对应）。
@@ -198,15 +196,23 @@ fn the_same_cleaning_config_produces_the_same_shape() {
 #[test]
 fn anchor_resolution_is_stable_and_layout_independent() {
     let dir = tempfile::tempdir().expect("临时目录");
-    let provider = provider_with(dir.path(), SAMPLE, Arc::new(tome_local::provider::NoCleaner));
+    let provider = provider_with(
+        dir.path(),
+        SAMPLE,
+        Arc::new(tome_local::provider::NoCleaner),
+    );
 
     let query = AnchorQuery {
         chapter_index: 1,
         char_offset: 0,
         anchor_text: Some("乙乙乙".to_string()),
     };
-    let first = provider.resolve_anchor(&sample_book(), &query).expect("解析");
-    let second = provider.resolve_anchor(&sample_book(), &query).expect("解析");
+    let first = provider
+        .resolve_anchor(&sample_book(), &query)
+        .expect("解析");
+    let second = provider
+        .resolve_anchor(&sample_book(), &query)
+        .expect("解析");
     assert_eq!(first, second, "同一查询必须给出同一锚点（无隐藏状态）");
     assert_eq!(first.0, 1, "章节序号应保持");
 
@@ -220,7 +226,11 @@ fn anchor_resolution_is_stable_and_layout_independent() {
 #[test]
 fn anchor_offsets_are_character_based() {
     let dir = tempfile::tempdir().expect("临时目录");
-    let provider = provider_with(dir.path(), SAMPLE, Arc::new(tome_local::provider::NoCleaner));
+    let provider = provider_with(
+        dir.path(),
+        SAMPLE,
+        Arc::new(tome_local::provider::NoCleaner),
+    );
     let content = provider.chapter_content(&sample_book(), 0).expect("取正文");
 
     let (_, offset) = provider
@@ -250,14 +260,20 @@ fn anchor_offsets_are_character_based() {
 #[test]
 fn prefetch_failures_have_no_side_effects() {
     let dir = tempfile::tempdir().expect("临时目录");
-    let provider = provider_with(dir.path(), SAMPLE, Arc::new(tome_local::provider::NoCleaner));
+    let provider = provider_with(
+        dir.path(),
+        SAMPLE,
+        Arc::new(tome_local::provider::NoCleaner),
+    );
 
     // 越界、负数、超大深度都不该 panic 或影响后续读取。
     provider.prefetch(&sample_book(), 999, 10);
     provider.prefetch(&sample_book(), -999, 5);
     provider.prefetch(&sample_book(), 0, u32::MAX);
 
-    let content = provider.chapter_content(&sample_book(), 0).expect("预取后仍可读");
+    let content = provider
+        .chapter_content(&sample_book(), 0)
+        .expect("预取后仍可读");
     assert!(content.content.contains("甲甲甲"));
 }
 
@@ -265,7 +281,11 @@ fn prefetch_failures_have_no_side_effects() {
 #[test]
 fn out_of_range_chapter_is_a_structured_content_error() {
     let dir = tempfile::tempdir().expect("临时目录");
-    let provider = provider_with(dir.path(), SAMPLE, Arc::new(tome_local::provider::NoCleaner));
+    let provider = provider_with(
+        dir.path(),
+        SAMPLE,
+        Arc::new(tome_local::provider::NoCleaner),
+    );
     let error = provider
         .chapter_content(&sample_book(), 42)
         .expect_err("越界章节应报错");
@@ -290,17 +310,19 @@ fn reading_one_chapter_does_not_rescan_the_whole_book() {
 
     // 小书与大书（正文量差约 20 倍）。
     let small = "第一章 开端\n短正文。\n第二章 承接\n短正文。\n".to_string();
-    let big = {
-        let body = "第一章 开端\n".to_string() + &"内容填充句子。".repeat(60_000) + "\n第二章 承接\n结尾。\n";
-        body
-    };
+    let big =
+        "第一章 开端\n".to_string() + &"内容填充句子。".repeat(60_000) + "\n第二章 承接\n结尾。\n";
 
     let small_dir = dir.path().join("small");
     let big_dir = dir.path().join("big");
     std::fs::create_dir_all(&small_dir).expect("建目录");
     std::fs::create_dir_all(&big_dir).expect("建目录");
 
-    let small_provider = provider_with(&small_dir, &small, Arc::new(tome_local::provider::NoCleaner));
+    let small_provider = provider_with(
+        &small_dir,
+        &small,
+        Arc::new(tome_local::provider::NoCleaner),
+    );
     let big_provider = provider_with(&big_dir, &big, Arc::new(tome_local::provider::NoCleaner));
 
     // 预热（去掉首次读盘与首次缓存的影响）。
@@ -341,7 +363,11 @@ fn measure(body: impl Fn()) -> std::time::Duration {
 #[test]
 fn the_seam_hides_the_implementation() {
     let dir = tempfile::tempdir().expect("临时目录");
-    let provider = provider_with(dir.path(), SAMPLE, Arc::new(tome_local::provider::NoCleaner));
+    let provider = provider_with(
+        dir.path(),
+        SAMPLE,
+        Arc::new(tome_local::provider::NoCleaner),
+    );
 
     // 关键：这里函数的签名只提 `dyn ContentProvider`。
     fn read_everything(provider: &dyn ContentProvider, book: &Book) -> Vec<ChapterContent> {
@@ -367,7 +393,11 @@ fn the_seam_hides_the_implementation() {
 #[test]
 fn chapter_indices_match_the_toc() {
     let dir = tempfile::tempdir().expect("临时目录");
-    let provider = provider_with(dir.path(), SAMPLE, Arc::new(tome_local::provider::NoCleaner));
+    let provider = provider_with(
+        dir.path(),
+        SAMPLE,
+        Arc::new(tome_local::provider::NoCleaner),
+    );
     let toc: Vec<Chapter> = provider.toc(&sample_book()).expect("目录");
 
     for chapter in &toc {

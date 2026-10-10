@@ -129,7 +129,10 @@ fn txt_without_recognisable_chapters_is_split_by_size() {
     let (code, stdout, _) = run_cli(&["local", "import", &path.to_string_lossy()]);
     assert_eq!(code, 0);
     let document: serde_json::Value = serde_json::from_str(&stdout).expect("应是 JSON");
-    assert_eq!(document["split_by_size"], true, "无规则命中应标记为按大小切分");
+    assert_eq!(
+        document["split_by_size"], true,
+        "无规则命中应标记为按大小切分"
+    );
     assert!(document["total_chapters"].as_u64().unwrap_or(0) > 1);
 }
 
@@ -155,7 +158,11 @@ fn gbk_txt_is_decoded_and_reports_its_charset() {
 fn local_scan_lists_recognisable_books() {
     let dir = tempfile::tempdir().expect("临时目录");
     write_txt(dir.path(), "一本.txt", SAMPLE_TXT);
-    write_txt(dir.path(), "另一本.txt", "完全不同的正文内容，用于区分身份。");
+    write_txt(
+        dir.path(),
+        "另一本.txt",
+        "完全不同的正文内容，用于区分身份。",
+    );
     std::fs::write(dir.path().join("笔记.md"), "不是书").expect("写入");
 
     let (code, stdout, _) = run_cli(&["local", "scan", &dir.path().to_string_lossy()]);
@@ -166,9 +173,10 @@ fn local_scan_lists_recognisable_books() {
     assert!(books.iter().all(|book| book["format"] == "txt"));
     // 身份必须给出（FR-025 的重建索引不重复依赖它）。
     assert!(
-        books
-            .iter()
-            .all(|book| book["origin_id"].as_str().unwrap_or("").starts_with("local:sha256:")),
+        books.iter().all(|book| book["origin_id"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("local:sha256:")),
         "每本书都应带内容身份"
     );
 }
@@ -233,10 +241,7 @@ fn local_import_copies_only_when_asked() {
     ]);
     assert_eq!(code, 0);
     let document: serde_json::Value = serde_json::from_str(&stdout).expect("应是 JSON");
-    assert!(
-        document["copied_to"].as_str().is_some(),
-        "应报告复制目标"
-    );
+    assert!(document["copied_to"].as_str().is_some(), "应报告复制目标");
     assert!(path.exists(), "原文件必须留在原地（FR-024 是复制不是移动）");
 }
 
@@ -310,9 +315,17 @@ fn local_commands_do_not_touch_the_network() {
     let dir = tempfile::tempdir().expect("临时目录");
     let path = write_txt(dir.path(), "离线书.txt", SAMPLE_TXT);
     for args in [
-        vec!["local", "import", path.to_string_lossy().to_string().as_str()],
+        vec![
+            "local",
+            "import",
+            path.to_string_lossy().to_string().as_str(),
+        ],
         vec!["local", "toc", path.to_string_lossy().to_string().as_str()],
-        vec!["local", "scan", dir.path().to_string_lossy().to_string().as_str()],
+        vec![
+            "local",
+            "scan",
+            dir.path().to_string_lossy().to_string().as_str(),
+        ],
     ] {
         let (code, _, _) = run_cli(&args);
         assert_eq!(code, 0, "本地命令应成功：{args:?}");

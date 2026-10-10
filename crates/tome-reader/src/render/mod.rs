@@ -14,12 +14,14 @@
 //! | [`batch`] | 绘制指令序列（顺序固定 + 确定性） | FR-048 / SC-012 | [DONE] T034 |
 //! | [`offscreen`] | 离屏渲染 + 256 对齐读回（能力错误诚实报告） | FR-053 | [DONE] T035 |
 //! | [`pixel_diff`] | pixelmatch-YIQ 双闸门（快照比对算法） | SC-011 | [DONE] T036 |
+//! | [`fonts`] | 内嵌子集注册 + 平台回退链（零网络） | FR-050/051/047 | [DONE] T037 |
 //!
 //! 后续落点（见 `specs/002-typesetting-renderer/plan.md` Project Structure）：
 //! `animate.rs`（T038）· `image.rs`（T039）· `fonts.rs`（T037）。
 
 pub mod atlas;
 pub mod batch;
+pub mod fonts;
 pub mod glyph_cache;
 pub mod offscreen;
 pub mod pipeline;

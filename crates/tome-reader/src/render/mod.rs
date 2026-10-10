@@ -9,12 +9,15 @@
 //! | 模块 | 职责 | 需求 | 状态 |
 //! |---|---|---|---|
 //! | [`pipeline`] | device/queue + 后端探测（无 surface） | FR-043 / FR-053 | [DONE] T032 |
+//! | [`atlas`] | 字形图集区域分配 + 增长簿记 | research R2-2/R2-4 | [DONE] T033 |
+//! | [`glyph_cache`] | 字形缓存键 + swash 栅格化 + 聚合上传 | FR-043 / FR-047 | [DONE] T033 |
 //!
 //! 后续落点（见 `specs/002-typesetting-renderer/plan.md` Project Structure）：
-//! `glyph_cache.rs`（T033）· `atlas.rs`（T033）· `batch.rs`（T034）·
-//! `offscreen.rs`（T035）· `animate.rs`（T038）· `image.rs`（T039）·
-//! `fonts.rs`（T037）。
+//! `batch.rs`（T034）· `offscreen.rs`（T035）· `animate.rs`（T038）·
+//! `image.rs`（T039）· `fonts.rs`（T037）。
 
+pub mod atlas;
+pub mod glyph_cache;
 pub mod pipeline;
 
 /// 当前构建可用的图形后端名。

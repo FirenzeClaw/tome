@@ -38,6 +38,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod corpus;
 pub mod css;
 pub mod css_post;
 pub mod css_pseudo;

@@ -1,0 +1,114 @@
+[
+  {
+    "name": "default:无前缀裸选择器等同CSS",
+    "kind": "html",
+    "input": "<div class=\"o\"><a>t</a></div>",
+    "rule": "div.o a@text",
+    "expected": ["t"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：无前缀规则跟随 Legado 预设语法，或直接 CSS 选择器）"
+  },
+  {
+    "name": "default:无前缀标签选择器",
+    "kind": "html",
+    "input": "<ul><li class=\"odd\"><a>1</a></li><li class=\"even\"><a>2</a></li></ul>",
+    "rule": "li.odd@text",
+    "expected": ["1"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：无前缀规则按 CSS 选择器解析）"
+  },
+  {
+    "name": "default:显式双at前缀",
+    "kind": "html",
+    "input": "<div>a</div>",
+    "rule": "@@div@text",
+    "expected": ["a"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：Default 规则需要以 @@ 开头）"
+  },
+  {
+    "name": "default:显式双at前缀加后代选择器",
+    "kind": "html",
+    "input": "<div><a>1</a></div>",
+    "rule": "@@div a@text",
+    "expected": ["1"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：Default 规则需要以 @@ 开头）"
+  },
+  {
+    "name": "default:显式双at前缀无后缀",
+    "kind": "html",
+    "input": "<div><a>1</a><a>2</a></div>",
+    "rule": "@@div a",
+    "expected": ["1", "2"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：Default 规则需要以 @@ 开头，未指定后缀时取文本）"
+  },
+  {
+    "name": "default:显式双at前缀的类选择器",
+    "kind": "html",
+    "input": "<p class=\"a\">x</p><p>y</p>",
+    "rule": "@@.a@text",
+    "expected": ["x"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：Default 规则需要以 @@ 开头）"
+  },
+  {
+    "name": "default:点号索引第三段位置",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li></ul>",
+    "rule": "li.0@text",
+    "expected": ["a"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：每段规则第三段是位置，正着数从0开始）"
+  },
+  {
+    "name": "default:点号负索引",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li></ul>",
+    "rule": "li.-1@text",
+    "expected": ["b"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：-1为倒数第一个）"
+  },
+  {
+    "name": "default:方括号索引",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li></ul>",
+    "rule": "li[0]@text",
+    "expected": ["a"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：数组写法 tag.li[0:10]）"
+  },
+  {
+    "name": "default:无前缀加属性后缀",
+    "kind": "html",
+    "input": "<a href=\"/u\">x</a>",
+    "rule": "a@href",
+    "expected": ["/u"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：最后一段取内容，@href 取属性值）"
+  },
+  {
+    "name": "default:无前缀加替换链",
+    "kind": "html",
+    "input": "<div>a</div>",
+    "rule": "div@text##a##A",
+    "expected": ["A"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：规则后接 ##正则##替换）"
+  },
+  {
+    "name": "default:反序标记加无前缀规则",
+    "kind": "html",
+    "input": "<div class=\"o\"><a>t</a></div>",
+    "rule": "-div.o a@text",
+    "expected": ["t"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：列表规则首字符 - 表示反序）"
+  },
+  {
+    "name": "default:选择器列表在无前缀形态下同样生效",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li></ul>",
+    "rule": ".x,li@text",
+    "expected": ["a", "b"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "default:排除区间在无前缀形态下同样生效",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li><li>c</li></ul>",
+    "rule": "li[!0:0]@text",
+    "expected": ["b", "c"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：!是排除）"
+  }
+]

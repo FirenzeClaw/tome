@@ -26,6 +26,7 @@ fancy-regex = "0.19.2"
 
 # 本 crate 自身错误类型（AGENTS.md：每个 crate 拥有自己的错误类型）
 thiserror = "2.0.21"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.151"
 serde_json_path = "0.7.2"
 serde_json_path_macros = "0.1.6"

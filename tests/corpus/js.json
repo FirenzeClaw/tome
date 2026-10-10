@@ -1,0 +1,226 @@
+[
+  {
+    "name": "js:表达式形态算术",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:1+1",
+    "expected": ["2"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：JavaScript 可以在 @js: 中使用）"
+  },
+  {
+    "name": "js:语句块形态取末表达式",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:var x=1; x+1",
+    "expected": ["2"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：@js: 段内为脚本，结果为段落值）"
+  },
+  {
+    "name": "js:字符串替换",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:'abc'.replace('a','X')",
+    "expected": ["Xbc"],
+    "basis": "ECMAScript 公开规范（String.prototype.replace）"
+  },
+  {
+    "name": "js:分裂与联接",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:'a-b-c'.split('-').join('+')",
+    "expected": ["a+b+c"],
+    "basis": "ECMAScript 公开规范（String.prototype.split / Array.prototype.join）"
+  },
+  {
+    "name": "js:JSON解析取字段",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:JSON.parse('{\"a\":\"b\"}').a",
+    "expected": ["b"],
+    "basis": "ECMAScript 公开规范（JSON.parse）"
+  },
+  {
+    "name": "js:数字转字符串",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:String(12)",
+    "expected": ["12"],
+    "basis": "ECMAScript 公开规范（String 转换函数）"
+  },
+  {
+    "name": "js:字符串转数字",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:Number('12')+1",
+    "expected": ["13"],
+    "basis": "ECMAScript 公开规范（Number 转换函数）"
+  },
+  {
+    "name": "js:模板字符串插值",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:`a${1+1}b`",
+    "expected": ["a2b"],
+    "basis": "ECMAScript 公开规范（模板字面量与替换）"
+  },
+  {
+    "name": "js:大小写转换",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:'abc'.toUpperCase()",
+    "expected": ["ABC"],
+    "basis": "ECMAScript 公开规范（String.prototype.toUpperCase）"
+  },
+  {
+    "name": "js:数组联接",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:[1,2,3].join(',')",
+    "expected": ["1,2,3"],
+    "basis": "ECMAScript 公开规范（Array.prototype.join）"
+  },
+  {
+    "name": "js:JSON序列化",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:JSON.stringify({a:1})",
+    "expected": ["{\"a\":1}"],
+    "basis": "ECMAScript 公开规范（JSON.stringify）"
+  },
+  {
+    "name": "js:数学函数",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:Math.max(1,5)",
+    "expected": ["5"],
+    "basis": "ECMAScript 公开规范（Math.max）"
+  },
+  {
+    "name": "js:if分支",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:if(1<2){'yes'}else{'no'}",
+    "expected": ["yes"],
+    "basis": "ECMAScript 公开规范（if 语句与块内的表达式语句）"
+  },
+  {
+    "name": "js:数组映射",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:var a=[1,2]; a.map(function(v){return v*2}).join('-')",
+    "expected": ["2-4"],
+    "basis": "ECMAScript 公开规范（Array.prototype.map）"
+  },
+  {
+    "name": "js:for循环累加",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:var s=''; for(var i=0;i<3;i++){s+=i} s",
+    "expected": ["012"],
+    "basis": "ECMAScript 公开规范（for 语句）"
+  },
+  {
+    "name": "js:布尔取值的文本化",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:true",
+    "expected": ["true"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：@js: 段的求值结果为字符串）"
+  },
+  {
+    "name": "js:null的文本化",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:null",
+    "expected": [""],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：@js: 的空值表现为空串）"
+  },
+  {
+    "name": "js:小数取值的文本化",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:1.5",
+    "expected": ["1.5"],
+    "basis": "ECMAScript 公开规范（Number 的字符串化）"
+  },
+  {
+    "name": "js:去除首尾空白",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:'  x  '.trim()",
+    "expected": ["x"],
+    "basis": "ECMAScript 公开规范（String.prototype.trim）"
+  },
+  {
+    "name": "js:URI解码",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:decodeURIComponent('%E4%B8%AD')",
+    "expected": ["中"],
+    "basis": "ECMAScript 公开规范（decodeURIComponent）"
+  },
+  {
+    "name": "js:子串截取",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:'abc'.substring(1)",
+    "expected": ["bc"],
+    "basis": "ECMAScript 公开规范（String.prototype.substring）"
+  },
+  {
+    "name": "js:分裂后取长度",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:'a,b'.split(',').length",
+    "expected": ["2"],
+    "basis": "ECMAScript 公开规范（Array.prototype.length）"
+  },
+  {
+    "name": "js:函数定义与调用",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:function f(){return 7} f()",
+    "expected": ["7"],
+    "basis": "ECMAScript 公开规范（函数声明与调用）"
+  },
+  {
+    "name": "js:对象键列举",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:Object.keys({a:1,b:2}).join(',')",
+    "expected": ["a,b"],
+    "basis": "ECMAScript 公开规范（Object.keys）"
+  },
+  {
+    "name": "js:parseInt解析前导数字",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:parseInt('12px')",
+    "expected": ["12"],
+    "basis": "ECMAScript 公开规范（parseInt 忽略尾随非数字字符）"
+  },
+  {
+    "name": "js:与替换链组合",
+    "kind": "html",
+    "input": "<div>abc</div>",
+    "rule": "@js:'abc'.replace('a','X')##X##Y",
+    "expected": ["Ybc"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：##正则##替换 跟在规则后面依次施加）"
+  },
+  {
+    "name": "js:结果再受替换链作用",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:'a1b'##\\d##N",
+    "expected": ["aNb"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：##正则##替换 作用于前段结果）"
+  },
+  {
+    "name": "js:算术结果受替换链作用",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:1+1##2##two",
+    "expected": ["two"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：##正则##替换 作用于前段结果）"
+  }
+]

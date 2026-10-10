@@ -126,6 +126,153 @@ pub fn run_with_js(
             action,
             input,
         } => run_action(options, source_id, action, input.as_deref(), host, js_host),
+        Command::Verify { corpus, report } => run_verify(corpus, report.as_deref()),
+    }
+}
+
+/// `verify --corpus <dir> [--report <file>]`：跑合成语料差分（SC-002a）。
+///
+/// # 这是本阶段 Independent Test 的载体
+///
+/// tasks.md 的 Phase 5 原文：
+///
+/// > **Independent Test**: `tome verify --corpus tests/corpus/` 输出一致率
+/// > ≥95%；逐条 diff 可查。
+///
+/// 故本函数输出两样东西：**一致率**（可判定通过/不通过）与**逐条 diff**
+/// （失败时能定位是哪一条、期望什么、实际什么）。
+///
+/// # 退出码
+///
+/// | 情形 | 码 |
+/// |---|---|
+/// | 通过率达阈值 | 0 |
+/// | 未达阈值 | 1（业务错误——**门没通过**） |
+/// | 语料读不了/格式错 | 1，带上原因 |
+///
+/// ## 为什么未达标不用 3（不支持能力）
+///
+/// 3 是"本产品做不到"的可编程信号（FR-006）。而这里**做得到**，只是
+/// 结果不满足门限——那是"有缺陷"，属业务错误。两者的后续处置不同：
+/// 前者等版本更新，后者去修 bug。
+fn run_verify(corpus: &Path, report: Option<&Path>) -> CommandOutcome {
+    let Some(corpus_text) = corpus.to_str() else {
+        return CommandOutcome::failure(&ErrorKind::Configuration, "语料目录路径不是合法 UTF-8");
+    };
+    if !corpus.is_dir() {
+        return CommandOutcome::failure(
+            &ErrorKind::Configuration,
+            &format!("语料目录不存在或不是目录：{corpus_text}"),
+        );
+    }
+
+    let loaded = match tome_rule::corpus::load_corpus_directory(corpus) {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            return CommandOutcome::failure(&ErrorKind::Rule, &format!("语料加载失败：{error}"));
+        }
+    };
+
+    // JS 运行时：语料里有 `js:` 类用例，不给引擎它们会全部失败——
+    // 那样测出的通过率反映的是"没配好环境"而不是引擎能力。
+    let runtime = match tome_rule::js_bridge::JobRuntime::new(tome_js::Limits::default()) {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            return CommandOutcome::failure(
+                &ErrorKind::Configuration,
+                &format!("建 JS 沙箱失败（语料里的 @js: 用例需要它）：{error}"),
+            );
+        }
+    };
+
+    let mut outcomes = Vec::new();
+    for (path, cases) in &loaded {
+        let mut produced = tome_rule::corpus::run_corpus(cases, Some(&runtime));
+        outcomes.append(&mut produced);
+        let _ = path;
+    }
+
+    let report_data = tome_rule::corpus::CorpusReport {
+        source: corpus_text.to_string(),
+        outcomes,
+    };
+
+    let rendered = render_verify_report(&report_data);
+    let passed_gate = report_data.meets_threshold();
+
+    // `--report <file>` 时把渲染结果写文件（失败即报错，不静默丢弃报告）
+    if let Some(report_path) = report {
+        if let Err(error) = std::fs::write(report_path, &rendered) {
+            return CommandOutcome::failure(
+                &ErrorKind::Storage,
+                &format!("报告写入 {} 失败：{error}", report_path.display()),
+            );
+        }
+    }
+
+    if passed_gate {
+        CommandOutcome::with_stdout(rendered)
+    } else {
+        CommandOutcome::failure(&ErrorKind::Rule, rendered.trim_end())
+    }
+}
+
+/// 渲染 verify 报告：一致率 + 逐条 diff（JSON，可 diff）。
+///
+/// # 为什么是 JSON
+///
+/// `contracts/cli.md` 的全局约定是"输出默认 JSON（结构化、可 diff）"。
+/// 差分测试的产物尤其需要可 diff——它是被**比较**的东西。
+fn render_verify_report(report: &tome_rule::corpus::CorpusReport) -> String {
+    let failures: Vec<serde_json::Value> = report
+        .failures()
+        .map(|outcome| {
+            serde_json::json!({
+                "name": outcome.name,
+                "category": outcome.category,
+                "expected": outcome.expected,
+                "actual": outcome.actual,
+                "error": outcome.error,
+            })
+        })
+        .collect();
+
+    let categories: Vec<serde_json::Value> = report
+        .by_category()
+        .into_iter()
+        .map(|(name, passed, total)| {
+            serde_json::json!({
+                "category": name,
+                "passed": passed,
+                "total": total,
+                "rate": if total == 0 { 1.0 } else { passed as f64 / total as f64 },
+            })
+        })
+        .collect();
+
+    let payload = serde_json::json!({
+        "corpus": report.source,
+        "total": report.total(),
+        "passed": report.passed(),
+        "failed": report.total() - report.passed(),
+        "pass_rate": report.pass_rate(),
+        "threshold": tome_rule::corpus::CORPUS_PASS_THRESHOLD,
+        "meets_threshold": report.meets_threshold(),
+        "by_category": categories,
+        "failures": failures,
+    });
+
+    // `to_string_pretty` 而非紧凑：报告是给人看的（逐条 diff 可查）
+    match serde_json::to_string_pretty(&payload) {
+        Ok(text) => format!("{text}\n"),
+        // 兜底：序列化失败不该让命令静默无输出
+        Err(error) => {
+            // 用 `json!` 而不是手拼字符串——手拼会因未转义的引号产出非法 JSON
+            let fallback = serde_json::json!({
+                "error": format!("报告序列化失败：{error}"),
+            });
+            format!("{fallback}\n")
+        }
     }
 }
 

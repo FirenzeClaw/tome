@@ -2298,6 +2298,7 @@ dependencies = [
  "precomputed-hash",
  "regex",
  "selectors",
+ "serde",
  "serde_json",
  "serde_json_path",
  "serde_json_path_macros",

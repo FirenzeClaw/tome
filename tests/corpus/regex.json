@@ -1,0 +1,266 @@
+[
+  {
+    "name": "regex:替换链删除数字",
+    "kind": "html",
+    "input": "<div>a1b</div>",
+    "rule": "@css:div@text##\\d##",
+    "expected": ["ab"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：##正则##替换，替换内容可留空）"
+  },
+  {
+    "name": "regex:替换链群组交换",
+    "kind": "html",
+    "input": "<div>abc</div>",
+    "rule": "@css:div@text##(a)(b)##$2$1",
+    "expected": ["bac"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：$1、$2 为群组引用）"
+  },
+  {
+    "name": "regex:相对地址补前缀惯用法",
+    "kind": "html",
+    "input": "<a href=\"/u\">x</a>",
+    "rule": "@css:a@href##^##https://x.com",
+    "expected": ["https://x.com/u"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：##^##前缀 为补全相对地址的惯用法）"
+  },
+  {
+    "name": "regex:替换链空白删除",
+    "kind": "html",
+    "input": "<div>a b</div>",
+    "rule": "@css:div@text##\\s+##",
+    "expected": ["ab"],
+    "basis": "research.md R5 的正则语义差异表（\\s 为空白类，本引擎按 Unicode 空白）"
+  },
+  {
+    "name": "regex:替换链字面替换",
+    "kind": "html",
+    "input": "<div>abc</div>",
+    "rule": "@css:div@text##b##X",
+    "expected": ["aXc"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：##正则##替换 循环替换）"
+  },
+  {
+    "name": "regex:替换链加号字面量",
+    "kind": "html",
+    "input": "<div>a-b-c</div>",
+    "rule": "@css:div@text##-##+",
+    "expected": ["a+b+c"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：##正则##替换 循环替换）"
+  },
+  {
+    "name": "regex:替换链贪婪量词",
+    "kind": "html",
+    "input": "<div>hello</div>",
+    "rule": "@css:div@text##l+##L",
+    "expected": ["heLo"],
+    "basis": "research.md R5 的正则语义差异表（贪婪量词匹配最长串）"
+  },
+  {
+    "name": "regex:替换链字符类",
+    "kind": "html",
+    "input": "<div>abc</div>",
+    "rule": "@css:div@text##[ab]##X",
+    "expected": ["XXc"],
+    "basis": "research.md R5 的正则语义差异表（字符类按集合匹配）"
+  },
+  {
+    "name": "regex:替换链数字量词",
+    "kind": "html",
+    "input": "<div>a1b2</div>",
+    "rule": "@css:div@text##\\d+##N",
+    "expected": ["aNbN"],
+    "basis": "research.md R5 的正则语义差异表（\\d 在本引擎为 Unicode 数字类）"
+  },
+  {
+    "name": "regex:群组引用后紧跟字面字母",
+    "kind": "html",
+    "input": "<div>a1</div>",
+    "rule": "@css:div@text##(\\d)##$1a",
+    "expected": ["a1a"],
+    "basis": "research.md R5 的正则语义差异表（$1a 在 Java 读作组1+字面 a；Rust 最长名解析需翻译层纠正）"
+  },
+  {
+    "name": "regex:锚点删除行首字母",
+    "kind": "html",
+    "input": "<div>abc</div>",
+    "rule": "@css:div@text##^a##",
+    "expected": ["bc"],
+    "basis": "research.md R5 的正则语义差异表（^ 锚点匹配输入开头）"
+  },
+  {
+    "name": "regex:替换为空串",
+    "kind": "html",
+    "input": "<div>aaa</div>",
+    "rule": "@css:div@text##a+##",
+    "expected": [""],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：替换内容可留空但结尾的 ## 不能省）"
+  },
+  {
+    "name": "regex:点号不匹配换行",
+    "kind": "html",
+    "input": "<div>abc</div>",
+    "rule": "@css:div@text##(?s).##X",
+    "expected": ["XXX"],
+    "basis": "research.md R5 的正则语义差异表（(?s) 开启 dotall 后 `.` 匹配任意字符）"
+  },
+  {
+    "name": "regex:转义点号只匹配字面点",
+    "kind": "html",
+    "input": "<div>a.c</div>",
+    "rule": "@css:div@text##\\.##-",
+    "expected": ["a-c"],
+    "basis": "research.md R5 的正则语义差异表（\\. 为字面点，不匹配任意字符）"
+  },
+  {
+    "name": "regex:内联大小写不敏感标志",
+    "kind": "html",
+    "input": "<div>ab</div>",
+    "rule": "@css:div@text##(?i)AB##z",
+    "expected": ["z"],
+    "basis": "research.md R5 的正则语义差异表（(?i) 内联忽略大小写标志）"
+  },
+  {
+    "name": "regex:花括号精确量词",
+    "kind": "html",
+    "input": "<div>aaa</div>",
+    "rule": "@css:div@text##a{2}##B",
+    "expected": ["Ba"],
+    "basis": "research.md R5 的正则语义差异表（{n} 精确量词，替换非重叠最左匹配）"
+  },
+  {
+    "name": "regex:群组引用放进方括号",
+    "kind": "html",
+    "input": "<div>abcdef</div>",
+    "rule": "@css:div@text##b(c)d##[$1]",
+    "expected": ["a[c]ef"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：$1 为群组引用，可与字面文本混排）"
+  },
+  {
+    "name": "regex:花括号形态的群组引用",
+    "kind": "html",
+    "input": "<div>x</div>",
+    "rule": "@css:div@text##(x)##${1}",
+    "expected": ["x"],
+    "basis": "research.md R5 的正则语义差异表（替换串翻译层把 $N 规范为 ${N}，两种写法等价）"
+  },
+  {
+    "name": "regex:字面美元符号转义",
+    "kind": "html",
+    "input": "<div>a$b</div>",
+    "rule": "@css:div@text##\\$##S",
+    "expected": ["aSb"],
+    "basis": "research.md R5 的正则语义差异表（\\$ 转义为字面美元符）"
+  },
+  {
+    "name": "regex:替换串双美元表示字面美元",
+    "kind": "html",
+    "input": "<div>x</div>",
+    "rule": "@css:div@text##x##$$",
+    "expected": ["$"],
+    "basis": "research.md R5 的正则语义差异表（字面 `$` 写作 `$$`）"
+  },
+  {
+    "name": "regex:零组引用为整体匹配",
+    "kind": "html",
+    "input": "<div>a</div>",
+    "rule": "@css:div@text##a##$0",
+    "expected": ["a"],
+    "basis": "research.md R5 的正则语义差异表（$0 指整体匹配）"
+  },
+  {
+    "name": "regex:多群组引用与字面混合",
+    "kind": "html",
+    "input": "<div>ab</div>",
+    "rule": "@css:div@text##(a)(b)##$1-$2",
+    "expected": ["a-b"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：$1、$2 为群组引用）"
+  },
+  {
+    "name": "regex:越界群组引用展开为空串",
+    "kind": "html",
+    "input": "<div>abc</div>",
+    "rule": "@css:div@text##b##$3",
+    "expected": ["ac"],
+    "basis": "research.md R5 的正则语义差异表（非法组引用展开为空串）"
+  },
+  {
+    "name": "regex:顺序替换链多次施加",
+    "kind": "html",
+    "input": "<div>aa</div>",
+    "rule": "@css:div@text##a##b##b##c",
+    "expected": ["cc"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：替换链可续接 ##正则##替换，依次施加）"
+  },
+  {
+    "name": "regex:属性正则匹配于属性选择器",
+    "kind": "html",
+    "input": "<img src=\"a.png\"><img src=\"b.txt\">",
+    "rule": "@css:img[src~=\\.png]@src",
+    "expected": ["a.png"],
+    "basis": "research.md R2 的 Jsoup 方言清单（[attr~=regex] 为 Jsoup 扩展，按正则匹配属性值）"
+  },
+  {
+    "name": "regex:属性正则支持内联标志",
+    "kind": "html",
+    "input": "<img src=\"A.PNG\"><img src=\"b.txt\">",
+    "rule": "@css:img[src~=(?i)\\.png]@src",
+    "expected": ["A.PNG"],
+    "basis": "research.md R2 的 Jsoup 方言清单（[attr~=regex] 内可为任意正则，含内联标志）"
+  },
+  {
+    "name": "regex:占有量词不做回溯",
+    "kind": "html",
+    "input": "<div>aaa</div>",
+    "rule": "@css:div@text##a++a##Z",
+    "expected": ["aaa"],
+    "basis": "research.md R5 的正则语义差异表（a++ 为占有量词，不回溯故无法匹配 aaa）"
+  },
+  {
+    "name": "regex:原子组不做回溯",
+    "kind": "html",
+    "input": "<div>aaa</div>",
+    "rule": "@css:div@text##(?>a+)a##Z",
+    "expected": ["aaa"],
+    "basis": "research.md R5 的正则语义差异表（原子组 (?) 语义与占有量词一致，不回溯）"
+  },
+  {
+    "name": "regex:星号占有量词不做回溯",
+    "kind": "html",
+    "input": "<div>aaaa</div>",
+    "rule": "@css:div@text##a*+a##Z",
+    "expected": ["aaaa"],
+    "basis": "research.md R5 的正则语义差异表（a*+ 为占有量词，不回溯故无法匹配）"
+  },
+  {
+    "name": "regex:问号占有量词可匹配",
+    "kind": "html",
+    "input": "<div>aa</div>",
+    "rule": "@css:div@text##a?+a##Z",
+    "expected": ["Z"],
+    "basis": "research.md R5 的正则语义差异表（a?+ 占有地匹配一个 a，其后的 a 仍可匹配）"
+  },
+  {
+    "name": "regex:锚定数字整串替换",
+    "kind": "html",
+    "input": "<div>3</div>",
+    "rule": "@css:div@text##^\\d+$##[num]",
+    "expected": ["[num]"],
+    "basis": "research.md R5 的正则语义差异表（^...$ 锚定整串）"
+  },
+  {
+    "name": "regex:回溯引用可匹配重复组",
+    "kind": "html",
+    "input": "<div>abab</div>",
+    "rule": "@css:div@text##(a)(b)\\1##Y",
+    "expected": ["Yb"],
+    "basis": "research.md R5 的正则语义差异表（回引用 \\1 需 fancy-regex 引擎）"
+  },
+  {
+    "name": "regex:lookbehind需fancy引擎",
+    "kind": "html",
+    "input": "<div>abc</div>",
+    "rule": "@css:div@text##(?<=a)b##X",
+    "expected": ["aXc"],
+    "basis": "research.md R5 的正则语义差异表（lookbehind 为 fancy-regex 特性）"
+  }
+]

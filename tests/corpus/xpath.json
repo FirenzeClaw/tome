@@ -1,0 +1,338 @@
+[
+  {
+    "name": "xpath:后代轴缩写",
+    "kind": "html",
+    "input": "<div><p>a</p></div>",
+    "rule": "@XPath://p",
+    "expected": ["a"],
+    "basis": "W3C XPath 1.0 规范 §2.5（`//` 为 `/descendant-or-self::node()/` 的缩写）"
+  },
+  {
+    "name": "xpath:绝对路径",
+    "kind": "html",
+    "input": "<div><p>a</p></div>",
+    "rule": "@XPath:/html/body",
+    "expected": ["a"],
+    "basis": "W3C XPath 1.0 规范 §2.2（绝对位置路径以 `/` 开头）"
+  },
+  {
+    "name": "xpath:子元素路径",
+    "kind": "html",
+    "input": "<div><p>a</p></div>",
+    "rule": "@XPath://div/p",
+    "expected": ["a"],
+    "basis": "W3C XPath 1.0 规范 §2.5（child 轴为默认轴）"
+  },
+  {
+    "name": "xpath:child轴全称",
+    "kind": "html",
+    "input": "<div><p>a</p></div>",
+    "rule": "@XPath://div/child::p",
+    "expected": ["a"],
+    "basis": "W3C XPath 1.0 规范 §2.2（child 轴的全称写法）"
+  },
+  {
+    "name": "xpath:descendant轴全称",
+    "kind": "html",
+    "input": "<div><span><p>a</p></span></div>",
+    "rule": "@XPath://div/descendant::p",
+    "expected": ["a"],
+    "basis": "W3C XPath 1.0 规范 §2.2（descendant 轴的全称写法）"
+  },
+  {
+    "name": "xpath:following-sibling轴",
+    "kind": "html",
+    "input": "<div><p>a</p><span>b</span><b>c</b></div>",
+    "rule": "@XPath://p/following-sibling::*",
+    "expected": ["b", "c"],
+    "basis": "W3C XPath 1.0 规范 §2.2（following-sibling 轴）"
+  },
+  {
+    "name": "xpath:preceding-sibling轴",
+    "kind": "html",
+    "input": "<div><p>a</p><span>b</span></div>",
+    "rule": "@XPath://span/preceding-sibling::p",
+    "expected": ["a"],
+    "basis": "W3C XPath 1.0 规范 §2.2（preceding-sibling 轴）"
+  },
+  {
+    "name": "xpath:ancestor轴",
+    "kind": "html",
+    "input": "<div><p>a</p></div>",
+    "rule": "@XPath://p/ancestor::div",
+    "expected": ["a"],
+    "basis": "W3C XPath 1.0 规范 §2.2（ancestor 轴）"
+  },
+  {
+    "name": "xpath:parent轴",
+    "kind": "html",
+    "input": "<div><p>a</p></div>",
+    "rule": "@XPath://p/parent::div",
+    "expected": ["a"],
+    "basis": "W3C XPath 1.0 规范 §2.2（parent 轴）"
+  },
+  {
+    "name": "xpath:ancestor-or-self轴",
+    "kind": "html",
+    "input": "<div><p>a</p></div>",
+    "rule": "@XPath://p/ancestor-or-self::*",
+    "expected": ["a", "a", "a", "a"],
+    "basis": "W3C XPath 1.0 规范 §2.2（ancestor-or-self 轴按文档序返回）"
+  },
+  {
+    "name": "xpath:属性轴取属性值",
+    "kind": "html",
+    "input": "<a href=\"u\">t</a>",
+    "rule": "@XPath://a/@href",
+    "expected": ["u"],
+    "basis": "W3C XPath 1.0 规范 §2.3（attribute 轴缩写 `@`）"
+  },
+  {
+    "name": "xpath:text节点测试",
+    "kind": "html",
+    "input": "<a href=\"u\">t</a>",
+    "rule": "@XPath://a/text()",
+    "expected": ["t"],
+    "basis": "W3C XPath 1.0 规范 §2.3（text() 节点测试）"
+  },
+  {
+    "name": "xpath:node节点测试",
+    "kind": "html",
+    "input": "<div><p>a</p></div>",
+    "rule": "@XPath://div/node()",
+    "expected": ["a"],
+    "basis": "W3C XPath 1.0 规范 §2.3（node() 节点测试匹配任意节点）"
+  },
+  {
+    "name": "xpath:通配节点测试",
+    "kind": "html",
+    "input": "<div><p>a</p></div>",
+    "rule": "@XPath://*",
+    "expected": ["a", "", "a", "a", "a"],
+    "basis": "W3C XPath 1.0 规范 §2.3（`*` 匹配任意元素节点）"
+  },
+  {
+    "name": "xpath:数值位置谓词",
+    "kind": "html",
+    "input": "<div><p>a</p><p>b</p></div>",
+    "rule": "@XPath://p[1]",
+    "expected": ["a"],
+    "basis": "W3C XPath 1.0 规范 §2.4（数值谓词等价于 position() = 该数值）"
+  },
+  {
+    "name": "xpath:last函数谓词",
+    "kind": "html",
+    "input": "<div><p>a</p><p>b</p></div>",
+    "rule": "@XPath://p[last()]",
+    "expected": ["b"],
+    "basis": "W3C XPath 1.0 规范 §2.4（last() 返回上下文大小）"
+  },
+  {
+    "name": "xpath:position函数谓词",
+    "kind": "html",
+    "input": "<div><p>a</p><p>b</p></div>",
+    "rule": "@XPath://p[position()=2]",
+    "expected": ["b"],
+    "basis": "W3C XPath 1.0 规范 §2.4（position() 返回上下文位置）"
+  },
+  {
+    "name": "xpath:属性值谓词",
+    "kind": "html",
+    "input": "<ul><li>a</li><li id=\"s\">b</li><li>c</li></ul>",
+    "rule": "@XPath://li[@id='s']/following-sibling::li",
+    "expected": ["c"],
+    "basis": "W3C XPath 1.0 规范 §2.4（属性值相等的谓词）"
+  },
+  {
+    "name": "xpath:计数函数",
+    "kind": "html",
+    "input": "<div><p>a</p><p>b</p></div>",
+    "rule": "@XPath:count(//p)",
+    "expected": ["2"],
+    "basis": "W3C XPath 1.0 规范 §4.1（count() 返回节点集大小）"
+  },
+  {
+    "name": "xpath:包含函数",
+    "kind": "html",
+    "input": "<p>Hello</p><p>Nope</p>",
+    "rule": "@XPath://p[contains(text(),'ell')]",
+    "expected": ["Hello"],
+    "basis": "W3C XPath 1.0 规范 §4.2（contains() 子串包含测试）"
+  },
+  {
+    "name": "xpath:开头函数",
+    "kind": "html",
+    "input": "<p>abc</p>",
+    "rule": "@XPath://p[starts-with(text(),'ab')]",
+    "expected": ["abc"],
+    "basis": "W3C XPath 1.0 规范 §4.2（starts-with() 前缀测试）"
+  },
+  {
+    "name": "xpath:空白归一函数",
+    "kind": "html",
+    "input": "<p>  a   b  </p>",
+    "rule": "@XPath:normalize-space(//p)",
+    "expected": ["a b"],
+    "basis": "W3C XPath 1.0 规范 §4.2（normalize-space() 去掉首尾空白并把内部空白折为单空格）"
+  },
+  {
+    "name": "xpath:拼接函数",
+    "kind": "html",
+    "input": "<p>a</p>",
+    "rule": "@XPath:concat('x',//p)",
+    "expected": ["xa"],
+    "basis": "W3C XPath 1.0 规范 §4.2（concat() 字符串拼接）"
+  },
+  {
+    "name": "xpath:字符串函数",
+    "kind": "html",
+    "input": "<p>a</p>",
+    "rule": "@XPath:string(//p)",
+    "expected": ["a"],
+    "basis": "W3C XPath 1.0 规范 §4.2（string() 取节点集首节点的字符串值）"
+  },
+  {
+    "name": "xpath:非函数",
+    "kind": "html",
+    "input": "<div><p>a</p></div>",
+    "rule": "@XPath://div[not(p)]",
+    "expected": [],
+    "basis": "W3C XPath 1.0 规范 §4.3（not() 布尔取反；div 含 p 故不命中）"
+  },
+  {
+    "name": "xpath:子串函数",
+    "kind": "html",
+    "input": "<p>abcdef</p>",
+    "rule": "@XPath:substring(//p,2,3)",
+    "expected": ["bcd"],
+    "basis": "W3C XPath 1.0 规范 §4.2（substring() 位置从 1 起，长度为第三参数）"
+  },
+  {
+    "name": "xpath:字符替换函数",
+    "kind": "html",
+    "input": "<p>abc</p>",
+    "rule": "@XPath:translate(//p,'abc','xyz')",
+    "expected": ["xyz"],
+    "basis": "W3C XPath 1.0 规范 §4.2（translate() 按位置逐字符替换）"
+  },
+  {
+    "name": "xpath:字符串长度函数",
+    "kind": "html",
+    "input": "<p>abc</p>",
+    "rule": "@XPath:string-length(//p)",
+    "expected": ["3"],
+    "basis": "W3C XPath 1.0 规范 §4.2（string-length() 返回字符数）"
+  },
+  {
+    "name": "xpath:or运算符",
+    "kind": "html",
+    "input": "<div><p>a</p></div>",
+    "rule": "@XPath://div[p or a]",
+    "expected": ["a"],
+    "basis": "W3C XPath 1.0 规范 §3.4（or 布尔运算符，节点集按存在性转布尔）"
+  },
+  {
+    "name": "xpath:and运算符",
+    "kind": "html",
+    "input": "<div><p>a</p></div>",
+    "rule": "@XPath://div[1 and 1=1]",
+    "expected": ["a"],
+    "basis": "W3C XPath 1.0 规范 §3.4（and 布尔运算符）"
+  },
+  {
+    "name": "xpath:加运算符",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@XPath:1+2",
+    "expected": ["3"],
+    "basis": "W3C XPath 1.0 规范 §3.5（`+` 数值加法）"
+  },
+  {
+    "name": "xpath:减运算符",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@XPath:7-2",
+    "expected": ["5"],
+    "basis": "W3C XPath 1.0 规范 §3.5（`-` 数值减法）"
+  },
+  {
+    "name": "xpath:乘运算符",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@XPath:3*4",
+    "expected": ["12"],
+    "basis": "W3C XPath 1.0 规范 §3.5（`*` 数值乘法）"
+  },
+  {
+    "name": "xpath:div运算符",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@XPath:7 div 2",
+    "expected": ["3.5"],
+    "basis": "W3C XPath 1.0 规范 §3.5（`div` 为浮点除法，非整数除法）"
+  },
+  {
+    "name": "xpath:mod运算符",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@XPath:7 mod 2",
+    "expected": ["1"],
+    "basis": "W3C XPath 1.0 规范 §3.5（`mod` 取余）"
+  },
+  {
+    "name": "xpath:联合运算符",
+    "kind": "html",
+    "input": "<div><a>1</a><b>2</b></div>",
+    "rule": "@XPath://a | //b",
+    "expected": ["1", "2"],
+    "basis": "W3C XPath 1.0 规范 §3.3（`|` 联合两个节点集并按文档序去重）"
+  },
+  {
+    "name": "xpath:隐式双斜杠前缀",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li></ul>",
+    "rule": "//li",
+    "expected": ["a", "b"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：XPath 必须以 @XPath: 或 // 开头）"
+  },
+  {
+    "name": "xpath:allText扩展取全部文本",
+    "kind": "html",
+    "input": "<div><p>a<span>b</span></p></div>",
+    "rule": "@XPath://p/allText()",
+    "expected": ["ab"],
+    "basis": "JsoupXpath 扩展函数公开说明（allText() 取元素及后代全部文本）"
+  },
+  {
+    "name": "xpath:html扩展取内部HTML",
+    "kind": "html",
+    "input": "<div><p>a<span>b</span></p></div>",
+    "rule": "@XPath://p/html()",
+    "expected": ["a<span>b</span>"],
+    "basis": "JsoupXpath 扩展函数公开说明（html() 取元素内部 HTML）"
+  },
+  {
+    "name": "xpath:outerHtml扩展取含自身HTML",
+    "kind": "html",
+    "input": "<div><p>a</p></div>",
+    "rule": "@XPath://p/outerHtml()",
+    "expected": ["<p>a</p>"],
+    "basis": "JsoupXpath 扩展函数公开说明（outerHtml() 取含元素自身的 HTML）"
+  },
+  {
+    "name": "xpath:num扩展取数值",
+    "kind": "html",
+    "input": "<p>12</p>",
+    "rule": "@XPath://p/num()",
+    "expected": ["12"],
+    "basis": "JsoupXpath 扩展函数公开说明（num() 把文本转数值）"
+  },
+  {
+    "name": "xpath:text扩展取文本",
+    "kind": "html",
+    "input": "<div><p>a</p></div>",
+    "rule": "@XPath://p/text()",
+    "expected": ["a"],
+    "basis": "JsoupXpath 扩展函数公开说明（text() 取节点文本，与 XPath 内置 text() 节点测试同名同义）"
+  }
+]

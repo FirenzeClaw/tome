@@ -1,0 +1,443 @@
+[
+  {
+    "name": "css:类型选择器与文本后缀",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@css:p@text",
+    "expected": ["x"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:类选择器",
+    "kind": "html",
+    "input": "<div class=\"n\">x</div>",
+    "rule": "@css:.n@text",
+    "expected": ["x"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:id选择器",
+    "kind": "html",
+    "input": "<p id=\"a\">x</p>",
+    "rule": "@css:#a@text",
+    "expected": ["x"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:属性存在选择器",
+    "kind": "html",
+    "input": "<a href=\"/x\" title=\"t\">y</a>",
+    "rule": "@css:a[href]@text",
+    "expected": ["y"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:属性精确匹配",
+    "kind": "html",
+    "input": "<a href=\"/x\">y</a><a href=\"/z\">n</a>",
+    "rule": "@css:a[href=/x]@text",
+    "expected": ["y"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:属性前缀匹配",
+    "kind": "html",
+    "input": "<a href=\"/xyz\">y</a><a href=\"z\">n</a>",
+    "rule": "@css:a[href^=/x]@text",
+    "expected": ["y"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:属性后缀匹配",
+    "kind": "html",
+    "input": "<a href=\"/xyz\">y</a><a href=\"z\">n</a>",
+    "rule": "@css:a[href$=yz]@text",
+    "expected": ["y"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:属性包含匹配",
+    "kind": "html",
+    "input": "<a href=\"/xyz\">y</a><a href=\"z\">n</a>",
+    "rule": "@css:a[href*=yz]@text",
+    "expected": ["y"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:子代组合符",
+    "kind": "html",
+    "input": "<div><p>a</p></div>",
+    "rule": "@css:div>p@text",
+    "expected": ["a"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:相邻兄弟组合符",
+    "kind": "html",
+    "input": "<div><p>a</p><p>b</p></div>",
+    "rule": "@css:p+p@text",
+    "expected": ["b"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:一般兄弟组合符",
+    "kind": "html",
+    "input": "<div><h1>h</h1><p>a</p><p>b</p></div>",
+    "rule": "@css:h1~p@text",
+    "expected": ["a", "b"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:后代组合符",
+    "kind": "html",
+    "input": "<div><span><p>a</p></span></div>",
+    "rule": "@css:div p@text",
+    "expected": ["a"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:选择器列表按文档序返回",
+    "kind": "html",
+    "input": "<p>a</p><div>b</div>",
+    "rule": "@css:p, div@text",
+    "expected": ["a", "b"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:nth-child伪类",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li><li>c</li></ul>",
+    "rule": "@css:li:nth-child(2)@text",
+    "expected": ["b"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:is伪类选列表",
+    "kind": "html",
+    "input": "<div><p>a</p><span>b</span></div>",
+    "rule": "@css:div :is(p, span)@text",
+    "expected": ["a", "b"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:has伪类",
+    "kind": "html",
+    "input": "<div><span class=\"x\">a</span></div><div>b</div>",
+    "rule": "@css:div:has(span)@text",
+    "expected": ["a"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:not伪类",
+    "kind": "html",
+    "input": "<div><p>a</p><span>b</span></div>",
+    "rule": "@css:div :not(p)@text",
+    "expected": ["b"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:root伪类匹配文档元素",
+    "kind": "html",
+    "input": "<html><body><p>a</p></body></html>",
+    "rule": "@css::root@text",
+    "expected": ["a"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:empty伪类",
+    "kind": "html",
+    "input": "<div></div><p>a</p>",
+    "rule": "@css:div:empty@text",
+    "expected": [""],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:contains选中含文字的元素",
+    "kind": "html",
+    "input": "<p>hello world</p><p>nope</p>",
+    "rule": "@css:p:contains(hello)@text",
+    "expected": ["hello world"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:contains看后代文字",
+    "kind": "html",
+    "input": "<div><span>hello</span></div>",
+    "rule": "@css:div:contains(hello)@text",
+    "expected": ["hello"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:containsOwn只看自身文字",
+    "kind": "html",
+    "input": "<div>hello<span>world</span></div>",
+    "rule": "@css:div:containsOwn(hello)@text",
+    "expected": ["helloworld"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:containsOwn不匹配仅后代含关键字",
+    "kind": "html",
+    "input": "<div><span>hello</span></div>",
+    "rule": "@css:div:containsOwn(hello)@text",
+    "expected": [],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:containsData只看数据节点",
+    "kind": "html",
+    "input": "<script>var a=1;</script><p>var</p>",
+    "rule": "@css:script:containsData(var)@text",
+    "expected": [""],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:containsWholeText保留原始空白",
+    "kind": "html",
+    "input": "<p>a  b</p><p>A B</p>",
+    "rule": "@css:p:containsWholeText(a  b)@html",
+    "expected": ["a  b"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs：containsWholeText 为精确、不归一化的整段文本）"
+  },
+  {
+    "name": "css:containsWholeText不归一化故不匹配单空格",
+    "kind": "html",
+    "input": "<p>a  b</p><p>A B</p>",
+    "rule": "@css:p:containsWholeText(a b)@html",
+    "expected": [],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs：containsWholeText 不归一化空白）"
+  },
+  {
+    "name": "css:containsWholeText大小写敏感",
+    "kind": "html",
+    "input": "<p>a  b</p><p>A B</p>",
+    "rule": "@css:p:containsWholeText(A B)@html",
+    "expected": ["A B"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs：containsWholeText 大小写敏感）"
+  },
+  {
+    "name": "css:matches正则匹配",
+    "kind": "html",
+    "input": "<p>ab12</p><p>xyz</p>",
+    "rule": "@css:p:matches(\\d+)@text",
+    "expected": ["ab12"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:matchesOwn正则匹配自身",
+    "kind": "html",
+    "input": "<div>ab12<span>cd</span></div>",
+    "rule": "@css:div:matchesOwn(\\d+)@text",
+    "expected": ["ab12cd"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:eq取第n个",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li><li>c</li></ul>",
+    "rule": "@css:li:eq(1)@text",
+    "expected": ["b"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:lt取前n个",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li><li>c</li></ul>",
+    "rule": "@css:li:lt(2)@text",
+    "expected": ["a", "b"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:gt取n之后",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li><li>c</li></ul>",
+    "rule": "@css:li:gt(0)@text",
+    "expected": ["b", "c"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:任意属性选择器星号",
+    "kind": "html",
+    "input": "<a>1</a><a href=\"h\">2</a>",
+    "rule": "@css:a[*]@text",
+    "expected": ["2"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:属性名前缀选择器",
+    "kind": "html",
+    "input": "<a data-id=\"7\">x</a><a title=\"t\">y</a>",
+    "rule": "@css:a[^data-]@text",
+    "expected": ["x"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:属性名前缀选择器取值",
+    "kind": "html",
+    "input": "<a data-id=\"7\" data-x=\"1\">x</a>",
+    "rule": "@css:a[^data-]@attr(data-id)",
+    "expected": ["7"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:ownText只取自身文本",
+    "kind": "html",
+    "input": "<div>a<span>b</span>c</div>",
+    "rule": "@css:div@ownText",
+    "expected": ["ac"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:text后缀归一化内部空白",
+    "kind": "html",
+    "input": "<div>a  b</div>",
+    "rule": "@css:div@text",
+    "expected": ["a b"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 的 Element#text：空白被归一化）"
+  },
+  {
+    "name": "css:text后缀去掉首尾空白",
+    "kind": "html",
+    "input": "<div>  a  </div>",
+    "rule": "@css:div@text",
+    "expected": ["a"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 的 Element#text：去首尾空白）"
+  },
+  {
+    "name": "css:html后缀取内部HTML",
+    "kind": "html",
+    "input": "<div>a<span>b</span>c</div>",
+    "rule": "@css:div@html",
+    "expected": ["a<span>b</span>c"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:all后缀取外部HTML",
+    "kind": "html",
+    "input": "<div>a<span>b</span>c</div>",
+    "rule": "@css:div@all",
+    "expected": ["<div>a<span>b</span>c</div>"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:href后缀取属性",
+    "kind": "html",
+    "input": "<a href=\"/u\">x</a>",
+    "rule": "@css:a@href",
+    "expected": ["/u"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:src后缀取属性",
+    "kind": "html",
+    "input": "<img src=\"/i.png\">",
+    "rule": "@css:img@src",
+    "expected": ["/i.png"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:attr后缀取任意属性",
+    "kind": "html",
+    "input": "<a title=\"t\">x</a>",
+    "rule": "@css:a@attr(title)",
+    "expected": ["t"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 与 cookbook/selector-syntax）"
+  },
+  {
+    "name": "css:textNodes多值后缀",
+    "kind": "html",
+    "input": "<p>One <span>Two</span> Three <br> Four</p>",
+    "rule": "@css:p@textNodes",
+    "expected": ["One ", " Three ", " Four"],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 的 Element#textNodes 示例）"
+  },
+  {
+    "name": "css:nodeValue对元素为空串",
+    "kind": "html",
+    "input": "<div>a<span>b</span>c</div>",
+    "rule": "@css:div@nodeValue",
+    "expected": [""],
+    "basis": "Jsoup Selector 公开文档（jsoup.org/apidocs 的 Node#nodeValue：元素节点返回空串）"
+  },
+  {
+    "name": "css:方括号单索引",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li><li>c</li></ul>",
+    "rule": "@css:li[0]@text",
+    "expected": ["a"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：位置正着数从0开始）"
+  },
+  {
+    "name": "css:方括号负索引",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li><li>c</li></ul>",
+    "rule": "@css:li[-1]@text",
+    "expected": ["c"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：-1为倒数第一个）"
+  },
+  {
+    "name": "css:方括号闭区间",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li><li>c</li></ul>",
+    "rule": "@css:li[0:1]@text",
+    "expected": ["a", "b"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：区间端点为闭区间）"
+  },
+  {
+    "name": "css:方括号排除区间",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li><li>c</li></ul>",
+    "rule": "@css:li[!0:1]@text",
+    "expected": ["c"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：!是排除）"
+  },
+  {
+    "name": "css:点号索引",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li><li>c</li></ul>",
+    "rule": "@css:li.0@text",
+    "expected": ["a"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：Default 语法点号形态的第三段位置）"
+  },
+  {
+    "name": "css:点号负索引",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li><li>c</li></ul>",
+    "rule": "@css:li.-1@text",
+    "expected": ["c"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：-1为倒数第一个）"
+  },
+  {
+    "name": "css:反序标记倒置列表",
+    "kind": "html",
+    "input": "<ul><li>a</li><li>b</li></ul>",
+    "rule": "@css:li@text",
+    "expected": ["b", "a"],
+    "reversed": true,
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：获取列表的最前面加上负号- 可以使列表倒置）"
+  },
+  {
+    "name": "css:替换链补全相对地址",
+    "kind": "html",
+    "input": "<a href=\"/u\">x</a>",
+    "rule": "@css:a@href##^##https://x.com",
+    "expected": ["https://x.com/u"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：##正则表达式##替换内容）"
+  },
+  {
+    "name": "css:无后缀时按文本取值",
+    "kind": "html",
+    "input": "<div><a>1</a><a>2</a></div>",
+    "rule": "@css:div a",
+    "expected": ["1", "2"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：未指定后缀时取文本）"
+  },
+  {
+    "name": "css:裸Default规则等同CSS选择器",
+    "kind": "html",
+    "input": "<div><a>1</a><a>2</a></div>",
+    "rule": "div>a@text",
+    "expected": ["1", "2"],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：无前缀时跟随 Legado 预设语法，或直接 CSS 选择器）"
+  }
+]

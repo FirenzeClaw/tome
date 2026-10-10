@@ -593,17 +593,14 @@ fn rewrite_regex_match(body: &str) -> String {
     };
     let left = body[..position].trim();
     let after = body[position + 2..].trim_start();
-    let Some((pattern, flags, consumed)) = take_regex_literal(after) else {
+    let Some((pattern, consumed)) = take_regex_literal(after) else {
         return body.to_string();
     };
 
     // 左操作数的**最后一个原子**才是被匹配的主体（`@.name =~ /re/` 里的 `@.name`）
     let (prefix, operand) = split_last_operand(left);
-    let mut call = format!("match({operand}, {pattern}");
-    if let Some(flags) = flags {
-        call.push_str(&format!(", {flags}"));
-    }
-    call.push(')');
+    // 两参数调用（标志已内联进模式，见 `take_regex_literal`）
+    let call = format!("match({operand}, {pattern})");
     // 后缀（`&& ...` 之类）已含在 consumed 之后，由调用方继续扫描
     let tail = &after[consumed..];
     format!("{prefix}{call}{tail}")
@@ -638,7 +635,19 @@ fn split_last_operand(text: &str) -> (String, String) {
 }
 
 /// 取 `/pattern/flags` 形态的正则字面量。返回 (模式字面量, 标志, 消费字符数)。
-fn take_regex_literal(text: &str) -> Option<(String, Option<String>, usize)> {
+/// 取 `/pattern/flags` 形态的正则字面量。返回 (模式字面量, 消费字符数)。
+///
+/// # 标志怎么处理：**内联进模式**，而不是当第三个实参
+///
+/// RFC 9535 的 `match(value, rgx)` 是**两参数**函数（规范 §2.4.4 的定义），
+/// 而 Jayway 的 `=~ /re/i` 带忽略大小写标志。曾把它改写成
+/// `match(@, 're', 'i')`——那在解析阶段就报 "expected 3 args, but received 2"
+/// （函数的元数在注册时写死）。
+///
+/// 正确做法是把标志**内联进正则模式**：Rust 的 `regex` 支持 `(?i)` 前缀，
+/// 而 `serde_json_path` 的 `match` 直接把它交给 `regex::Regex::new`。
+/// 于是 `=~ /ab/i` → `match(@, '(?i)ab')`——两参数，语义等价。
+fn take_regex_literal(text: &str) -> Option<(String, usize)> {
     let chars: Vec<char> = text.chars().collect();
     if chars.first() != Some(&'/') {
         return None;
@@ -663,14 +672,31 @@ fn take_regex_literal(text: &str) -> Option<(String, Option<String>, usize)> {
                 flags.push(chars[cursor]);
                 cursor += 1;
             }
-            // 只保留 RFC 9535 认识的 `i`（其余标志无对应，丢弃并靠调用方
-            // 的 `[UNCERTAIN]` 记录暴露）
-            let flag_literal = if flags.contains('i') {
-                Some("'i'".to_string())
+            // 把可映射的标志内联成 Rust 正则的内联标志组。
+            //
+            // Jayway/Java 与 Rust 的标志对应：
+            //
+            // | Java 标志 | 含义 | Rust 内联 |
+            // |---|---|---|
+            // | `i` | 忽略大小写 | `(?i)` |
+            // | `s` | dotall（`.` 匹配换行） | `(?s)` |
+            // | `m` | 多行（`^`/`$` 匹配行边界） | `(?m)` |
+            // | `x` | 忽略空白 | `(?x)` |
+            //
+            // 其余 Java 标志（`u`/`d`/`U`/`c`/`g`）在 Rust 里无对应或
+            // 含义不同，故**忽略**——忽略一个不认识的标志会让"这条正则的
+            // 标志没生效"，但那比"整条规则语法错"轻，且 XML/JSON 的正则
+            // 标志在书源里几乎只有 `i`。
+            let inline: String = ['i', 's', 'm', 'x']
+                .into_iter()
+                .filter(|flag| flags.contains(*flag))
+                .collect();
+            let literal = if inline.is_empty() {
+                json_string_literal(&pattern)
             } else {
-                None
+                json_string_literal(&format!("(?{inline}){pattern}"))
             };
-            return Some((json_string_literal(&pattern), flag_literal, cursor));
+            return Some((literal, cursor));
         }
         pattern.push(current);
         index += 1;
@@ -1142,9 +1168,50 @@ mod tests {
     }
 
     #[test]
-    fn 正则的忽略大小写标志被保留() {
+    fn 正则的忽略大小写标志被内联进模式() {
+        // RFC 9535 的 `match(value, rgx)` 是**两参数**的，故标志不能当第三个
+        // 实参（那样解析阶段就报 "expected 3 args, but received 2"）。
+        // 正确做法是把标志内联成 Rust 正则的 `(?i)` 前缀。
         let rewritten = rewrite(r"$.list[?(@.name =~ /abc/i)]");
-        assert!(rewritten.contains("'i'"), "{rewritten}");
+        assert_eq!(rewritten, r"$.list[?(match(@.name, '(?i)abc'))]");
+        assert!(
+            !rewritten.contains("match(@.name, 'abc', 'i')"),
+            "标志不能是第三个实参：{rewritten}"
+        );
+    }
+
+    #[test]
+    fn 正则的其余可映射标志也被内联() {
+        // Java 的 `s`(dotall) / `m`(multiline) / `x`(忽略空白) 在 Rust 有对应
+        for (flags, expected_prefix) in
+            [("s", "(?s)"), ("m", "(?m)"), ("x", "(?x)"), ("is", "(?is)")]
+        {
+            let rewritten = rewrite(&format!(r"$.list[?(@.n =~ /a/{flags})]"));
+            assert!(
+                rewritten.contains(&format!("'{expected_prefix}a'")),
+                "标志 `{flags}` 应内联为 `{expected_prefix}`：{rewritten}"
+            );
+        }
+    }
+
+    #[test]
+    fn 无标志的正则不内联() {
+        let rewritten = rewrite(r"$.list[?(@.name =~ /abc/)]");
+        assert_eq!(rewritten, r"$.list[?(match(@.name, 'abc'))]");
+        assert!(!rewritten.contains("(?"), "无标志时不该加内联标志组");
+    }
+
+    #[test]
+    fn 认识的标志可真正生效() {
+        // 端到端：`(?i)` 必须真的让匹配变成不区分大小写
+        let value = serde_json::json!({"list": [{"n": "ABC"}]});
+        let got = crate::jsonpath::query_expression(&value, r"$.list[?(@.n =~ /abc/i)]")
+            .expect("应求值成功");
+        assert_eq!(got.nodes.len(), 1, "忽略大小写标志应生效");
+        // 反向：不带标志时不该命中
+        let got = crate::jsonpath::query_expression(&value, r"$.list[?(@.n =~ /abc/)]")
+            .expect("应求值成功");
+        assert_eq!(got.nodes.len(), 0, "不带标志时大小写敏感");
     }
 
     // ---------- 终端方法（length / 聚合函数） ----------

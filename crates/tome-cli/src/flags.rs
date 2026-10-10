@@ -112,6 +112,16 @@ pub enum Command {
         /// 动作的输入（`search` 时是关键词）
         input: Option<String>,
     },
+    /// `verify --corpus <dir> [--report <file>]`（`contracts/cli.md`）
+    ///
+    /// 跑合成语料差分：逐条比对引擎输出与期望，输出一致率与逐条 diff。
+    /// 对应 SC-002(a)：合成用例通过率 ≥95%。
+    Verify {
+        /// 语料目录
+        corpus: PathBuf,
+        /// 报告输出文件（`None` 表示写 stdout）
+        report: Option<PathBuf>,
+    },
 }
 
 /// 全局选项。
@@ -156,6 +166,8 @@ pub fn parse(args: &[String]) -> ParseOutcome {
     let mut source_file: Option<PathBuf> = None;
     let mut action: Option<String> = None;
     let mut input: Option<String> = None;
+    let mut corpus: Option<PathBuf> = None;
+    let mut report: Option<PathBuf> = None;
 
     // ## 迭代协议：每个分支返回"消费了几个参数"，循环统一推进
     //
@@ -245,6 +257,22 @@ pub fn parse(args: &[String]) -> ParseOutcome {
                     None => return ParseOutcome::Usage("--source-file 需要一个路径".to_string()),
                 };
                 source_file = Some(PathBuf::from(value));
+                2
+            }
+            "--corpus" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => return ParseOutcome::Usage("--corpus 需要一个目录".to_string()),
+                };
+                corpus = Some(PathBuf::from(value));
+                2
+            }
+            "--report" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => return ParseOutcome::Usage("--report 需要一个路径".to_string()),
+                };
+                report = Some(PathBuf::from(value));
                 2
             }
             // 未知的 `--xxx` 报用法错
@@ -363,9 +391,19 @@ pub fn parse(args: &[String]) -> ParseOutcome {
                 input,
             }
         }
+        "verify" => {
+            // `verify` 需要 `--corpus <dir>`（`contracts/cli.md` 的唯一形态；
+            // `--real-sources`/`--golden` 形态属 S1-6 的真实基线，本阶段不做）
+            let Some(corpus) = corpus else {
+                return ParseOutcome::Usage(
+                    "verify 需要 --corpus <dir>（用法：verify --corpus tests/corpus/）".to_string(),
+                );
+            };
+            Command::Verify { corpus, report }
+        }
         other => {
             return ParseOutcome::Usage(format!(
-                "未知子命令 `{other}`（本切片实现 source import / search / run）"
+                "未知子命令 `{other}`（已实现 source import / search / run / verify）"
             ));
         }
     };
@@ -412,6 +450,7 @@ pub fn help_text() -> String {
         "  tome search <source-id> <keyword>                  按书源搜索",
         "  tome search --source-file <f> <keyword>            用临时书源文件搜索",
         "  tome run <source-id> --action <a> [--input <s>]     通用执行（--action search）",
+        "  tome verify --corpus <dir> [--report <file>]       跑合成语料差分（SC-002a）",
         "",
         "全局选项：",
         "  --format json|human    输出格式（默认 json）",
@@ -419,6 +458,8 @@ pub fn help_text() -> String {
         "  --replay <dir>         从目录回放（未命中时补抓，除非加 --offline）",
         "  --offline              完全离线（须与 --replay 同用）",
         "  --data-dir <path>      数据目录",
+        "  --corpus <dir>         合成语料目录（verify 用）",
+        "  --report <file>        报告输出文件（verify 用，默认为 stdout）",
         "  -h, --help             显示本帮助",
         "",
         "退出码：0 成功 / 1 业务错误 / 2 用法错误 / 3 不支持能力",
@@ -570,9 +611,48 @@ mod tests {
     #[test]
     fn 未知子命令报用法错() {
         // 用未实现的子命令（`contracts/cli.md` 定义了它，但本切片不实现）
-        let text = parse_usage(&["verify", "x"]);
-        assert!(text.contains("verify"), "{text}");
+        let text = parse_usage(&["local", "import", "x"]);
+        assert!(text.contains("local"), "{text}");
         assert!(text.contains("source import"), "应提示可用命令：{text}");
+    }
+
+    // ---------- verify（SC-002a 的载体） ----------
+
+    #[test]
+    fn verify_接受语料目录() {
+        let (_, command) = parse_ok(&["verify", "--corpus", "tests/corpus"]);
+        assert_eq!(
+            command,
+            Command::Verify {
+                corpus: PathBuf::from("tests/corpus"),
+                report: None,
+            }
+        );
+    }
+
+    #[test]
+    fn verify_可指定报告文件() {
+        let (_, command) = parse_ok(&[
+            "verify",
+            "--corpus",
+            "tests/corpus",
+            "--report",
+            "/tmp/report.json",
+        ]);
+        match command {
+            Command::Verify { corpus, report } => {
+                assert_eq!(corpus, PathBuf::from("tests/corpus"));
+                assert_eq!(report, Some(PathBuf::from("/tmp/report.json")));
+            }
+            other => panic!("应为 verify 命令，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn verify_缺语料目录报用法错() {
+        // `--corpus` 是 verify 的唯一必需参数——没它跑不了差分
+        let text = parse_usage(&["verify"]);
+        assert!(text.contains("--corpus"), "{text}");
     }
 
     #[test]
@@ -605,6 +685,8 @@ mod tests {
             "--data-dir",
             "--url",
             "--source-file",
+            "--corpus",
+            "--report",
         ] {
             let text = parse_usage(&[flag]);
             assert!(text.contains("需要一个"), "{flag} 应报缺值：{text}");

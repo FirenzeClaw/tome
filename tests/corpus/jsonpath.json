@@ -1,0 +1,432 @@
+[
+  {
+    "name": "jsonpath:点号取字段",
+    "kind": "json",
+    "input": "{\"a\":\"b\"}",
+    "rule": "@json:$.a",
+    "expected": [
+      "b"
+    ],
+    "basis": "RFC 9535 §2.5.1（name selector 的点号简写）"
+  },
+  {
+    "name": "jsonpath:嵌套点号路径",
+    "kind": "json",
+    "input": "{\"a\":{\"b\":\"c\"}}",
+    "rule": "@json:$.a.b",
+    "expected": [
+      "c"
+    ],
+    "basis": "RFC 9535 §2.5.1（name selector 的点号简写）"
+  },
+  {
+    "name": "jsonpath:括号记法取字段",
+    "kind": "json",
+    "input": "{\"a\":{\"b\":\"c\"}}",
+    "rule": "@json:$['a']['b']",
+    "expected": [
+      "c"
+    ],
+    "basis": "RFC 9535 §2.5.1（bracket notation 的字符串 name selector）"
+  },
+  {
+    "name": "jsonpath:通配取全部元素",
+    "kind": "json",
+    "input": "{\"list\":[1,2,3]}",
+    "rule": "@json:$.list[*]",
+    "expected": [
+      "1",
+      "2",
+      "3"
+    ],
+    "basis": "RFC 9535 §2.5.2（wildcard selector）"
+  },
+  {
+    "name": "jsonpath:数组单索引",
+    "kind": "json",
+    "input": "{\"list\":[1,2,3]}",
+    "rule": "@json:$.list[0]",
+    "expected": [
+      "1"
+    ],
+    "basis": "RFC 9535 §2.5.1（数组索引 selector）"
+  },
+  {
+    "name": "jsonpath:数组负索引",
+    "kind": "json",
+    "input": "{\"list\":[1,2,3]}",
+    "rule": "@json:$.list[-1]",
+    "expected": [
+      "3"
+    ],
+    "basis": "RFC 9535 §2.5.1（负索引从末尾计数）"
+  },
+  {
+    "name": "jsonpath:数组切片",
+    "kind": "json",
+    "input": "{\"list\":[1,2,3,4]}",
+    "rule": "@json:$.list[0:2]",
+    "expected": [
+      "1",
+      "2"
+    ],
+    "basis": "RFC 9535 §2.5.3（slice selector，end 为开区间）"
+  },
+  {
+    "name": "jsonpath:数组切片中段",
+    "kind": "json",
+    "input": "{\"list\":[1,2,3,4,5]}",
+    "rule": "@json:$.list[1:3]",
+    "expected": [
+      "2",
+      "3"
+    ],
+    "basis": "RFC 9535 §2.5.3（slice selector，end 为开区间）"
+  },
+  {
+    "name": "jsonpath:多索引选择",
+    "kind": "json",
+    "input": "{\"list\":[1,2,3]}",
+    "rule": "@json:$.list[0,2]",
+    "expected": [
+      "1",
+      "3"
+    ],
+    "basis": "RFC 9535 §2.5.1（联合选择器，按文档序去重）"
+  },
+  {
+    "name": "jsonpath:多键选择",
+    "kind": "json",
+    "input": "{\"a\":\"x\",\"b\":\"y\"}",
+    "rule": "@json:$['a','b']",
+    "expected": [
+      "x",
+      "y"
+    ],
+    "basis": "RFC 9535 §2.5.1（联合选择器）"
+  },
+  {
+    "name": "jsonpath:递归下降",
+    "kind": "json",
+    "input": "{\"a\":{\"b\":{\"c\":1}}}",
+    "rule": "@json:$..c",
+    "expected": [
+      "1"
+    ],
+    "basis": "RFC 9535 §2.5.2（descendant segment `..`）"
+  },
+  {
+    "name": "jsonpath:递归下降取数组",
+    "kind": "json",
+    "input": "{\"a\":{\"list\":[1,2,3]}}",
+    "rule": "@json:$..list",
+    "expected": [
+      "[1,2,3]"
+    ],
+    "basis": "RFC 9535 §2.5.2（descendant segment `..`）"
+  },
+  {
+    "name": "jsonpath:过滤器大于",
+    "kind": "json",
+    "input": "{\"list\":[{\"p\":5},{\"p\":15}]}",
+    "rule": "@json:$.list[?(@.p>10)]",
+    "expected": [
+      "{\"p\":15}"
+    ],
+    "basis": "RFC 9535 §2.3.5.2（比较运算符 >）"
+  },
+  {
+    "name": "jsonpath:过滤器等于",
+    "kind": "json",
+    "input": "{\"list\":[{\"p\":5},{\"p\":15}]}",
+    "rule": "@json:$.list[?(@.p==5)]",
+    "expected": [
+      "{\"p\":5}"
+    ],
+    "basis": "RFC 9535 §2.3.5.2（比较运算符 ==）"
+  },
+  {
+    "name": "jsonpath:过滤器不等于",
+    "kind": "json",
+    "input": "{\"list\":[{\"p\":5},{\"p\":15}]}",
+    "rule": "@json:$.list[?(@.p!=5)]",
+    "expected": [
+      "{\"p\":15}"
+    ],
+    "basis": "RFC 9535 §2.3.5.2（比较运算符 !=）"
+  },
+  {
+    "name": "jsonpath:过滤器逻辑与",
+    "kind": "json",
+    "input": "{\"list\":[{\"p\":5,\"q\":1},{\"p\":15,\"q\":2}]}",
+    "rule": "@json:$.list[?(@.p>1 && @.q<2)]",
+    "expected": [
+      "{\"p\":5,\"q\":1}"
+    ],
+    "basis": "RFC 9535 §2.3.5.3（逻辑运算符 &&）"
+  },
+  {
+    "name": "jsonpath:过滤器逻辑或",
+    "kind": "json",
+    "input": "{\"list\":[{\"p\":5},{\"p\":15}]}",
+    "rule": "@json:$.list[?(@.p==5 || @.p==15)]",
+    "expected": [
+      "{\"p\":5}",
+      "{\"p\":15}"
+    ],
+    "basis": "RFC 9535 §2.3.5.3（逻辑运算符 ||）"
+  },
+  {
+    "name": "jsonpath:过滤器存在性测试",
+    "kind": "json",
+    "input": "{\"list\":[{\"p\":5},{\"q\":15}]}",
+    "rule": "@json:$.list[?(@.q)]",
+    "expected": [
+      "{\"q\":15}"
+    ],
+    "basis": "RFC 9535 §2.3.5.1（存在性测试）"
+  },
+  {
+    "name": "jsonpath:过滤器小于",
+    "kind": "json",
+    "input": "{\"list\":[1,2,3]}",
+    "rule": "@json:$.list[?(@<3)]",
+    "expected": [
+      "1",
+      "2"
+    ],
+    "basis": "RFC 9535 §2.3.5.2（比较运算符 <）"
+  },
+  {
+    "name": "jsonpath:脚本索引取末元素",
+    "kind": "json",
+    "input": "{\"list\":[1,2,3]}",
+    "rule": "@json:$.list[(@.length-1)]",
+    "expected": [
+      "3"
+    ],
+    "basis": "Jayway JsonPath README（Script Filters / Indexes：`$.list[(@.length-1)]` 取末元素）"
+  },
+  {
+    "name": "jsonpath:脚本索引倒数第二个",
+    "kind": "json",
+    "input": "{\"list\":[1,2,3,4,5]}",
+    "rule": "@json:$.list[(@.length-2)]",
+    "expected": [
+      "4",
+      "5"
+    ],
+    "basis": "Jayway JsonPath README（Script Filters：`(@.length-N)` 返回索引，末元素处为末项）"
+  },
+  {
+    "name": "jsonpath:length函数取数组长度",
+    "kind": "json",
+    "input": "{\"list\":[1,2,3]}",
+    "rule": "@json:$.list.length()",
+    "expected": [
+      "3"
+    ],
+    "basis": "Jayway JsonPath README（Functions：`length()` 返回数组长度）"
+  },
+  {
+    "name": "jsonpath:length函数取字符串长度",
+    "kind": "json",
+    "input": "{\"s\":\"abc\"}",
+    "rule": "@json:$.s.length()",
+    "expected": [
+      "3"
+    ],
+    "basis": "Jayway JsonPath README（Functions：`length()` 返回字符串长度）"
+  },
+  {
+    "name": "jsonpath:终端min函数",
+    "kind": "json",
+    "input": "{\"list\":[1,5,3]}",
+    "rule": "@json:$.list.min()",
+    "expected": [
+      "1"
+    ],
+    "basis": "Jayway JsonPath README（Aggregate Functions：`min()`）"
+  },
+  {
+    "name": "jsonpath:终端max函数",
+    "kind": "json",
+    "input": "{\"list\":[1,5,3]}",
+    "rule": "@json:$.list.max()",
+    "expected": [
+      "5"
+    ],
+    "basis": "Jayway JsonPath README（Aggregate Functions：`max()`）"
+  },
+  {
+    "name": "jsonpath:终端avg函数",
+    "kind": "json",
+    "input": "{\"list\":[1,5,3]}",
+    "rule": "@json:$.list.avg()",
+    "expected": [
+      "3"
+    ],
+    "basis": "Jayway JsonPath README（Aggregate Functions：`avg()`）"
+  },
+  {
+    "name": "jsonpath:终端stddev为样本标准差",
+    "kind": "json",
+    "input": "{\"list\":[1,2,3,4]}",
+    "rule": "@json:$.list.stddev()",
+    "expected": [
+      "1.2909944487358056"
+    ],
+    "basis": "Jayway JsonPath README（Aggregate Functions：`stddev()` 为样本标准差，除以 n-1）"
+  },
+  {
+    "name": "jsonpath:终端sum函数",
+    "kind": "json",
+    "input": "{\"list\":[1,5,3]}",
+    "rule": "@json:$.list.sum()",
+    "expected": [
+      "9"
+    ],
+    "basis": "Jayway JsonPath README（Aggregate Functions：`sum()`）"
+  },
+  {
+    "name": "jsonpath:空集合sum为零",
+    "kind": "json",
+    "input": "{\"list\":[]}",
+    "rule": "@json:$.list.sum()",
+    "expected": [
+      "0"
+    ],
+    "basis": "Jayway JsonPath README（Aggregate Functions：空和定义为 0）"
+  },
+  {
+    "name": "jsonpath:空集合min给空结果",
+    "kind": "json",
+    "input": "{\"list\":[]}",
+    "rule": "@json:$.list.min()",
+    "expected": [],
+    "basis": "Jayway JsonPath README（Aggregate Functions：空集合返回 undefined，此处表现为无值）"
+  },
+  {
+    "name": "jsonpath:终端min的字段自变量形态",
+    "kind": "json",
+    "input": "{\"list\":[3,1,2]}",
+    "rule": "@json:min($.list)",
+    "expected": [
+      "1"
+    ],
+    "basis": "RFC 9535 §2.4.4（`min()` 函数的节点列表自变量形态）"
+  },
+  {
+    "name": "jsonpath:终端sum的字段自变量形态",
+    "kind": "json",
+    "input": "{\"list\":[10,20,30]}",
+    "rule": "@json:sum($.list)",
+    "expected": [
+      "60"
+    ],
+    "basis": "RFC 9535 §2.4.4（`sum()` 函数的节点列表自变量形态）"
+  },
+  {
+    "name": "jsonpath:in运算符",
+    "kind": "json",
+    "input": "{\"list\":[{\"p\":5},{\"p\":15}]}",
+    "rule": "@json:$.list[?(@.p in [5])]",
+    "expected": [
+      "{\"p\":5}"
+    ],
+    "basis": "Jayway JsonPath README（Filter Operators：`in` 判断左值是否在右侧字面量集合中）"
+  },
+  {
+    "name": "jsonpath:nin运算符",
+    "kind": "json",
+    "input": "{\"list\":[{\"p\":5},{\"p\":15}]}",
+    "rule": "@json:$.list[?(@.p nin [5])]",
+    "expected": [
+      "{\"p\":15}"
+    ],
+    "basis": "Jayway JsonPath README（Filter Operators：`nin` 判断左值是否不在右侧字面量集合中）"
+  },
+  {
+    "name": "jsonpath:in多元素集合",
+    "kind": "json",
+    "input": "{\"list\":[{\"p\":5},{\"p\":15}]}",
+    "rule": "@json:$.list[?(@.p in [5,15])]",
+    "expected": [
+      "{\"p\":5}",
+      "{\"p\":15}"
+    ],
+    "basis": "Jayway JsonPath README（Filter Operators：`in` 判断左值是否在右侧字面量集合中）"
+  },
+  {
+    "name": "jsonpath:隐式前缀美元点形态",
+    "kind": "json",
+    "input": "{\"list\":[1,2,3]}",
+    "rule": "$.list[*]",
+    "expected": [
+      "1",
+      "2",
+      "3"
+    ],
+    "basis": "书源规则公开说明（社区流通的《书源规则说明》：JSONPath 最好以 @json: 或 $. 开头）"
+  },
+  {
+    "name": "jsonpath:数字取值的字符串化",
+    "kind": "json",
+    "input": "{\"n\":3}",
+    "rule": "@json:$.n",
+    "expected": [
+      "3"
+    ],
+    "basis": "RFC 9535 §2.1（JSON 数值的文本表示）"
+  },
+  {
+    "name": "jsonpath:布尔取值的字符串化",
+    "kind": "json",
+    "input": "{\"b\":true}",
+    "rule": "@json:$.b",
+    "expected": [
+      "true"
+    ],
+    "basis": "RFC 9535 §2.1（JSON 布尔的文本表示）"
+  },
+  {
+    "name": "jsonpath:null取值的字符串化",
+    "kind": "json",
+    "input": "{\"x\":null}",
+    "rule": "@json:$.x",
+    "expected": [
+      "null"
+    ],
+    "basis": "RFC 9535 §2.1（JSON null 的文本表示）"
+  },
+  {
+    "name": "jsonpath:数组整体取值",
+    "kind": "json",
+    "input": "{\"list\":[1,2,3]}",
+    "rule": "@json:$.list",
+    "expected": [
+      "[1,2,3]"
+    ],
+    "basis": "RFC 9535 §2.1（节点值序列化）"
+  },
+  {
+    "name": "jsonpath:正则匹配忽略大小写标志",
+    "kind": "json",
+    "input": "{\"list\":[{\"n\":\"ABC\"},{\"n\":\"xyz\"}]}",
+    "rule": "@json:$.list[?(@.n =~ /abc/i)].n",
+    "expected": [
+      "ABC"
+    ],
+    "basis": "Jayway JsonPath README（Filter Operators：`=~` 为正则匹配，`/re/i` 的 i 为忽略大小写标志）；RFC 9535 §2.4.4（match() 为两参数，故标志内联为 Rust 正则的 (?i) 前缀）"
+  },
+  {
+    "name": "jsonpath:正则匹配不带标志时大小写敏感",
+    "kind": "json",
+    "input": "{\"list\":[{\"n\":\"ABC\"},{\"n\":\"abc\"}]}",
+    "rule": "@json:$.list[?(@.n =~ /abc/)].n",
+    "expected": [
+      "abc"
+    ],
+    "basis": "Jayway JsonPath README（Filter Operators：`=~ /re/` 无标志时按字面大小写匹配）；RFC 9535 §2.4.4（match() 全串匹配）"
+  }
+]

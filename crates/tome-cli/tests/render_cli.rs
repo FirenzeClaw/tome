@@ -469,3 +469,121 @@ fn render_rejects_out_of_range_page() {
         "越界时 MUST NOT 产出文件（否则调用方会把它当成一页的有效结果）"
     );
 }
+
+// ===========================================================================
+// `--viewport <n>`（contracts/cli.md §2.3 的滚动模式目标）
+// ===========================================================================
+
+/// **`--viewport N` 渲染的是第 N 个视口**（不同视口的内容必须不同）。
+///
+/// ## 与 `render_page_selects_the_requested_page` 同一条判据
+///
+/// "渲染成功"不构成判据——`--viewport` 未被消费时传任何视口号都渲染首屏，
+/// 而"产出合法 PNG"照样通过。故判据同样是**差分**：视口 0 与视口 1 的
+/// 前景像素内容必须不同。
+///
+/// ## 为什么需要比翻页更大的高度
+///
+/// 滚动模式的视口高即画布高：太矮则整章只有一屏，差分断言会退化成
+/// 平凡通过。此处给 `--mode scroll` 一个足够高的视口，让长样本切成多屏。
+#[test]
+fn render_viewport_selects_the_requested_viewport() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let text = write_long_sample(dir.path());
+    let viewport0 = dir.path().join("v0.png");
+    let viewport1 = dir.path().join("v1.png");
+
+    let render = |index: &str, out: &Path| -> (i32, String, String) {
+        run_cli(&[
+            "render",
+            "--text",
+            text.to_str().unwrap(),
+            "--mode",
+            "scroll",
+            "--viewport",
+            index,
+            "--out",
+            out.to_str().unwrap(),
+            "--width",
+            "342",
+            "--height",
+            "120",
+        ])
+    };
+
+    let (code0, out0, err0) = render("0", &viewport0);
+    if code0 == 3 {
+        println!("[render] SKIPPED: 本机无图形后端");
+        return;
+    }
+    assert_eq!(code0, 0, "渲染第 0 个视口应成功，stderr: {err0}");
+    let (code1, out1, err1) = render("1", &viewport1);
+    assert_eq!(code1, 0, "渲染第 1 个视口应成功，stderr: {err1}");
+
+    let value0: serde_json::Value = serde_json::from_str(&out0).expect("应是 JSON");
+    let value1: serde_json::Value = serde_json::from_str(&out1).expect("应是 JSON");
+
+    let bytes0 = std::fs::read(&viewport0).expect("应能读第 0 个视口");
+    let bytes1 = std::fs::read(&viewport1).expect("应能读第 1 个视口");
+
+    assert_ne!(
+        bytes0, bytes1,
+        "第 0 个与第 1 个视口的像素内容必须不同——相同说明 --viewport 未被消费"
+    );
+
+    for (label, value) in [("第 0 个视口", &value0), ("第 1 个视口", &value1)] {
+        assert!(
+            value["foreground_pixels"].as_u64().unwrap_or(0) > 0,
+            "{label} 应有前景像素：{value}"
+        );
+        assert_eq!(
+            value["viewport_index"].as_u64(),
+            Some(if label.starts_with("第 0") { 0 } else { 1 }),
+            "{label} 的报告应回显消费到的视口号：{value}"
+        );
+    }
+}
+
+/// **越界视口报结构化错误**（不产出文件、不静默出空图）。
+///
+/// 与越界页码同理：静默产出底色图会让调用方无法分辨"这一屏真的是空的"
+/// 与"视口号写错了"。
+#[test]
+fn render_rejects_out_of_range_viewport() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let text = write_sample(dir.path());
+    let out = dir.path().join("nope.png");
+
+    let (code, _, stderr) = run_cli(&[
+        "render",
+        "--text",
+        text.to_str().unwrap(),
+        "--mode",
+        "scroll",
+        "--viewport",
+        "9999",
+        "--out",
+        out.to_str().unwrap(),
+        "--width",
+        "342",
+        "--height",
+        "300",
+    ]);
+
+    if code == 3 {
+        println!("[render] SKIPPED: 本机无图形后端");
+        return;
+    }
+    assert_eq!(
+        code, 1,
+        "越界视口应是业务/配置错误（退出码 1），实测 {code}；stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("9999") || stderr.contains("越界") || stderr.contains("共"),
+        "错误应说明视口号与总视口数：{stderr}"
+    );
+    assert!(
+        !out.exists(),
+        "越界时 MUST NOT 产出文件（否则调用方会把它当成一屏的有效结果）"
+    );
+}

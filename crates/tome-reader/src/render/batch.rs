@@ -283,10 +283,39 @@ impl RenderBatch {
         Self::from_lines(&lines, geometry, viewport, theme, 0.0)
     }
 
-    /// 由**一组行盒**构造批次（`for_chapter` 与 `for_page` 的共同实现）。
+    /// 由**一组行盒**构造批次（`for_chapter` / `for_page` / `for_lines` 的共同实现）。
     ///
     /// `origin_y_px` 是这些行在画布上的纵向起点：首屏取 0（章顶即画布顶），
     /// 单页渲染同样取 0（该页顶即画布顶）。
+    #[must_use]
+    pub fn for_lines(
+        lines: &[&crate::paginate::page::PageLine],
+        geometry: &GeometryConfig,
+        viewport: &Viewport,
+        theme: Theme,
+    ) -> Self {
+        Self::from_lines(lines, geometry, viewport, theme, 0.0)
+    }
+
+    /// 由**一行盒切片**构造批次——滚动视口的落点。
+    ///
+    /// ## 为什么与 [`Self::for_lines`] 并存
+    ///
+    /// `ScrollFlow::viewport_lines` 返回 `&[PageLine]`（流里切出的借用切片），
+    /// 而 `Page::lines` 是 `Vec<PageLine>`——两者都是"一组行"，但借用形态不同。
+    /// 让调用方各自 `collect` 成 `Vec<&PageLine>` 会多一次分配且要求调用方
+    /// 知道内部表示；这里提供零拷贝的直入点，与 `for_lines` 共用同一实现体。
+    #[must_use]
+    pub fn for_line_slice(
+        lines: &[crate::paginate::page::PageLine],
+        geometry: &GeometryConfig,
+        viewport: &Viewport,
+        theme: Theme,
+    ) -> Self {
+        let borrowed: Vec<&crate::paginate::page::PageLine> = lines.iter().collect();
+        Self::from_lines(&borrowed, geometry, viewport, theme, 0.0)
+    }
+
     fn from_lines(
         lines: &[&crate::paginate::page::PageLine],
         geometry: &GeometryConfig,

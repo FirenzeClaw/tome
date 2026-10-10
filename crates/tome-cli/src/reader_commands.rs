@@ -782,23 +782,68 @@ pub fn run_render(options: &GlobalOptions, command: &Command) -> CommandOutcome 
         }
     };
 
-    // 目标页：`--page <n>`（翻页）或 `--viewport <n>`（滚动，取该视口首屏）。
+    // --- 目标选取：`--page <n>`（翻页）或 `--viewport <n>`（滚动）---
     //
-    // 页号是**章内页码**（0 起），与 `tome layout` 输出的 `page_index` 同口径。
-    let target_index = args.page.map(|value| value as usize).unwrap_or(0);
-    let Some(page) = pagination.pages.get(target_index) else {
-        // 越界页码 = **结构化错误**，不是一张只有底色的图。
-        // 静默产出空图会让调用方无法分辨"这页真的是空的"与"页码写错了"。
-        return CommandOutcome::failure(
-            &ErrorKind::Configuration,
-            &format!(
-                "--page {target_index} 越界：本章共 {} 页（章内页码 0 起）",
-                pagination.pages.len()
-            ),
-        );
+    // ## 两条路径各自都「先算再取」，不互相借用
+    //
+    // `--page` 取 `paginate` 的**权威页序列**（含留白页、单行超高独占一页）；
+    // `--viewport` 取 `ScrollFlow` 切好的**视口序列**（视口高 = 画布高）。
+    // 二者是两套切分，不能用一个近似另一个：滚动视口高通常远小于页高，
+    // 用页序列去截首屏会与原视口分叉（表现为"渲染的视口 N 与 `tome layout`
+    // 报告的视口 N 内容不同"，与 `--page` 那条修正同一条纪律）。
+    let (batch, target_report) = if let Some(index) = args.viewport_index {
+        let target_index = index as usize;
+        // 先分页取行盒（`ScrollFlow::new` 的输入是 `ChapterLayout`），
+        // 再交给滚动流按视口高切分——两次转换都是既有 API，CLI 不复制逻辑。
+        let mut scroll_paginator = Paginator::new();
+        let chapter = match layout_chapter(&mut scroll_paginator, &text, &geometry, &viewport) {
+            Ok(chapter) => chapter,
+            Err(error) => {
+                return CommandOutcome::failure(&error.kind(), &format!("排版失败：{error}"));
+            }
+        };
+        let flow = match ScrollFlow::new(chapter, geometry, viewport) {
+            Ok(flow) => flow,
+            Err(error) => {
+                return CommandOutcome::failure(&error.kind(), &format!("滚动流构造失败：{error}"));
+            }
+        };
+        let Some(scroll_viewport) = flow.viewports().get(target_index) else {
+            // 越界视口号 = **结构化错误**，不是一张只有底色的图（与越界页码同理）。
+            return CommandOutcome::failure(
+                &ErrorKind::Configuration,
+                &format!(
+                    "--viewport {target_index} 越界：本章共 {} 个视口（视口号 0 起）",
+                    flow.viewports().len()
+                ),
+            );
+        };
+        let lines = flow.viewport_lines(scroll_viewport);
+        let batch = RenderBatch::for_line_slice(lines, &geometry, &viewport, theme);
+        (
+            batch,
+            serde_json::json!({ "viewport_index": target_index, "page_index": serde_json::Value::Null }),
+        )
+    } else {
+        // 页号是**章内页码**（0 起），与 `tome layout` 输出的 `page_index` 同口径。
+        let target_index = args.page.map(|value| value as usize).unwrap_or(0);
+        let Some(page) = pagination.pages.get(target_index) else {
+            // 越界页码 = **结构化错误**，不是一张只有底色的图。
+            // 静默产出空图会让调用方无法分辨"这页真的是空的"与"页码写错了"。
+            return CommandOutcome::failure(
+                &ErrorKind::Configuration,
+                &format!(
+                    "--page {target_index} 越界：本章共 {} 页（章内页码 0 起）",
+                    pagination.pages.len()
+                ),
+            );
+        };
+        (
+            RenderBatch::for_page(page, &geometry, &viewport, theme),
+            serde_json::json!({ "page_index": target_index, "viewport_index": serde_json::Value::Null }),
+        )
     };
 
-    let batch = RenderBatch::for_page(page, &geometry, &viewport, theme);
     let mut cache = GlyphCache::new();
 
     let image = match OffscreenRenderer::new(width, height)
@@ -841,6 +886,10 @@ pub fn run_render(options: &GlobalOptions, command: &Command) -> CommandOutcome 
         "software": backend.is_software,
         "theme": args.theme.clone().unwrap_or_else(|| "day".to_owned()),
         "reduced_motion": args.reduced_motion,
+        // 目标回显：`--page` 与 `--viewport` 二选一，未被选中的那项为 `null`——
+        // 调用方据此确认"我给的视口号真的被消费了"，而不是渲染了首屏。
+        "page_index": target_report.get("page_index").cloned().unwrap_or(serde_json::Value::Null),
+        "viewport_index": target_report.get("viewport_index").cloned().unwrap_or(serde_json::Value::Null),
     });
 
     CommandOutcome::with_stdout(format_report(options, &report))

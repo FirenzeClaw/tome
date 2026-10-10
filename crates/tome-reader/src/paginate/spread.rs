@@ -27,7 +27,7 @@
 //! "超过 42em 则必须分栏"（§5.1）与"手动可强制单页"（§5.2）不再冲突：
 //! 单页模式下版心封顶 42em 并居中，不自动强制分栏。
 
-use crate::paginate::config::GeometryConfig;
+use crate::paginate::config::{GeometryConfig, SpreadMode};
 
 /// 阅读区视口（**可用**宽高，不是窗口宽高）。
 ///
@@ -205,6 +205,142 @@ pub fn column_measure_px(columns: Columns, viewport: &Viewport, geometry: &Geome
     capped.max(1.0)
 }
 
+// ===========================================================================
+// 手动覆盖三态与语义回落（T020 / FR-015，裁决 OQ#14→C）
+// ===========================================================================
+
+/// 应用手动覆盖（FR-015 的**三态**），返回实际生效的栏数。
+///
+/// 只需要栏数时用它；需要知道"手动选择是否仍成立"时用
+/// [`resolve_override`]（它多给一个 [`OverrideResolution::override_active`]）。
+#[must_use]
+pub fn resolve_columns(viewport: &Viewport, geometry: &GeometryConfig) -> Columns {
+    resolve_override(viewport, geometry).columns
+}
+
+/// 手动覆盖的解析结果：实际生效的栏数 + 手动选择是否仍在生效。
+///
+/// ## 为什么要把"仍在生效"单独给出来（而不是让调用方自己比较）
+///
+/// FR-015 的第二个半句要求"宽度仅发生不改变该矛盾的变化时 MUST NOT 清除
+/// 用户的手动选择"。故调用方（会话状态）在每次变化后都要问一句：
+/// **"我的手动选择还成立吗？"**
+///
+/// 若它靠比较"`resolve_columns` 的结果 == 我选的那个"来回答，两种情形会
+/// 判错：
+///
+/// | 情形 | `resolve_columns` 结果 | "== 我选的" | 正确判断 |
+/// |---|---|---|---|
+/// | 宽窗 + ForceSpread | Double | 相等 → 以为成立 | 成立 ✓（恰巧对） |
+/// | 窄窗 + ForceSpread | Single（回落） | 不等 → 以为失效 | 失效 ✓ |
+/// | 宽窗 + **Auto** | Double | 相等 → 以为成立 | **不成立** ✗ |
+///
+/// 第三行是反例：`Auto` 模式下根本没有手动选择，但"结果恰好等于双页"会让
+/// 它看起来像有一个。后果是界面可能显示"已强制双页"——用户从没选过。
+///
+/// [`Self::override_active`] 直接回答那个问题，语义不含糊。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OverrideResolution {
+    /// 实际生效的栏数。
+    pub columns: Columns,
+    /// 手动选择是否**仍然成立**（`Auto` 恒为 `false`）。
+    pub override_active: bool,
+}
+
+/// 解析手动覆盖与自动判据的冲突（FR-015 的完整语义）。
+///
+/// ## 三态的处置
+///
+/// | `spread_mode` | 结果 | `override_active` |
+/// |---|---|---|
+/// | [`SpreadMode::Auto`] | 判据结果 | `false` |
+/// | [`SpreadMode::ForceSingle`] | 恒 [`Columns::Single`] | `true`（恒成立） |
+/// | [`SpreadMode::ForceSpread`] | 容得下则双页，否则判据结果 | 容得下 `true`，否则 `false` |
+///
+/// ## 为什么 ForceSingle 永不回落
+///
+/// "回落"的定义是"手动选择与当前可用宽度**相矛盾**"。单页在任何宽度下
+/// 都成立——它不要求任何宽度下限。故它与宽度不存在矛盾。
+///
+/// 若把 ForceSingle 也做成"窄窗时回落"，那它回落的结果恰好也是单页（判据
+/// 在窄窗下必然给单页），行为上无从区分；但这个"回落"会**清掉用户的选择**
+/// （见 [`override_decision_after_resize`]），于是用户把窗口拉宽后会发现自己
+/// 又回到双页了——而他从没改过设置。
+///
+/// ## 为什么 ForceSpread 回落的是判据结果而不是硬性单页
+///
+/// 矛盾的定义就是"判据说单页"，故两者在本函数里结果必然相同。差别在
+/// **语义**：回落是说"这次不生效"，而非"用户的选择改成了单页"。调用方据
+/// `override_active == false` 清除会话内的选择，而不是去写一个"单页"的设置。
+#[must_use]
+pub fn resolve_override(viewport: &Viewport, geometry: &GeometryConfig) -> OverrideResolution {
+    let automatic = auto_columns(viewport, geometry);
+
+    match geometry.spread_mode {
+        SpreadMode::Auto => OverrideResolution {
+            columns: automatic,
+            override_active: false,
+        },
+        SpreadMode::ForceSingle => OverrideResolution {
+            columns: Columns::Single,
+            override_active: true,
+        },
+        SpreadMode::ForceSpread => {
+            if automatic == Columns::Double {
+                OverrideResolution {
+                    columns: Columns::Double,
+                    override_active: true,
+                }
+            } else {
+                OverrideResolution {
+                    columns: automatic,
+                    override_active: false,
+                }
+            }
+        }
+    }
+}
+
+/// 宽度/几何变化后手动选择是否应当被保留（FR-015 第二半句）。
+///
+/// ## 判据是"矛盾是否改变"，不是"宽度是否改变"
+///
+/// MASTER §5.2 的原条款是「窗口尺寸变化超过一定幅度时自动模式重新接管」，
+/// 该"幅度阈值"已被判为**凭空数字且会误伤微调**（裁决 OQ#14→C）。正确语义
+/// 只看一件事：**当前几何下手动选择还成立吗？**
+///
+/// - 仍成立 → [`OverrideDecision::Keep`]（**无论宽度变了多少**）
+/// - 已不成立 → [`OverrideDecision::Clear`]（此时才移除选择，回到自动）
+///
+/// 故本函数不需要"变化幅度"这个输入——它的缺席是**刻意的**，而不是漏了参数。
+/// 加回一个 `previous_width` 参数会让实现者有机会去比较宽度，而那正是被
+/// 判为错误的做法。
+///
+/// ## 无状态（幂等）
+///
+/// 判据只依赖**当前**几何，不依赖任何历史。故同一宽度反复问答案恒相同——
+/// 调用方不必担心"反复清除"导致的界面抖动。
+#[must_use]
+pub fn override_decision_after_resize(
+    viewport: &Viewport,
+    geometry: &GeometryConfig,
+) -> OverrideDecision {
+    if resolve_override(viewport, geometry).override_active {
+        OverrideDecision::Keep
+    } else {
+        OverrideDecision::Clear
+    }
+}
+
+/// 变化后对手动选择的处置（FR-015）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverrideDecision {
+    /// 手动选择仍成立——保留（宽度是否变化过无关）。
+    Keep,
+    /// 手动选择已与当前几何矛盾——清除（回到自动）。
+    Clear,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -302,5 +438,117 @@ mod tests {
             SpreadSide::Right.opposite().opposite(),
             "右页相反两次应回到右页"
         );
+    }
+
+    // --- T020：手动覆盖三态与语义回落 ---
+
+    /// Auto 模式下没有手动选择可保留（`override_active` 恒 false）。
+    ///
+    /// ## 这条防的是一个很隐蔽的误判
+    ///
+    /// 若调用方用"`resolve_columns` 的结果 == 我选的那个"来判断选择是否
+    /// 成立，那么宽窗下的 Auto 模式会被判成"有个双页选择"——因为判据恰好
+    /// 返回 Double。后果是界面显示"已强制双页"，而用户从没选过。
+    #[test]
+    fn auto_mode_reports_no_active_override() {
+        let g = geometry();
+        // 宽到判据必然给双页
+        let wide = Viewport::new(5000.0, 800.0);
+        let resolution = resolve_override(&wide, &g);
+        assert_eq!(resolution.columns, Columns::Double, "判据应给双页");
+        assert!(
+            !resolution.override_active,
+            "Auto 模式下 override_active 必须为 false（不得因判据恰好给双页而误报）"
+        );
+        assert_eq!(
+            override_decision_after_resize(&wide, &g),
+            OverrideDecision::Clear,
+            "Auto 模式无选择可 Keep"
+        );
+    }
+
+    /// ForceSpread 在矛盾出现时回落，且报告"选择已不成立"。
+    #[test]
+    fn force_spread_falls_back_when_too_narrow() {
+        let mut g = geometry();
+        g.spread_mode = SpreadMode::ForceSpread;
+
+        let wide = resolve_override(&Viewport::new(2000.0, 800.0), &g);
+        assert_eq!(wide.columns, Columns::Double);
+        assert!(wide.override_active);
+
+        let narrow = resolve_override(&Viewport::new(800.0, 800.0), &g);
+        assert_eq!(narrow.columns, Columns::Single);
+        assert!(
+            !narrow.override_active,
+            "窄窗下 ForceSpread 与宽度矛盾，必须报告选择不成立"
+        );
+    }
+
+    /// ForceSingle 在任何宽度下都成立（单页无宽度下限）。
+    #[test]
+    fn force_single_never_falls_back() {
+        let mut g = geometry();
+        g.spread_mode = SpreadMode::ForceSingle;
+
+        for width in [0.0f32, 400.0, 1432.0, 5000.0] {
+            let resolution = resolve_override(&Viewport::new(width, 800.0), &g);
+            assert_eq!(
+                resolution.columns,
+                Columns::Single,
+                "宽度 {width} 下应强制单页"
+            );
+            assert!(
+                resolution.override_active,
+                "宽度 {width} 下 ForceSingle 不得被判为失效（它无宽度下限）"
+            );
+        }
+    }
+
+    /// **FR-015 第二半句**：宽度变但矛盾未变 → **不清除**选择。
+    #[test]
+    fn keep_decision_when_contradiction_unchanged() {
+        let mut g = geometry();
+        g.spread_mode = SpreadMode::ForceSpread;
+
+        // 三档都容得下两栏（宽度变了，矛盾没变）
+        for width in [1500.0f32, 2400.0, 3000.0] {
+            assert_eq!(
+                override_decision_after_resize(&Viewport::new(width, 800.0), &g),
+                OverrideDecision::Keep,
+                "宽度 {width} 下仍容得下两栏——不得清除用户的双页选择"
+            );
+        }
+    }
+
+    /// 矛盾出现时清除选择。
+    #[test]
+    fn clear_decision_when_contradiction_appears() {
+        let mut g = geometry();
+        g.spread_mode = SpreadMode::ForceSpread;
+
+        for width in [300.0f32, 800.0, 1431.0] {
+            assert_eq!(
+                override_decision_after_resize(&Viewport::new(width, 800.0), &g),
+                OverrideDecision::Clear,
+                "宽度 {width} 下容不下两栏——应清除选择（回落自动）"
+            );
+        }
+    }
+
+    /// 判定是**无状态的纯函数**：同一输入反复问，答案恒相同。
+    ///
+    /// "反复清除"在调用方可能表现为状态抖动（界面反复提示"已回落"）。
+    #[test]
+    fn override_decision_is_stateless_and_idempotent() {
+        let mut g = geometry();
+        g.spread_mode = SpreadMode::ForceSpread;
+        let viewport = Viewport::new(900.0, 800.0);
+
+        let first = override_decision_after_resize(&viewport, &g);
+        for _ in 0..5 {
+            assert_eq!(override_decision_after_resize(&viewport, &g), first);
+        }
+        assert_eq!(first, OverrideDecision::Clear);
     }
 }

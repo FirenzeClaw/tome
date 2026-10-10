@@ -44,7 +44,7 @@
 use crate::layout::engine::{Geometry as LayoutGeometry, LayoutEngine};
 use crate::layout::linebox::LineBox;
 use crate::paginate::config::GeometryConfig;
-use crate::paginate::spread::{auto_columns, column_measure_px, Columns, SpreadSide, Viewport};
+use crate::paginate::spread::{column_measure_px, resolve_override, Columns, SpreadSide, Viewport};
 use crate::text::model::TextModel;
 use crate::text::paragraph;
 
@@ -181,8 +181,10 @@ impl Paginator {
             .validate()
             .map_err(|field| crate::error::ReaderError::invalid_geometry(field, "invalid value"))?;
 
-        // T019 只有**自动判据**；手动覆盖三态属 T020（`spread::resolve_columns`）。
-        let resolution = auto_columns(viewport, geometry);
+        // 手动覆盖三态 + 语义回落（FR-015）。回落时 `override_active`
+        // 为 false，供上层清除会话内的手动选择。
+        let override_resolution = resolve_override(viewport, geometry);
+        let resolution = override_resolution.columns;
         let measure_px = column_measure_px(resolution, viewport, geometry);
         let line_height_px = geometry.line_height_px();
         let available_height = viewport.available_height_px;
@@ -259,9 +261,7 @@ impl Paginator {
             spread: SpreadResolution {
                 columns: resolution,
                 measure_px,
-                // 手动覆盖的状态由 T020 引入（`spread::resolve_override`）。
-                // T019 只有自动判据，故此处恒为 false。
-                override_active: false,
+                override_active: override_resolution.override_active,
             },
             rule_exceptions,
             split_diagnostic: split.diagnostic,

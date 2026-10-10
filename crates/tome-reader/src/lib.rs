@@ -54,6 +54,7 @@ pub mod layout;
 pub mod paginate;
 pub mod precalc;
 pub mod rules;
+pub mod scroll;
 pub mod text;
 
 #[cfg(feature = "render")]

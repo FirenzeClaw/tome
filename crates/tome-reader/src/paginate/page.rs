@@ -353,6 +353,112 @@ pub struct Paginator {
     engine: LayoutEngine,
 }
 
+/// 一章的**排版结果**（分页与滚动两种形态的共同输入）。
+///
+/// ## 为什么抽这个类型（FR-020/FR-021 的落点）
+///
+/// FR-020 要求两种阅读形态"在同一组几何参数下可切换"，FR-021 要求"不引入
+/// 第二套坐标"。两者合起来意味着：**两种形态必须消费同一份行盒序列**——
+/// 若各自排版，断行结果可能不同（版心、可用高都会参与），那时"锚点不变"
+/// 就是巧合而非保证。
+///
+/// 故把"正文 → 章内行盒序列"这一步单独成函数，分页与滚动都从它出发。
+/// 分页再加"按可用高切页"，滚动再加"按可用高切视口"。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChapterLayout {
+    /// 章内行盒序列（按阅读顺序，`chapter_char_range` 是**章内**区间）
+    pub lines: Vec<PageLine>,
+    /// 章内字符总数（含段间分隔符）
+    pub char_len: usize,
+    /// 版心宽度（px）——分页与滚动共用的几何结果
+    pub measure_px: f32,
+    /// 实际生效的栏数（含手动覆盖，FR-015）
+    pub columns: Columns,
+    /// 手动覆盖是否仍在生效
+    pub override_active: bool,
+    /// 全部禁则例外（供 SC-002 计数）
+    pub rule_exceptions: Vec<crate::layout::linebox::RuleExceptionRecord>,
+    /// 段落切分的诊断（FR-002 的"可读诊断记录"）
+    pub split_diagnostic: paragraph::Diagnostic,
+    /// 超长西文词退化的次数（FR-009 的诊断口径）
+    pub degraded_words: usize,
+}
+
+/// 把一章正文排版为章内行盒序列（**两种阅读形态的共同输入**）。
+///
+/// ## 这是唯一的排版入口
+///
+/// 分页（[`Paginator::paginate`]）与滚动（`crate::scroll::flow`）都必须经此
+/// 函数取得行盒。这样"两种形态共享同一排版结果"是**结构性事实**而非约定
+/// ——没有第二条排版路径可供绕过（有测试断言两者行盒逐字段相同）。
+///
+/// ## 不做的事
+///
+/// - 不切页、不切视口（那是调用方各自的关切）
+/// - 不调 `ContentProvider`（FR-004：正文由调用方一次交给本层）
+/// - 不读 Theme / 呈现参数（FR-019/SC-005：分页只依赖几何）
+pub fn layout_chapter(
+    paginator: &mut Paginator,
+    content: &str,
+    geometry: &GeometryConfig,
+    viewport: &Viewport,
+) -> Result<ChapterLayout, crate::error::ReaderError> {
+    geometry
+        .validate()
+        .map_err(|field| crate::error::ReaderError::invalid_geometry(field, "invalid value"))?;
+
+    let override_resolution = resolve_override(viewport, geometry);
+    let resolution = override_resolution.columns;
+    let measure_px = column_measure_px(resolution, viewport, geometry);
+
+    let split = paragraph::split(content);
+    let layout_geometry = LayoutGeometry {
+        measure_px,
+        font_size_px: f32::from(geometry.font_size_px),
+        line_height: geometry.line_height,
+        alignment: crate::rules::justify::Alignment::Justified,
+    };
+
+    // 逐段排版，把行盒换算成章内区间。
+    //
+    // 段落的章内起点（`para.char_start`）是换算的关键：行盒的段内区间
+    // 加上它即得章内区间。
+    let mut lines: Vec<PageLine> = Vec::new();
+    let mut rule_exceptions = Vec::new();
+    let mut degraded_words = 0usize;
+
+    for para in &split.paragraphs {
+        let model = TextModel::new(para.text.clone());
+        let result = paginator
+            .engine
+            .layout_paragraph(&model, para.index, &layout_geometry);
+
+        degraded_words += result.degraded_words;
+        rule_exceptions.extend(result.exceptions.iter().cloned());
+
+        for line in result.lines {
+            let offset = para.char_start;
+            let chapter_char_range =
+                (line.char_range.start + offset)..(line.char_range.end + offset);
+            lines.push(PageLine {
+                line,
+                chapter_char_range,
+            });
+        }
+    }
+
+    Ok(ChapterLayout {
+        lines,
+        char_len: content.chars().count(),
+        measure_px,
+        columns: resolution,
+        override_active: override_resolution.override_active,
+        rule_exceptions,
+        split_diagnostic: split.diagnostic,
+        degraded_words,
+    })
+}
+
 impl Paginator {
     /// 新建分页器。
     #[must_use]
@@ -388,56 +494,15 @@ impl Paginator {
         geometry: &GeometryConfig,
         viewport: &Viewport,
     ) -> Result<PaginationResult, crate::error::ReaderError> {
-        geometry
-            .validate()
-            .map_err(|field| crate::error::ReaderError::invalid_geometry(field, "invalid value"))?;
+        // --- 1. 排版（与滚动形态共用同一入口，FR-020/021）---
+        let chapter = layout_chapter(self, content, geometry, viewport)?;
 
-        // 手动覆盖三态 + 语义回落（FR-015）。回落时 `override_active`
-        // 为 false，供上层清除会话内的手动选择。
-        let override_resolution = resolve_override(viewport, geometry);
-        let resolution = override_resolution.columns;
-        let measure_px = column_measure_px(resolution, viewport, geometry);
         let line_height_px = geometry.line_height_px();
         let available_height = viewport.available_height_px;
-
-        let split = paragraph::split(content);
-        let layout_geometry = LayoutGeometry {
-            measure_px,
-            font_size_px: f32::from(geometry.font_size_px),
-            line_height: geometry.line_height,
-            alignment: crate::rules::justify::Alignment::Justified,
-        };
-
-        // --- 1. 逐段排版，把行盒换算成章内区间 ---
-        //
-        // 段落的章内起点（`para.char_start`）是换算的关键：行盒的段内区间
-        // 加上它即得章内区间。
-        let mut chapter_lines: Vec<PageLine> = Vec::new();
-        let mut rule_exceptions = Vec::new();
-        let mut degraded_words = 0usize;
-
-        for para in &split.paragraphs {
-            let model = TextModel::new(para.text.clone());
-            let result = self
-                .engine
-                .layout_paragraph(&model, para.index, &layout_geometry);
-
-            degraded_words += result.degraded_words;
-            rule_exceptions.extend(result.exceptions.iter().cloned());
-
-            for line in result.lines {
-                let offset = para.char_start;
-                let chapter_char_range =
-                    (line.char_range.start + offset)..(line.char_range.end + offset);
-                chapter_lines.push(PageLine {
-                    line,
-                    chapter_char_range,
-                });
-            }
-        }
+        let resolution = chapter.columns;
 
         // --- 2. 贪心装页 ---
-        let mut pages = pack_pages(&chapter_lines, line_height_px, available_height);
+        let mut pages = pack_pages(&chapter.lines, line_height_px, available_height);
 
         // --- 3. 内容页区间的收尾：让每页认领到"下一页首个字符"为止 ---
         //
@@ -465,13 +530,13 @@ impl Paginator {
             pages,
             spread: SpreadResolution {
                 columns: resolution,
-                measure_px,
-                override_active: override_resolution.override_active,
+                measure_px: chapter.measure_px,
+                override_active: chapter.override_active,
             },
-            rule_exceptions,
-            split_diagnostic: split.diagnostic,
-            degraded_words,
-            char_len: content.chars().count(),
+            rule_exceptions: chapter.rule_exceptions,
+            split_diagnostic: chapter.split_diagnostic,
+            degraded_words: chapter.degraded_words,
+            char_len: chapter.char_len,
         })
     }
 }

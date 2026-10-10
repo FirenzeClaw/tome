@@ -1,4 +1,4 @@
-//! [DONE] 书源的 JS 接线：把沙箱接到管线上（tasks.md T043/T044 的消费侧）
+//! \[DONE] 书源的 JS 接线：把沙箱接到管线上（tasks.md T043/T044 的消费侧）
 //!
 //! # 本模块解决的问题
 //!
@@ -27,7 +27,7 @@
 //!
 //! 纯 CSS/正则的书源完全用不到沙箱。给它们也建 runtime 是浪费
 //! （QuickJS 初始化 + prelude 注入有实打实的开销）。
-//! 故 [`SourceJsEngine::optional_for`] 在"书源不含 JS 特征"时返回 `None`
+//! 故 [`SourceJsEngine::for_source`] 在"书源不含 JS 特征"时返回 `None`
 //! ——调用方据此走快路径。
 //!
 //! 判定见 [`source_needs_javascript`]。

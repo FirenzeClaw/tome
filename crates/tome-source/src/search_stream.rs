@@ -1,4 +1,4 @@
-//! [DONE] 并行流式搜索（tasks.md T073 / A6 / FR-012，SC-006）
+//! \[DONE] 并行流式搜索（tasks.md T073 / A6 / FR-012，SC-006）
 //!
 //! # 本模块**替代** `search.rs` 里的串行实现
 //!
@@ -71,7 +71,7 @@ use crate::source::ParsedSource;
 /// 取 8：足以让"一个慢源"不再拖住全部（8 个槽位里还有 7 个在跑），
 /// 又不至于让单机产生异常并发。
 ///
-/// [WORKAROUND] 硬编码常量：若实测发现慢源占比很高（8 个槽位仍不够），
+/// \[WORKAROUND] 硬编码常量：若实测发现慢源占比很高（8 个槽位仍不够），
 /// 应改为可配置项随 `config.toml` 注入。
 pub const MAX_SEARCH_WORKERS: usize = 8;
 

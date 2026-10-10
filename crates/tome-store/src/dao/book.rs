@@ -1,4 +1,4 @@
-//! [DONE] DAO·书籍 / 章节 / 库根（tasks.md T057 / FR-023、FR-025）
+//! \[DONE] DAO·书籍 / 章节 / 库根（tasks.md T057 / FR-023、FR-025）
 //!
 //! # 身份规则（`data-model.md`）
 //!

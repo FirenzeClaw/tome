@@ -386,35 +386,35 @@
 
 ### 数据导入导出 + 阅读记录 + 书内搜索
 
-- [ ] T087 [US4] tome-store：全部阅读数据导出/导入（书源+书架+进度+书签+高亮+批注+规则，JSON，对称可导回）于 `crates/tome-store/src/backup.rs`（FR-033）
-  - [ ] 导出→清空→导入→数据一致（往返测试）
-- [ ] T088 [P] [US4] tome-store：Android 备份书源导入（上游备份 zip 中的书源 JSON 解析）于 `crates/tome-store/src/backup_android.rs`（FR-034）
-  - [ ] Android 备份样本可导入（FR-034 验收落点）
-- [ ] T089 [P] [US4] tome-store：阅读记录落库（每书阅读时长/字数，可聚合；无界面下也落库）于 `crates/tome-store/src/dao/read_record.rs`（FR-026b）
-- [ ] T090 [P] [US6] tome-store：书内全文搜索（FTS5 索引已缓存章节）于 `crates/tome-store/src/fts.rs`（FR-019b，仅检索已缓存，不触发额外抓取）
-- [ ] T091 [P] [US4] tome-store：完整删除用户数据（配置、缓存与个人数据）于 `crates/tome-store/src/delete.rs`（FR-035）
-  - [ ] 删除后书架/进度/痕迹/规则/配置全清；不残留文件或索引引用
+- [x] T087 [US4] tome-store：全部阅读数据导出/导入（书源+书架+进度+书签+高亮+批注+规则，JSON，对称可导回）于 `crates/tome-store/src/backup.rs`（FR-033）
+  - [x] 导出→清空→导入→数据一致（往返测试）
+- [x] T088 [P] [US4] tome-store：Android 备份书源导入（上游备份 zip 中的书源 JSON 解析）于 `crates/tome-store/src/backup_android.rs`（FR-034）
+  - [x] Android 备份样本可导入（FR-034 验收落点）
+- [x] T089 [P] [US4] tome-store：阅读记录落库（每书阅读时长/字数，可聚合；无界面下也落库）于 `crates/tome-store/src/dao/read_record.rs`（FR-026b）
+- [x] T090 [P] [US6] tome-store：书内全文搜索（FTS5 索引已缓存章节）于 `crates/tome-store/src/fts.rs`（FR-019b，仅检索已缓存，不触发额外抓取）
+- [x] T091 [P] [US4] tome-store：完整删除用户数据（配置、缓存与个人数据）于 `crates/tome-store/src/delete.rs`（FR-035）
+  - [x] 删除后书架/进度/痕迹/规则/配置全清；不残留文件或索引引用
 
 ### 错误本地化 + CLI 完整命令面 + 无头验证 + CI 收口
 
-- [ ] T092 [US6] tome-core + tome-cli：ErrorKind → 中英文案映射面（引擎只产标识，文案在上层/CLI 资源）于 `crates/tome-cli/src/i18n.rs`（FR-044/SC-016）
-  - [ ] 引擎错误 100% 可映射中英文案；无单语言可读错误
-- [ ] T093 [US6] tome-cli：补齐命令面（`info`/`toc`/`content`/`run --trace`/`local`/`data`/`source check`/`source list --group/--enabled`/`data delete`/搜索关键词管理）+ 全局 flag（`--format human`/`--data-dir`/`--config`/`--offline`）于 `crates/tome-cli/src/`（contracts/cli.md，FR-001 分组启停 + FR-018 关键词管理 + FR-035 删除入口）
-  - [ ] `run --trace` 输出规则求值轨迹（逐步中间值，FR-037）
-  - [ ] 书源分组与启停可经 CLI 操作；搜索关键词可收藏与复用；`data delete` 可完整删除用户数据
-- [ ] T094 [US6] 无头运行验证：在无图形环境（无窗口系统）下经 CLI 调用引擎全部能力于 `crates/tome-cli/tests/headless.rs`（FR-036/SC-011）
-  - [ ] 无图形环境下全能力可调且无图形相关失败（100%）
-- [ ] T095 [US6] CI：三平台 release 产物 + 体积基线监控于 `.github/workflows/release.yml`（SC-009/SC-010）
-  - [ ] 三平台产物可运行；体积基线入 CI 监控
-- [ ] T096 [US6] CI：依赖图断言——`cargo build -p tome-core` 在无上层 crate 时独立通过；`tome-js`/`tome-net`/`tome-store`/`tome-rule` 互不依赖（星型无环）于 `.github/workflows/ci.yml`（FR-039/宪章 IV）
-  - [ ] 手动引入反向依赖时 CI 变红（验证断言有效）
+- [x] T092 [US6] tome-core + tome-cli：ErrorKind → 中英文案映射面（引擎只产标识，文案在上层/CLI 资源）于 `crates/tome-cli/src/i18n.rs`（FR-044/SC-016）
+  - [x] 引擎错误 100% 可映射中英文案；无单语言可读错误
+- [x] T093 [US6] tome-cli：补齐命令面（`info`/`toc`/`content`/`run --trace`/`local`/`data`/`source check`/`source list --group/--enabled`/`data delete`/搜索关键词管理）+ 全局 flag（`--format human`/`--data-dir`/`--config`/`--offline`）于 `crates/tome-cli/src/`（contracts/cli.md，FR-001 分组启停 + FR-018 关键词管理 + FR-035 删除入口）
+  - [x] `run --trace` 输出规则求值轨迹（逐步中间值，FR-037）
+  - [x] 书源分组与启停可经 CLI 操作；搜索关键词可收藏与复用；`data delete` 可完整删除用户数据
+- [x] T094 [US6] 无头运行验证：在无图形环境（无窗口系统）下经 CLI 调用引擎全部能力于 `crates/tome-cli/tests/headless.rs`（FR-036/SC-011）
+  - [x] 无图形环境下全能力可调且无图形相关失败（100%）
+- [x] T095 [US6] CI：三平台 release 产物 + 体积基线监控于 `.github/workflows/release.yml`（SC-009/SC-010）
+  - [x] 三平台产物可运行；体积基线入 CI 监控
+- [x] T096 [US6] CI：依赖图断言——`cargo build -p tome-core` 在无上层 crate 时独立通过；`tome-js`/`tome-net`/`tome-store`/`tome-rule` 互不依赖（星型无环）于 `.github/workflows/ci.yml`（FR-039/宪章 IV）
+  - [x] 手动引入反向依赖时 CI 变红（验证断言有效）
 
 > **⛔ 检查点：S1-6 之后（S1 完成）**
-> - [ ] SC-002b 真实书源回归基线已记录
-> - [ ] 三平台 CI 产物；体积基线在监控
-> - [ ] spec 全部 SC 可度量项通过；宪章合规复检通过
-> - [ ] 人工审查 + 干净室轴审查通过
-> - [ ] 上游参考运行器接线的干净室约定已成文并执行（运行器怎么跑 / 产物落盘位置 / 核对人）
+> - [x] SC-002b 真实书源回归基线已记录
+> - [x] 三平台 CI 产物；体积基线在监控
+> - [x] spec 全部 SC 可度量项通过；宪章合规复检通过
+> - [x] 人工审查 + 干净室轴审查通过
+> - [x] 上游参考运行器接线的干净室约定已成文并执行（运行器怎么跑 / 产物落盘位置 / 核对人）
 
 ---
 

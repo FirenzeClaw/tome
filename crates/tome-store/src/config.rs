@@ -1,4 +1,4 @@
-//! [DONE] 配置 TOML 的加载与原子写（tasks.md T062 / FR-032）
+//! \[DONE] 配置 TOML 的加载与原子写（tasks.md T062 / FR-032）
 //!
 //! # 没有全局 `CONFIG` 单例（架构审查 A3）
 //!

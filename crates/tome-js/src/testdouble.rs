@@ -1,4 +1,4 @@
-//! [DONE] 内存态宿主替身：`StoreHost` 与 `CryptoHost`（tasks.md T033）
+//! \[DONE] 内存态宿主替身：`StoreHost` 与 `CryptoHost`（tasks.md T033）
 //!
 //! # 为什么替身是产品的一部分，而不仅是测试脚手架
 //!
@@ -16,7 +16,7 @@
 //! 一个"什么都接受"的替身会让 T041 的安全红线测试**假绿**——等 S1-4 真实
 //! `tome-store` 装上后才发现越界没挡住，而那时问题已经被埋进两层实现里。
 //!
-//! 故本模块的 [`MemoryStoreHost::read_file`] / [`write_file`] 实现了完整的
+//! 故本模块的 [`MemoryStoreHost`](crate::testdouble::MemoryStoreHost "MemoryStoreHost") 的 `read_file` / `write_file` 实现了完整的
 //! 路径包含判定，与真实实现的要求一致：
 //!
 //! | 输入形态 | 判定 | 理由 |

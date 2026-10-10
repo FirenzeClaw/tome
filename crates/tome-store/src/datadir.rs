@@ -1,4 +1,4 @@
-//! [DONE] 数据目录解析与启动期检测（tasks.md T055 / FR-042、FR-043）
+//! \[DONE] 数据目录解析与启动期检测（tasks.md T055 / FR-042、FR-043）
 //!
 //! # 两条运行模式
 //!
@@ -18,7 +18,7 @@
 //! 判定为安装模式，程序会去系统目录建一个**空库**——用户看到的是"书架空了"。
 //! 故 [`DataDir::resolve`] 在把 `data/` 判为不可用时，只回落到系统目录而
 //! **不**迁移或删除 `data/` 里的任何东西；同时把判定理由放进
-//! [`DataDir::resolution_note`] 供上层展示，让"我的数据去哪了"有答案。
+//! `DataDir::resolution_note` 供上层展示，让"我的数据去哪了"有答案。
 //!
 //! # 启动期检测（FR-043）
 //!
@@ -47,12 +47,12 @@ pub const APP_DIR_NAME: &str = "tome";
 ///
 /// 硬门槛会在"磁盘快满但还能用"时拒绝启动——那剥夺了用户继续读书的能力，
 /// 而读书本身几乎不占空间（缓存可以随时清）。故空间不足**不**阻止启动，
-/// 只在剩余量低于本值时给出警告（[`Layout::space_warning`]）。
+/// 只在剩余量低于本值时给出警告（`Layout::space_warning`）。
 ///
 /// 取 100 MiB：足以容纳一本书的全部章节缓存（5 万章 × 6 KB ≈ 300 MB 是上限，
 /// 但按需缓存的实际占用远低于此），而低于它的磁盘本身就该引起用户注意。
 ///
-/// [WORKAROUND] 硬编码常量：改为随 `config.toml` 的存储子集注入（T063 的组合根
+/// \[WORKAROUND] 硬编码常量：改为随 `config.toml` 的存储子集注入（T063 的组合根
 /// 已有注入位），当前阶段保持无配置依赖。
 pub const RECOMMENDED_FREE_BYTES: u64 = 100 * 1024 * 1024;
 
@@ -405,15 +405,47 @@ fn resolve_system(system_data_dir: Option<&Path>, note: Option<&str>) -> Resolve
 /// 唯一可靠的判据是真的写一次。这是 `data-model.md`「启动期检测」的意图——
 /// 检测的目的是**提前发现**，而不是预测。
 ///
-/// 文件名带进程号：并发启动的两个实例不会互相干扰。
+/// # 探测文件名的唯一性（并发下的正确性）
+///
+/// 文件名带**进程号 + 线程号**，而不是只带进程号。
+///
+/// ## 为什么只带进程号不够（实测踩到的坑）
+///
+/// 首版只用 `std::process::id()`。那在"一个进程里多个线程各自解析数据目录"
+/// 时会出问题：两个线程探测**同一个目录**时用的是**同一个文件名**，
+/// 于是 A 的"先删一次"会把 B 刚写下的探测文件删掉，B 随后的
+/// `remove_file` 报 not-found → `probe` 失败 → 数据目录被判为不可用。
+///
+/// 后果不是"测试挂了"这么轻：它会**悄悄退化到默认数据目录**，于是本该
+/// 隔离在临时目录里的写入落到了共享位置——表现为互不相关的测试互相污染
+/// （实测症状：`source import` 的同 id 更新计数偶发为 0、清缓存偶发
+/// "database is locked"）。
+///
+/// 加上线程号后，每个调用者有自己的文件，互不干扰。
+///
+/// ## 为什么不干脆用一个随机数
+///
+/// `thread::current().id()` 是**廉价且必定可用**的（不需要随机源，也不
+/// 依赖时钟）。随机数要引 rand 或手搓，而这里只需要"同一时刻不同调用者
+/// 不撞名"——线程号恰好就是这个语义，且与"并发"这件事一一对应。
 fn probe(dir: &Path) -> Result<(), StoreError> {
     std::fs::create_dir_all(dir).map_err(|error| from_io(dir, error))?;
 
-    let marker = dir.join(format!(".tome-write-probe-{}", std::process::id()));
-    // 先删一次：上一次异常退出可能留下探测文件（用户看到会疑惑）
-    let _ = std::fs::remove_file(&marker);
-    std::fs::write(&marker, b"probe").map_err(|error| from_io(dir, error))?;
-    std::fs::remove_file(&marker).map_err(|error| from_io(dir, error))?;
+    let marker = dir.join(format!(
+        ".tome-write-probe-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    // 先删一次：上一次异常退出可能留下探测文件（用户看到会疑惑）。
+    // 容忍 not-found——那说明本来就没有，不是错误。
+    match std::fs::remove_file(&marker) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(from_io(&marker, error)),
+    }
+
+    std::fs::write(&marker, b"probe").map_err(|error| from_io(&marker, error))?;
+    std::fs::remove_file(&marker).map_err(|error| from_io(&marker, error))?;
 
     // 目录项清点：目录存在且可写，但**读**不了（如只给了写权限）时，
     // 后续的目录扫描会失败。这里一并挡住。

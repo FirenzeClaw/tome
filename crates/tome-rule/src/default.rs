@@ -1,4 +1,4 @@
-//! [DONE] Default（JSOUP 之 Default / preter）语法解析器（PM 补漏裁决）
+//! \[DONE] Default（JSOUP 之 Default / preter）语法解析器（PM 补漏裁决）
 //!
 //! # 这是公开规则说明的**第一语法**
 //!
@@ -149,7 +149,7 @@ pub struct DefaultRule {
 
 /// 解析一条 Default 规则正文（调用方已剥掉 `-` 反序标记与 `@@` 前缀）。
 ///
-/// [DONE] 本模块的解析入口。
+/// \[DONE] 本模块的解析入口。
 ///
 /// # 段与访问器的切分
 ///
@@ -414,7 +414,7 @@ fn matching_open_bracket(text: &str) -> Option<usize> {
 
 /// 在文档上求值一条 Default 规则，产出字符串列表。
 ///
-/// [DONE] 本模块的求值入口。多段是**逐段嵌套下钻**（见模块文档的依据）。
+/// \[DONE] 本模块的求值入口。多段是**逐段嵌套下钻**（见模块文档的依据）。
 pub fn evaluate(document: &Document, rule: &str) -> Result<Vec<String>, RuleError> {
     let parsed = parse(rule)?;
     evaluate_with_nodes(None, Some(document), &parsed)

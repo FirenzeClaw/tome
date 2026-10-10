@@ -1,8 +1,8 @@
-//! [DONE] `NetHost` 的实现接线（tasks.md T032 / FR-005 网络类）
+//! \[DONE] `NetHost` 的实现接线（tasks.md T032 / FR-005 网络类）
 //!
 //! # 本模块的职责边界
 //!
-//! `NetHost` 的**实现在 [`crate::executor`]**（[`RequestExecutor`] 的
+//! `NetHost` 的**实现在 [`crate::executor`]**（[`crate::executor::RequestExecutor`] 的
 //! `impl NetHost for` 块）——那是"全系统唯一的发请求出口"（架构决策 A2）。
 //! 本模块不重复实现它，而是回答另一个问题：
 //!
@@ -58,7 +58,7 @@ use crate::charset;
 /// 变成一个没有依据的谜。此处**不**依赖 tome-source（那是反向依赖），
 /// 故这个数字在两处各写一次——它是**契约值**而非实现细节。
 ///
-/// [WORKAROUND] 若将来它需要可配置，应下沉到 `RequestSpec` 的构造方
+/// \[WORKAROUND] 若将来它需要可配置，应下沉到 `RequestSpec` 的构造方
 /// （管线与脚本桥共用一处），而不是继续在两边各调一次。
 pub const SCRIPT_REQUEST_TIMEOUT_MS: u64 = 15_000;
 

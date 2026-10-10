@@ -1,4 +1,4 @@
-//! [DONE] XPath 值模型与 XPath 1.0 §3.6 的节点字符串展开（tasks.md T049）
+//! \[DONE] XPath 值模型与 XPath 1.0 §3.6 的节点字符串展开（tasks.md T049）
 
 use std::fmt;
 
@@ -34,7 +34,7 @@ pub enum XPathValue {
     /// **第一个**节点的值。若把属性结果也折成一个字符串，`//a/@href`
     /// 就只会产出第一个 href——那是错的。
     ///
-    /// 故属性轴的结果用序列承载，由 [`super::mod`] 的入口展开成字符串
+    /// 故属性轴的结果用序列承载，由 [`super`] 的入口展开成字符串
     /// 列表。除该入口外，序列**不参与**任何 XPath 运算（对它做算术会被
     /// [`super::eval::to_number`] 按惯例取首项）。
     Sequence(Vec<XPathValue>),
@@ -43,7 +43,7 @@ pub enum XPathValue {
 impl XPathValue {
     /// 构造一个节点集：去重后按文档序排列。
     ///
-    /// [DONE] 节点集的**唯一**构造入口。去重是 §3.6 明文要求的：
+    /// \[DONE] 节点集的**唯一**构造入口。去重是 §3.6 明文要求的：
     ///
     /// > A node-set is a set of nodes with no duplicates.
     ///
@@ -94,7 +94,7 @@ pub fn sort_document_order(nodes: &mut [NodeRef]) {
 /// 而 DOM 的属性本身保持源码顺序（[`crate::dom`] 的 `attrs` 是 `Vec`）。
 /// 故本实现按"元素本身的位置 + 属性在元素内的下标"排序——这是让
 /// `@*[1]`、`@*[last()]` 有确定答案的唯一办法。属性节点在
-/// [`crate::dom`] 里由 `(元素, 属性名)` 二元组表示，见 [`AttributeNode`]。
+/// [`crate::dom`] 里由 `(元素, 属性名)` 二元组表示，见 `AttributeNode`。
 pub fn compare_document_order(left: &NodeRef, right: &NodeRef) -> std::cmp::Ordering {
     use std::cmp::Ordering;
 

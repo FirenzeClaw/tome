@@ -1,4 +1,4 @@
-//! [DONE] JSONPath 聚合函数注册（tasks.md T047 / research R3）
+//! \[DONE] JSONPath 聚合函数注册（tasks.md T047 / research R3）
 //!
 //! # 为什么用 `#[function]` 而不是文本替换
 //!
@@ -232,7 +232,7 @@ fn to_value(computed: Option<f64>) -> ValueType<'static> {
 /// | `#[function]` 注册的 `min()` 等 | 过滤器里的**嵌套**调用（`[? count(@.x) > min($.y)]`） |
 /// | 本函数 | 整条表达式就是终端调用的场合（`$.list.min()`） |
 ///
-/// 两者都调 [`Aggregate`] 的同一套计算，故结果必然一致——不会出现
+/// 两者都调 `Aggregate` 的同一套计算，故结果必然一致——不会出现
 /// "过滤器里算出来的 min 与终端算出来的 min 不同"这类分叉。
 pub fn apply_terminal(
     name: &str,

@@ -1,4 +1,4 @@
-//! [DONE] 书源持久化的薄适配（吸收 `tome-source::registry`，T056 的收尾）
+//! \[DONE] 书源持久化的薄适配（吸收 `tome-source::registry`，T056 的收尾）
 //!
 //! # 这个模块为什么存在
 //!

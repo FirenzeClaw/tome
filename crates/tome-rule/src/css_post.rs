@@ -121,7 +121,7 @@ impl RuleSuffix {
 
     /// 对单个节点求值。
     ///
-    /// [DONE] 后缀求值的唯一入口。`document` 参数用于 `Html`/`OuterHtml` 的序列化。
+    /// \[DONE] 后缀求值的唯一入口。`document` 参数用于 `Html`/`OuterHtml` 的序列化。
     pub fn evaluate(&self, node: &NodeRef) -> Vec<String> {
         match self {
             Self::Text => vec![node.text()],
@@ -183,7 +183,7 @@ fn outer_html(node: &NodeRef) -> String {
 /// 故本实现的取舍是：**结构保真、字符转义与自闭合形式按 HTML5 规范**，
 /// 不追求与 Jsoup 逐字节相同（那需要对照数据，属 S1-6 真实书源基线的范畴）。
 ///
-/// [UNCERTAIN] 属性引号风格、自闭合标签写法（`<br>` vs `<br/>`）、实体转义
+/// \[UNCERTAIN] 属性引号风格、自闭合标签写法（`<br>` vs `<br/>`）、实体转义
 /// 范围这三处与 Jsoup 的差异未逐项对照。S1-6 的差分基线会给出实测差异率。
 ///
 /// ## 为什么用显式栈而不是递归
@@ -423,7 +423,7 @@ impl IndexSlice {
 
     /// 把切片施加到一个列表上。
     ///
-    /// [DONE] 索引语义的唯一落点。
+    /// \[DONE] 索引语义的唯一落点。
     ///
     /// ## 端点归一化
     ///
@@ -779,7 +779,7 @@ impl<'a> RuleEngine<'a> {
 
     /// 求值一条规则（不限定求值起点：文档根）。
     ///
-    /// [DONE] 五类规则的统一入口。
+    /// \[DONE] 五类规则的统一入口。
     pub fn evaluate(&self, rule: &str) -> Result<Vec<String>, crate::error::RuleError> {
         let (subject, chain) = split_chain(rule);
         let values = self.evaluate_subject(None, &subject)?;
@@ -1048,7 +1048,7 @@ fn evaluate_css_body(
 /// 的上溯边界保证了这一点）。搜索结果的字段选择器（`@css:.name@text`）
 /// 是以"每本书"为单位书写的，在整页上求会把所有书的字段混在一起。
 ///
-/// [DONE] T027 的节点级入口。接受带 `@css:` 前缀与裸选择器两种写法
+/// \[DONE] T027 的节点级入口。接受带 `@css:` 前缀与裸选择器两种写法
 /// （书源里两种都常见，见 `evaluate_rule` 的同款处理）。
 pub fn select_nodes(
     document: &Document,
@@ -1097,7 +1097,7 @@ pub fn select_nodes(
 
 /// 在一个**节点子树内**求一条完整规则（选择器 + 切片 + 后缀）。
 ///
-/// [DONE] T027 的字段级入口：搜索结果的每个字段都在"每本书的子树"内求值。
+/// \[DONE] T027 的字段级入口：搜索结果的每个字段都在"每本书的子树"内求值。
 ///
 /// 与 [`evaluate_rule`] 的区别仅在于求值起点——它从文档根起，本函数从
 /// `root` 起。语义上等价于"在这个子树里跑同一条规则"。

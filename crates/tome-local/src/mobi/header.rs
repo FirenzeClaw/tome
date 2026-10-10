@@ -1,4 +1,4 @@
-//! [DONE] PalmDOC 头与 MOBI 头（tasks.md T078 / research R4）
+//! \[DONE] PalmDOC 头与 MOBI 头（tasks.md T078 / research R4）
 //!
 //! # 依据的公开规范
 //!

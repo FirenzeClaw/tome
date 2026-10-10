@@ -1,4 +1,4 @@
-//! [DONE] EPUB 导入：元数据 / 目录 / 正文 / 内嵌资源（tasks.md T077 / FR-021）
+//! \[DONE] EPUB 导入：元数据 / 目录 / 正文 / 内嵌资源（tasks.md T077 / FR-021）
 //!
 //! # 规格原文
 //!
@@ -140,7 +140,7 @@ struct ManifestItem {
     properties: String,
 }
 
-/// [DONE] FR-021 的主入口：EPUB 字节 → 书 + 目录 + 资源。
+/// \[DONE] FR-021 的主入口：EPUB 字节 → 书 + 目录 + 资源。
 pub fn import_bytes(bytes: &[u8]) -> LocalResult<ParsedEpub> {
     let mut warnings = Vec::new();
     let mut archive = open_archive(bytes)?;
@@ -240,10 +240,18 @@ pub fn import_path(path: &std::path::Path) -> LocalResult<ParsedEpub> {
 /// 而 EPUB 的 XHTML 由电子书工具生成，标签集极其有限（`p`/`div`/`h1`-`h6`/
 /// `br`/`img`/`a`/`span`），本模块的轻量扫描足够且**不引入依赖**。
 ///
-/// > [UNCERTAIN] 若日后发现某些 EPUB 的正文提取质量不达标（如表格丢失、
+/// > \[UNCERTAIN] 若日后发现某些 EPUB 的正文提取质量不达标（如表格丢失、
 /// > 脚注乱序），应改为复用 `tome-rule` 的 DOM——那时它就不是杀鸡用牛刀，
 /// > 而是正确性所需。
 pub fn extract_text(xhtml: &str) -> String {
+    extract_text_inner(xhtml, &mut Vec::new())
+}
+
+/// [`extract_text`] 的实现体；同时按需收集图片位置。
+///
+/// `images` 非空时行为与传空切片完全相同（只是多收集了锚点），
+/// 故文本产出**逐字节一致**——这是"两次解析不漂移"的结构保证。
+fn extract_text_inner(xhtml: &str, images: &mut Vec<LocalImageAnchor>) -> String {
     let mut out = String::with_capacity(xhtml.len() / 2);
     let mut chars = xhtml.char_indices().peekable();
 
@@ -358,6 +366,22 @@ pub fn extract_text(xhtml: &str) -> String {
         // 嵌在块级分支里，于是 `<p>图示：<img alt="一朵花"/>结束</p>`
         // 的替代文本被整个丢掉（`<img>` 不触发块级分支）。
         if name == "img" && !is_closing {
+            // 位置取"此刻已累积的文本长度"——在 `alt` 追加**之前**，
+            // 因为图片本身插在它的替代文本之前
+            let char_offset = out.chars().count() as i64;
+            if let Some(src) = attribute_value(raw, "src") {
+                let src = src.trim();
+                if !src.is_empty() {
+                    images.push(LocalImageAnchor {
+                        char_offset,
+                        src: src.to_string(),
+                        alt: attribute_value(raw, "alt")
+                            .map(|text| text.trim().to_string())
+                            .filter(|text| !text.is_empty()),
+                    });
+                }
+            }
+
             if let Some(alt) = attribute_value(raw, "alt") {
                 let alt = alt.trim();
                 if !alt.is_empty() {
@@ -372,6 +396,34 @@ pub fn extract_text(xhtml: &str) -> String {
     }
 
     decode_entities(&out)
+}
+
+/// 图片在 `extract_text` 产出文本里的位置（T084 裁决 OQ#13 的本地书一侧）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalImageAnchor {
+    /// 在 `extract_text` 结果里的**字符**偏移
+    pub char_offset: i64,
+    /// 资源地址（`<img src>`，相对 EPUB 内的路径，未补全基址）
+    pub src: String,
+    /// 替代文本
+    pub alt: Option<String>,
+}
+
+/// 与 [`extract_text`] **同一次扫描**产出文本与图片位置。
+///
+/// # 为什么必须是同一次扫描（而不是两次独立解析）
+///
+/// 图片位置的定义是"它在 `extract_text` 结果里的第几个字符"。若两次解析
+/// 的规则有任何差异（哪怕只是空白处理），位置就会偏——而偏移是**静默**
+/// 错的（图跑到别处，不报错）。
+///
+/// 把 `extract_text` 的逻辑复制一份来算位置同样危险：两份规则必然漂移。
+/// 故这里让 `extract_text` 委托到本函数（`images` 收集器为空时行为完全
+/// 相同），**只有一份扫描逻辑**。
+pub fn extract_text_with_images(xhtml: &str) -> (String, Vec<LocalImageAnchor>) {
+    let mut images = Vec::new();
+    let text = extract_text_inner(xhtml, &mut images);
+    (text, images)
 }
 
 /// 从一段标签文本里取出属性值。
@@ -1220,6 +1272,77 @@ mod tests {
         let html = r#"<p>图示：<img src="a.png" alt="一朵花"/>结束</p>"#;
         let text = extract_text(html);
         assert!(text.contains("一朵花"), "实际 {text:?}");
+    }
+
+    #[test]
+    fn 图片锚点带位置与_alt() {
+        let html =
+            r#"<html><body><p>第一段文字</p><p><img src="a.png" alt="一朵花"/></p></body></html>"#;
+        let (text, images) = extract_text_with_images(html);
+        assert_eq!(images.len(), 1, "应认出一张图");
+        let image = &images[0];
+        assert_eq!(image.src, "a.png");
+        assert_eq!(image.alt.as_deref(), Some("一朵花"));
+
+        // 位置应对应"图片之前的文本量"。第一段是"第一段文字"（5 字）+ 换行
+        // （块级标签产生的），故图的偏移应 >= 6
+        assert!(
+            image.char_offset >= 6,
+            "图片偏移应在前一段之后，实际 {}",
+            image.char_offset
+        );
+        // 锚点位置必须落在产出文本的范围内（越界会让排版崩）
+        assert!(
+            (image.char_offset as usize) <= text.chars().count(),
+            "偏移 {} 超出文本长度 {}",
+            image.char_offset,
+            text.chars().count()
+        );
+    }
+
+    #[test]
+    fn 无图时锚点为空() {
+        let html = "<p>只有文字，没有图</p>";
+        let (_, images) = extract_text_with_images(html);
+        assert!(images.is_empty());
+    }
+
+    #[test]
+    fn 同一次扫描的文本与单独调用逐字节一致() {
+        // 这是"不漂移"的结构保证：`extract_text` 委托到同一实现，
+        // 收集锚点不该改变文本产出
+        let html = r#"<p>甲<img src="x.png" alt="补"/>乙</p><p>丙</p>"#;
+        let plain = extract_text(html);
+        let (with_images, _) = extract_text_with_images(html);
+        assert_eq!(plain, with_images, "收集锚点不该改变文本");
+    }
+
+    #[test]
+    fn 多处图片各自带位置且递增() {
+        let html = r#"<p>短</p><p><img src="1.png"/></p><p>中间一段更长的文字</p><p><img src="2.png"/></p>"#;
+        let (_, images) = extract_text_with_images(html);
+        assert_eq!(images.len(), 2);
+        assert!(
+            images[0].char_offset < images[1].char_offset,
+            "两张图的偏移应递增：{:?}",
+            images
+        );
+    }
+
+    #[test]
+    fn 无_src_的图片不产生锚点() {
+        // 没有地址就取不到图，记下来也没有意义
+        let html = r#"<p><img alt="没有地址"/></p>"#;
+        let (_, images) = extract_text_with_images(html);
+        assert!(images.is_empty());
+    }
+
+    #[test]
+    fn 无_alt_的图片_alt_为_none() {
+        let html = r#"<p><img src="a.png"/></p>"#;
+        let (_, images) = extract_text_with_images(html);
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].alt, None);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! [DONE] 源可用性检查（tasks.md T071 / FR-011）
+//! \[DONE] 源可用性检查（tasks.md T071 / FR-011）
 //!
 //! # "可判定的结论"是什么意思
 //!
@@ -45,16 +45,16 @@ use tome_core::SourceKind;
 /// 一个通常有结果的词，能把"规则坏了"与"这个词没书"更好地区分开。
 ///
 /// 但**不能依赖这一点**——没有哪个词保证每个源都有结果（玄幻源可能没有
-/// 某本言情书）。故判定逻辑（见 [`verdict_from_search`]）把"跑通但无结果"
+/// 某本言情书）。故判定逻辑（见 `verdict_from_search`）把"跑通但无结果"
 /// 也算可用。
 ///
-/// [WORKAROUND] 硬编码常量：若日后要做"按源类型选关键词"（玄幻源用玄幻词），
+/// \[WORKAROUND] 硬编码常量：若日后要做"按源类型选关键词"（玄幻源用玄幻词），
 /// 应改为按 `SourceKind` 或源自定义字段选择，而非继续改这一个常量。
 pub const CHECK_KEYWORD: &str = "的";
 
 /// 检查单个书源（FR-011）。
 ///
-/// [DONE] T071 的单源入口。
+/// \[DONE] T071 的单源入口。
 pub fn check_source(parsed: &ParsedSource, host: &dyn NetHost) -> Result<CheckReport, SourceError> {
     let verdict = check_source_verdict(parsed, host);
     Ok(CheckReport {
@@ -113,7 +113,7 @@ pub fn check_source_verdict(parsed: &ParsedSource, host: &dyn NetHost) -> CheckV
 /// 故此处只做**静态检查**（有没有 `js` 字段、能否过基本形状校验），
 /// 并把它记为可用。真实执行留给"用户点开这个源"时。
 ///
-/// `[UNCERTAIN]` 这会让"脚本语法错但字段齐全"的源被判为可用。若要更严
+/// `\[UNCERTAIN]` 这会让"脚本语法错但字段齐全"的源被判为可用。若要更严
 /// 的检查，应提供一个**可选**的深检模式（`--deep`）而不是默认加重批量
 /// 检查的代价。
 fn check_script_source(parsed: &ParsedSource) -> CheckVerdict {
@@ -159,7 +159,7 @@ pub fn select_sources(sources: &[ParsedSource], filter: &SourceCheckFilter) -> V
 
 /// 批量检查（FR-011），**流式**返回（A6）。
 ///
-/// [DONE] T071 的批量入口。
+/// \[DONE] T071 的批量入口。
 pub fn check_sources<'a>(
     sources: &'a [ParsedSource],
     filter: &SourceCheckFilter,

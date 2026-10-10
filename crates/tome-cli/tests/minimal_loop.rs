@@ -401,6 +401,7 @@ fn 录制后离线重放输出逐字节一致() {
         format: OutputFormat::Json,
         network: tome_cli::NetworkMode::Record(capture_dir.path().to_path_buf()),
         data_dir: None,
+        ..GlobalOptions::default()
     };
     let record_executor = executor_for(&record_options);
     let recorded = run_cli(
@@ -433,6 +434,7 @@ fn 录制后离线重放输出逐字节一致() {
             offline: true,
         },
         data_dir: None,
+        ..GlobalOptions::default()
     };
     let replay_executor = executor_for(&replay_options);
     let replayed = run_cli(
@@ -472,6 +474,7 @@ fn 离线重放未命中时报错而非静默空结果() {
         format: OutputFormat::Json,
         network: tome_cli::NetworkMode::Record(capture_dir.path().to_path_buf()),
         data_dir: None,
+        ..GlobalOptions::default()
     };
     let record_executor = executor_for(&record_options);
     let _ = run_cli(
@@ -488,6 +491,7 @@ fn 离线重放未命中时报错而非静默空结果() {
             offline: true,
         },
         data_dir: None,
+        ..GlobalOptions::default()
     };
     let replay_executor = executor_for(&replay_options);
     let outcome = run_cli(
@@ -521,6 +525,7 @@ fn record_once_模式只补空洞() {
         format: OutputFormat::Json,
         network: tome_cli::NetworkMode::Record(capture_dir.path().to_path_buf()),
         data_dir: None,
+        ..GlobalOptions::default()
     };
     let record_executor = executor_for(&record_options);
     let first = run_cli(
@@ -539,6 +544,7 @@ fn record_once_模式只补空洞() {
             offline: false,
         },
         data_dir: None,
+        ..GlobalOptions::default()
     };
     let once_executor = executor_for(&once_options);
     let second = run_cli(
@@ -586,6 +592,7 @@ fn 规则求值不发请求_纯化成立() {
         format: OutputFormat::Json,
         network: tome_cli::NetworkMode::Record(capture_dir.path().to_path_buf()),
         data_dir: None,
+        ..GlobalOptions::default()
     };
     let record_executor = executor_for(&record_options);
     let _ = run_cli(
@@ -603,6 +610,7 @@ fn 规则求值不发请求_纯化成立() {
             offline: true,
         },
         data_dir: None,
+        ..GlobalOptions::default()
     };
     let offline_executor = executor_for(&offline_options);
     let outcome = run_cli(
@@ -822,6 +830,7 @@ fn sc001_首个来源结果远快于30秒() {
         format: OutputFormat::Json,
         network: tome_cli::NetworkMode::Record(capture_dir.path().to_path_buf()),
         data_dir: None,
+        ..GlobalOptions::default()
     };
     let executor = executor_for(&options);
     let warmup = run_cli(
@@ -838,6 +847,7 @@ fn sc001_首个来源结果远快于30秒() {
             offline: true,
         },
         data_dir: None,
+        ..GlobalOptions::default()
     };
     let replay_executor = executor_for(&replay_options);
 
@@ -894,10 +904,26 @@ fn 用法错误由解析层报出() {
 
 #[test]
 fn 服务器不可达时给出网络类错误() {
-    // 起一个服务器拿端口再关掉，得到一个"几乎必然无人监听"的地址
-    let listener = TcpListener::bind("127.0.0.1:0").expect("应能绑定");
-    let address = listener.local_addr().expect("应能取地址");
-    drop(listener);
+    // 得到一个"必然无人监听"的地址。
+    //
+    // ## 为什么不"绑一个端口再关掉"（首版做法，实测是 flaky 的）
+    //
+    // 那个做法是：`bind("127.0.0.1:0")` 拿一个随机端口 → `drop(listener)`
+    // 释放它 → 期望无人监听。**但端口一旦释放就回到内核的可用池**，
+    // 同进程内并行的其他测试（`MiniServer` 也用 `:0`）可能立刻拿到它。
+    // 此时请求会**成功**，测试断言"不可达"就红了。
+    //
+    // 实测确有此现象：连续跑 `minimal_loop` 时约 1/8 概率命中
+    // （报 "left: 0, right: 1"，即退出码 0 = 请求成功了）。
+    //
+    // ## 改用保留地址段
+    //
+    // `127.0.0.1:1` 是 TCP 端口 1（特权端口，本进程不持有 CAP_NET_BIND），
+    // 内核绝不会把它分配给测试的临时监听器。故它**稳定地不可达**。
+    //
+    // 用 `127.0.0.1` 而非外部地址：不发公网请求（FR-041 的取向），
+    // 连接被本机内核立刻拒绝（RST），测试跑得快。
+    let address = "127.0.0.1:1";
 
     let dir = tempfile::tempdir().expect("应能建目录");
     let path = dir.path().join("source.json");

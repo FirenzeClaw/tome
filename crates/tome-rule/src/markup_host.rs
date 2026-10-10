@@ -1,4 +1,4 @@
-//! [DONE] `MarkupHost` 的 tome-rule 真实实现（tasks.md T039 的实现侧 / P4 遗留）
+//! \[DONE] `MarkupHost` 的 tome-rule 真实实现（tasks.md T039 的实现侧 / P4 遗留）
 //!
 //! # 这是一个**反向**桥
 //!
@@ -23,7 +23,7 @@
 //! 故每次调用都要**解析一次 HTML**。对书源脚本的调用频率（一次抓取最多
 //! 几十次选择）这个代价可忽略，而换来的是类型边界清晰。
 //!
-//! ## `[UNCERTAIN]` 若调用方对同一份 HTML 反复选择
+//! ## `\[UNCERTAIN]` 若调用方对同一份 HTML 反复选择
 //!
 //! 那会重复解析。书源里的 `java.getElement(markup, rule)` 通常是
 //! "一份 HTML 抽一个字段"，故当前不做缓存。若 S1-6 的真实基线显示有

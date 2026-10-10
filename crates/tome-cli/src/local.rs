@@ -1,4 +1,4 @@
-//! [DONE] `tome local` 子命令（tasks.md T076-T083 / `contracts/cli.md`）
+//! \[DONE] `tome local` 子命令（tasks.md T076-T083 / `contracts/cli.md`）
 //!
 //! # 契约原文
 //!

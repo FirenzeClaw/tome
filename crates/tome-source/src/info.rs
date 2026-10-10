@@ -1,4 +1,4 @@
-//! [DONE] 书籍详情管线（tasks.md T065 / FR-002 第三类动作）
+//! \[DONE] 书籍详情管线（tasks.md T065 / FR-002 第三类动作）
 //!
 //! # 动作的形状
 //!
@@ -152,7 +152,7 @@ pub fn parse_book_info_with_js(
 
 /// 详情动作的完整执行（求值 → 抓取 → 解析）。
 ///
-/// [DONE] T065 的对外入口。
+/// \[DONE] T065 的对外入口。
 pub fn book_info(
     parsed: &ParsedSource,
     book_url: &str,

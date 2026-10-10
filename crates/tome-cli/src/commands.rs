@@ -1,4 +1,4 @@
-//! [DONE] CLI 命令实现（tasks.md T028/T029 / `contracts/cli.md`）
+//! \[DONE] CLI 命令实现（tasks.md T028/T029 / `contracts/cli.md`）
 //!
 //! # 组合根
 //!
@@ -30,7 +30,7 @@ use tome_core::{ErrorKind, NetHost, StoreHost};
 use tome_source::source::{load_from_channel, LoadOutcome, ParsedSource};
 use tome_source::{search, SourceError};
 
-use crate::flags::{exit_code_for, unsupported, Command, GlobalOptions, NetworkMode, OutputFormat};
+use crate::flags::{exit_code_for, Command, GlobalOptions, NetworkMode, OutputFormat};
 
 /// 一次命令执行的结果：退出码 + 标准输出 + 标准错误。
 ///
@@ -71,7 +71,7 @@ impl CommandOutcome {
 
 /// 执行一条命令，产出（退出码, stdout, stderr）。
 ///
-/// [DONE] CLI 的对外入口。`stdin_reader` 为 `source import --stdin` 提供输入。
+/// \[DONE] CLI 的对外入口。`stdin_reader` 为 `source import --stdin` 提供输入。
 pub fn run(
     options: &GlobalOptions,
     command: &Command,
@@ -144,7 +144,7 @@ impl HostCapabilities {
 ///
 /// 含 JS 的书源需要把网络与存储交给 JS 引擎，而两者在 JS 侧都以
 /// `Arc<dyn Trait>` 持有。`&dyn NetHost` 借不出一个 `Arc`，故由组合根
-/// （`main.rs` 的 [`AppRoot`]）把能力以 `Arc` 形式传进来。
+/// （`main.rs` 的 `AppRoot`）把能力以 `Arc` 形式传进来。
 ///
 /// 不传时含 JS 的源会得到**结构化能力错误**（FR-006）——而不是
 /// "静默跑不起来"。那让"忘了传"这件事在第一次运行时就暴露。
@@ -180,7 +180,16 @@ pub fn run_with_js(
             source_id,
             action,
             input,
-        } => run_action(options, source_id, action, input.as_deref(), host, hosts),
+            trace,
+        } => run_action(
+            options,
+            source_id,
+            action,
+            input.as_deref(),
+            *trace,
+            host,
+            hosts,
+        ),
         Command::Info {
             source_id,
             book_url,
@@ -224,6 +233,33 @@ pub fn run_with_js(
         // S2 排版层（contracts/cli.md §2.1）
         Command::Layout(_) => crate::reader_commands::run_layout(options, command),
         Command::LayoutAnchor(_) => crate::reader_commands::run_layout_anchor(options, command),
+        // T093：分组与启停（FR-001）
+        Command::SourceGroup { source_ids, name } => {
+            crate::pipeline_commands::run_source_group(options, source_ids, name)
+        }
+        Command::SourceEnable {
+            source_ids,
+            all,
+            enabled,
+        } => crate::pipeline_commands::run_source_enable(options, source_ids, *all, *enabled),
+        Command::SourceGroups => crate::pipeline_commands::run_source_groups(options),
+        // T093：搜索关键词（FR-018）
+        Command::KeywordList => crate::pipeline_commands::run_keyword_list(options),
+        Command::KeywordAdd { keyword } => {
+            crate::pipeline_commands::run_keyword_add(options, keyword)
+        }
+        Command::KeywordRemove { keyword } => {
+            crate::pipeline_commands::run_keyword_remove(options, keyword)
+        }
+        // T093：数据面（FR-033 / SC-017 / FR-035）
+        Command::DataExport { output } => {
+            crate::data_commands::run_export(options, output.as_deref())
+        }
+        Command::DataImport { file } => crate::data_commands::run_import(options, file),
+        Command::DataClearCache { kind } => crate::data_commands::run_clear_cache(options, kind),
+        Command::DataDelete { yes } => crate::data_commands::run_delete(options, *yes),
+        // T093：规则求值轨迹（FR-037）——纯计算，不需要宿主能力
+        Command::RuleTrace { rule, input } => crate::pipeline_commands::run_rule_trace(rule, input),
         Command::Verify { corpus, report } => run_verify(corpus, report.as_deref()),
         // T086：真实书源档（SC-002b）。它**真的发请求**，故需要网络宿主。
         Command::VerifyReal {
@@ -526,9 +562,29 @@ fn run_action(
     source_id: &str,
     action: &str,
     input: Option<&str>,
+    trace: bool,
     host: &dyn NetHost,
     hosts: HostCapabilities,
 ) -> CommandOutcome {
+    // ## `--trace` 只对**规则求值**有意义的动作生效
+    //
+    // 轨迹来自 `tome_rule::trace`，它作用于"一条规则 + 一段输入"。而
+    // `search`/`info`/`toc`/`content` 各自要走完整管线（多字段、发请求），
+    // 轨迹在那里没有单一的"那条规则"。
+    //
+    // 故 `--trace` 配合一个**显式规则**使用：`--rule <规则> --input <文本>`
+    // 形态见 [`run_trace`]。对四个抓取动作给 `--trace` 时报用法错误——
+    // 静默忽略会让脚本以为拿到了轨迹而实际没有。
+    if trace {
+        return CommandOutcome {
+            exit_code: 2,
+            stdout: String::new(),
+            stderr: "用法错误：`--trace` 需要配合 `--rule <规则>`（轨迹作用于单条规则）
+"
+            .to_string(),
+        };
+    }
+
     match action {
         "search" => {
             let Some(keyword) = input else {
@@ -536,27 +592,44 @@ fn run_action(
                     exit_code: 2,
                     stdout: String::new(),
                     stderr: "用法错误：`--action search` 需要 `--input <关键词>`
-".to_string(),
+"
+                    .to_string(),
                 };
             };
             run_search(options, Some(source_id), None, keyword, host, hosts)
         }
-        // ## 后续切片的动作：报**能力错误**（退出码 3）而不是用法错误
+        // ## info / toc / content 已实现（T065-T067）
         //
-        // 它们是本产品**将要**支持的（契约里定义了），故不该说"你调错了"；
-        // 但当前也做不到，故是 `UnsupportedCapability`。
-        // 这个区别让脚本能据此判断"等版本更新"与"改调用方式"。
-        other @ ("info" | "toc" | "content") => CommandOutcome::failure(
-            &unsupported(other),
-            &format!(
-                "error.unsupported_capability 动作 `{other}` 属后续切片（contracts/cli.md 已定义契约，本切片实现 search）"
-            ),
-        ),
+        // 此前这里对三者报"属后续切片"的能力错误——那是 S1-1 时期的占位。
+        // T093 的契约对照发现它们**已经落地**（在 `pipeline_commands`），
+        // 故改为直接委派。报"不支持"会让脚本以为要等版本更新，而实际
+        // 现在就能用。
+        "info" | "toc" | "content" => {
+            let Some(input) = input else {
+                return CommandOutcome {
+                    exit_code: 2,
+                    stdout: String::new(),
+                    stderr: format!(
+                        "用法错误：`--action {action}` 需要 `--input <地址>`（详情页或章节地址）
+"
+                    ),
+                };
+            };
+            match action {
+                "info" => {
+                    crate::pipeline_commands::run_info(options, source_id, input, host, hosts)
+                }
+                "toc" => crate::pipeline_commands::run_toc(options, source_id, input, host, hosts),
+                _ => crate::pipeline_commands::run_content(
+                    options, source_id, input, false, host, hosts,
+                ),
+            }
+        }
         other => CommandOutcome {
             exit_code: 2,
             stdout: String::new(),
             stderr: format!(
-                "用法错误：未知动作 `{other}`（可用：search；info/toc/content 属后续切片）
+                "用法错误：未知动作 `{other}`（可用：search / info / toc / content）
 "
             ),
         },
@@ -1070,7 +1143,7 @@ pub fn failure_for(error: &SourceError) -> CommandOutcome {
 
 /// 从 [`NetworkMode`] 构造执行器（T029 的接线点）。
 ///
-/// [DONE] `--record`/`--replay`/`--offline` 落到执行器的唯一处。
+/// \[DONE] `--record`/`--replay`/`--offline` 落到执行器的唯一处。
 ///
 /// ## 为什么 `NetworkMode::Live` 也要显式走这里
 ///

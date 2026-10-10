@@ -1,4 +1,4 @@
-//! # [WIP] tome-store —— 存储层
+//! # \[WIP] tome-store —— 存储层
 //!
 //! 负责全部本地数据持久化：SQLite actor（单写者串行化）、schema 迁移器、各表 DAO、
 //! 书籍 Pack 容器、图片缓存，以及配置的类型化注入。
@@ -29,7 +29,7 @@
 //! | [`image_cache`] | 图片缓存（可独立清理） | T061 |
 //! | [`config`] | 配置 TOML 加载与原子写 | T062 |
 //!
-//! [WIP] 本 crate 的 T053-T062 已落地；`BookRepository` 接缝的完整实现
+//! \[WIP] 本 crate 的 T053-T062 已落地；`BookRepository` 接缝的完整实现
 //! （备份导入导出、书内搜索）属后续切片 T087-T091。
 
 // ## 关于 unsafe

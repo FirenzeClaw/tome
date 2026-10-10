@@ -1,8 +1,8 @@
-//! [DONE] HTTP 日志管线（tasks.md T064 / FR-017）
+//! \[DONE] HTTP 日志管线（tasks.md T064 / FR-017）
 //!
 //! # 本模块的位置：在 `NetHost` 之外包一层
 //!
-//! 日志记录**不能**塞进 [`tome_net::RequestExecutor`] 内部，理由有两条：
+//! 日志记录**不能**塞进 [`crate::executor::RequestExecutor`] 内部，理由有两条：
 //!
 //! 1. **依赖方向**：持久化要落 `tome-store` 的 `http_log` 表，而
 //!    `tome-net` 依赖 `tome-store` 会让"网络层依赖存储层"——接缝

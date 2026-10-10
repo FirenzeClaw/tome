@@ -1,4 +1,4 @@
-//! [DONE] MOBI DRM 检测与格式拒绝（tasks.md T080 / research R4）
+//! \[DONE] MOBI DRM 检测与格式拒绝（tasks.md T080 / research R4）
 //!
 //! # research R4 点名的陷阱
 //!

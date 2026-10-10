@@ -67,33 +67,34 @@
 
 **Independent Test**: `tome layout --chapter <样本>#0` 输出结构 JSON：标点密集语料禁则违反 0；混排无超宽；样式组合下标不变。
 
-- [ ] T010 [US1] 规范化文本模型于 `crates/tome-reader/src/text/model.rs`（FR-003：段落→字形簇→字形；对外一律字符下标，与 001 `char_offset` 同口径）
-  - [ ] grapheme cluster 不在簇内断开（emoji/组合字符/变体选择符用例）
-  - [ ] 公开 API 无字节偏移/UTF-16 码元偏移暴露（签名审查测试）
-- [ ] T011 [US1] 段落切分于 `crates/tome-reader/src/text/paragraph.rs`（FR-001 换行符边界；FR-002 全角空格启发式：双条件门槛 + 诊断记录 + 命名常量阈值）
-  - [ ] 启发式启用/不启用两路径正反测试；不启用时零副作用断言
-  - [ ] 前导空格在默认路径下按段内文本处理（不误切空段）
-- [ ] T012 [US1] 禁则字符清单于 `crates/tome-reader/src/rules/cjk.rs`（FR-005/007：行首/行尾禁则表 = UAX#14 CL/OP 类 + 破折号对（U+2014 B2）/省略号等补丁条目；清单可枚举逐项测试）
-  - [ ] SC-001：每条规则附判定例与反例，100% 通过
-  - [ ] 清单条数与内容成文（模块文档引用 UAX#14 与 CLreq 公开资料为依据）
-- [ ] T013 [US1] ShapeLine 克隆后处理引擎于 `crates/tome-reader/src/layout/engine.rs` + `crates/tome-reader/src/layout/linebox.rs`（research R1 方案 A：line_shape→克隆→按禁则表合并 ShapeWord→layout；使用 T005 已验证的行为；LineBox 结构定义在 linebox.rs，对齐 data-model.md §4 七字段）
-  - [ ] 端到端：行首无闭标点、行尾无开标点（SC-002 标点密集语料违反 0）
-  - [ ] 例外走硬序第④步时有 `RuleExceptionRecord` 产出（char_index + rule_id）
-- [ ] T014 [P] [US1] 标点挤压于 `crates/tome-reader/src/rules/squeeze.rs`（FR-006：x_advance 改写 + 压缩下限命名常量 + 不改字符顺序与区间归属）+ 中西文混排于 `crates/tome-reader/src/rules/mixed.rs`（FR-009：交界处最小间隙；西文整词优先、超行长词退化按字符断行）
-  - [ ] US1 场景 1：行长在版心内浮动 ≤1 挤压单位且无超宽（SC-003）
-  - [ ] 挤压前后字符下标一致（区间归属不变断言）
-- [ ] T015 [US1] 两端对齐两段式 + 硬序消解于 `crates/tome-reader/src/rules/justify.rs`（FR-011 正文 justify 默认、居中用于标题/引用；FR-008 硬序 ①挤压→②悬挂（≤半字身）→③整字回退→④放弃禁则，固定可预测）
-  - [ ] 硬序四步各有触发用例；第④步例外记录可枚举可计数（供 SC-002）
-  - [ ] justify 与挤压协同：不出现标点被拉散的稀疏行（视觉断言语料）
-- [ ] T016 [US1] 行内样式最小集合于 `crates/tome-reader/src/layout/style.rs`（FR-010：标题/强调/引用/居中；样式只影响外观与行盒属性；标题字号随阅读字号等比缩放，禁硬编码 px）
-  - [ ] FR-010 参数化断言：同段文本任意样式组合下字符下标一致
-  - [ ] 标题字号随 14/19/24/30 等比（四档断言）
+- [x] T010 [US1] 规范化文本模型于 `crates/tome-reader/src/text/model.rs`（FR-003：段落→字形簇→字形；对外一律字符下标，与 001 `char_offset` 同口径）
+  - [x] grapheme cluster 不在簇内断开（emoji/组合字符/变体选择符用例）
+  - [x] 公开 API 无字节偏移/UTF-16 码元偏移暴露（签名审查测试）
+- [x] T011 [US1] 段落切分于 `crates/tome-reader/src/text/paragraph.rs`（FR-001 换行符边界；FR-002 全角空格启发式：双条件门槛 + 诊断记录 + 命名常量阈值）
+  - [x] 启发式启用/不启用两路径正反测试；不启用时零副作用断言
+  - [x] 前导空格在默认路径下按段内文本处理（不误切空段）
+- [x] T012 [US1] 禁则字符清单于 `crates/tome-reader/src/rules/cjk.rs`（FR-005/007：行首/行尾禁则表 = UAX#14 CL/OP 类 + 破折号对（U+2014 B2）/省略号等补丁条目；清单可枚举逐项测试）
+  - [x] SC-001：每条规则附判定例与反例，100% 通过
+  - [x] 清单条数与内容成文（模块文档引用 UAX#14 与 CLreq 公开资料为依据）
+- [x] T013 [US1] ShapeLine 克隆后处理引擎于 `crates/tome-reader/src/layout/engine.rs` + `crates/tome-reader/src/layout/linebox.rs`（research R1 方案 A：line_shape→克隆→按禁则表合并 ShapeWord→layout；使用 T005 已验证的行为；LineBox 结构定义在 linebox.rs，对齐 data-model.md §4 七字段）
+  - [x] 端到端：行首无闭标点、行尾无开标点（SC-002 标点密集语料违反 0）
+  - [x] 例外走硬序第④步时有 `RuleExceptionRecord` 产出（char_index + rule_id）
+- [x] T014 [P] [US1] 标点挤压于 `crates/tome-reader/src/rules/squeeze.rs`（FR-006：x_advance 改写 + 压缩下限命名常量 + 不改字符顺序与区间归属）+ 中西文混排于 `crates/tome-reader/src/rules/mixed.rs`（FR-009：交界处最小间隙；西文整词优先、超行长词退化按字符断行）
+  - [x] US1 场景 1：行长在版心内浮动 ≤1 挤压单位且无超宽（SC-003）
+  - [x] 挤压前后字符下标一致（区间归属不变断言）
+- [x] T015 [US1] 两端对齐两段式 + 硬序消解于 `crates/tome-reader/src/rules/justify.rs`（FR-011 正文 justify 默认、居中用于标题/引用；FR-008 硬序 ①挤压→②悬挂（≤半字身）→③整字回退→④放弃禁则，固定可预测）
+  - [x] 硬序四步各有触发用例；第④步例外记录可枚举可计数（供 SC-002）
+  - [x] justify 与挤压协同：不出现标点被拉散的稀疏行（视觉断言语料）
+- [x] T016 [US1] 行内样式最小集合于 `crates/tome-reader/src/layout/style.rs`（FR-010：标题/强调/引用/居中；样式只影响外观与行盒属性；标题字号随阅读字号等比缩放，禁硬编码 px）
+  - [x] FR-010 参数化断言：同段文本任意样式组合下字符下标一致
+  - [x] 标题字号随 14/19/24/30 等比（四档断言）
 
 > **⛔ 检查点：S2-1 之后（排版正确性门）**
-> - [ ] SC-001 规则清单逐项判定例反例 100%；SC-002 禁则违反 0；SC-003 混排无超宽
-> - [ ] FR-010 样式组合下标不变（参数化断言）+ 标题字号等比
-> - [ ] 四命令全绿；`tome layout` 出结构 JSON
-> - [ ] 人工审查后进入下一阶段
+> - [x] SC-001 规则清单逐项判定例反例 100%；SC-002 禁则违反 0；SC-003 混排无超宽
+> - [x] FR-010 样式组合下标不变（参数化断言）+ 标题字号等比
+> - [x] 四命令全绿；`tome layout` 出结构 JSON
+> - [x] 人工审查后进入下一阶段
+>   - PM 注记（2026-10-10）：排版正确性门通过（SC-001/002/003 + FR-010 双断言 + `tome layout` 出契约 JSON）。遗留 KNOWN_DEFECT_COUNT=1（混排行未吸纳可放的下一单元）以只减不增棘轮钉住，修复方向归 S2-2 或 PM 裁决；`--chapter` 入口待 S3/001 书架接线（现以 `--text` 为载体 + 结构化能力错误）。
 
 ---
 
@@ -103,31 +104,32 @@
 
 **Independent Test**: `tome layout` 页区间拼接逐字符等于原文（SC-006）；锚点矩阵全组合不变（SC-004）；昼/夜下页序列逐字节相同（SC-005）。
 
-- [ ] T017 [US2] ReadingConfig schema 于 `crates/tome-reader/src/paginate/config.rs`（FR-013/028：几何/呈现子集分离；FR-018 段模式互斥默认缩进 2em；白名单校验拒绝非法值并回退上一有效值）
-  - [ ] 全字段范围校验测试（字号 0/行高负/版心负宽拒绝）
-  - [ ] 序列化往返（作为 `Book.read_config` 的 schema）
-- [ ] T018 [US2] `Book.read_config` 接线（tome-store 读写给 S2 schema；全局默认 vs 单书覆盖语义，裁决 OQ#12）于 `crates/tome-store/src/dao/` 既有 book DAO 的扩展 + `crates/tome-reader/src/paginate/config.rs` 的加载入口
-  - [ ] 未设置时回退全局默认；显式"为这本书设置"后覆盖生效（经 BookRepository 测试）
-- [ ] T019 [US1] 页序列计算于 `crates/tome-reader/src/paginate/page.rs` + `spread.rs`（FR-012 页=字符区间；FR-014 em 制判据：阅读区可用宽度 ≥ 2×measure+gutter，禁固定 px 断点，字号变化重算判据；FR-004 唯一内容源为 ContentProvider）
-  - [ ] 内容页无损：页区间拼接与该章正文逐字符相等（`crates/tome-reader/tests/pagination_lossless.rs`；SC-006 的留白页口径在 T021 的测试中补齐）
-  - [ ] 判据随字号重算测试（19px→24px 双页阈值右移）
-  - [ ] 排版全程不自读缓存容器、不发请求（计数宿主/回放断言，FR-004）
-- [ ] T020 [US1] 手动覆盖三态 + 语义落于 `crates/tome-reader/src/paginate/spread.rs`（FR-015：自动/强制单页/强制双页；矛盾时回落自动，非矛盾变化不清除用户选择）
-  - [ ] 回落路径与保留路径各有测试（`crates/tome-reader/tests/spread_override.rs`，宽度变化两类）
-- [ ] T021 [US1] 书页语义于 `crates/tome-reader/src/paginate/booksem.rs`（FR-016：左偶右奇；章起偶数页留白补足；命名设置项「章节从新页开始」可关；单页模式不应用）
-  - [ ] 双页章起位置测试（`crates/tome-reader/tests/book_semantics.rs`：上章末单页时留白补足，留白页 is_padding=true 显式标记且不计入内容区间——SC-006 完整口径在此补齐）
-  - [ ] 开关关闭时无留白；单页模式断言无留白（裁决 OQ#5）
-- [ ] T022 [US2] 锚点解耦 + 参数矩阵验证于 `crates/tome-reader/tests/anchor_matrix.rs`（FR-017/SC-004：同锚点任意两组几何参数分别定位同字符且锚点值不变；矩阵 = 字号 14/19/24/30 × 行高 1.75/1.85/2.2 × 单/双页 × 翻页/滚动 × 段缩进/段间距）
-  - [ ] 全组合 100% 锚点值不变且字符落在可见范围
-- [ ] T023 [US2] 呈现参数零依赖断言（FR-019/SC-005：昼/夜主题、不同字体族、不同动效开关下页序列（字符区间）100% 相同）
-  - [ ] `crates/tome-reader/tests/theme_independence.rs` 通过（主题切换不触发重排的断言）
-- [ ] T024 [US2] 分页预计算 + 增量重排于 `crates/tome-reader/src/precalc.rs`（FR-044：当前位置附近章节后台预计算、可取消、失败无副作用、不持久化；FR-045：参数变化只重排受影响页即可呈现首帧）
-  - [ ] 取消后无部分状态泄漏（`crates/tome-reader/tests/precalc.rs`）
-  - [ ] 增量重排首帧时间 < 整章重排（同文件的测量测试，口径写注释）
+- [x] T017 [US2] ReadingConfig schema 于 `crates/tome-reader/src/paginate/config.rs`（FR-013/028：几何/呈现子集分离；FR-018 段模式互斥默认缩进 2em；白名单校验拒绝非法值并回退上一有效值）
+  - [x] 全字段范围校验测试（字号 0/行高负/版心负宽拒绝）
+  - [x] 序列化往返（作为 `Book.read_config` 的 schema）
+- [x] T018 [US2] `Book.read_config` 接线（tome-store 读写给 S2 schema；全局默认 vs 单书覆盖语义，裁决 OQ#12）于 `crates/tome-store/src/dao/` 既有 book DAO 的扩展 + `crates/tome-reader/src/paginate/config.rs` 的加载入口
+  - [x] 未设置时回退全局默认；显式"为这本书设置"后覆盖生效（经 BookRepository 测试）
+- [x] T019 [US1] 页序列计算于 `crates/tome-reader/src/paginate/page.rs` + `spread.rs`（FR-012 页=字符区间；FR-014 em 制判据：阅读区可用宽度 ≥ 2×measure+gutter，禁固定 px 断点，字号变化重算判据；FR-004 唯一内容源为 ContentProvider）
+  - [x] 内容页无损：页区间拼接与该章正文逐字符相等（`crates/tome-reader/tests/pagination_lossless.rs`；SC-006 的留白页口径在 T021 的测试中补齐）
+  - [x] 判据随字号重算测试（19px→24px 双页阈值右移）
+  - [x] 排版全程不自读缓存容器、不发请求（计数宿主/回放断言，FR-004）
+- [x] T020 [US1] 手动覆盖三态 + 语义落于 `crates/tome-reader/src/paginate/spread.rs`（FR-015：自动/强制单页/强制双页；矛盾时回落自动，非矛盾变化不清除用户选择）
+  - [x] 回落路径与保留路径各有测试（`crates/tome-reader/tests/spread_override.rs`，宽度变化两类）
+- [x] T021 [US1] 书页语义于 `crates/tome-reader/src/paginate/booksem.rs`（FR-016：左偶右奇；章起偶数页留白补足；命名设置项「章节从新页开始」可关；单页模式不应用）
+  - [x] 双页章起位置测试（`crates/tome-reader/tests/book_semantics.rs`：上章末单页时留白补足，留白页 is_padding=true 显式标记且不计入内容区间——SC-006 完整口径在此补齐）
+  - [x] 开关关闭时无留白；单页模式断言无留白（裁决 OQ#5）
+- [x] T022 [US2] 锚点解耦 + 参数矩阵验证于 `crates/tome-reader/tests/anchor_matrix.rs`（FR-017/SC-004：同锚点任意两组几何参数分别定位同字符且锚点值不变；矩阵 = 字号 14/19/24/30 × 行高 1.75/1.85/2.2 × 单/双页 × 翻页/滚动 × 段缩进/段间距）
+  - [x] 全组合 100% 锚点值不变且字符落在可见范围
+- [x] T023 [US2] 呈现参数零依赖断言（FR-019/SC-005：昼/夜主题、不同字体族、不同动效开关下页序列（字符区间）100% 相同）
+  - [x] `crates/tome-reader/tests/theme_independence.rs` 通过（主题切换不触发重排的断言）
+- [x] T024 [US2] 分页预计算 + 增量重排于 `crates/tome-reader/src/precalc.rs`（FR-044：当前位置附近章节后台预计算、可取消、失败无副作用、不持久化；FR-045：参数变化只重排受影响页即可呈现首帧）
+  - [x] 取消后无部分状态泄漏（`crates/tome-reader/tests/precalc.rs`）
+  - [x] 增量重排首帧时间 < 整章重排（同文件的测量测试，口径写注释）
 
 > **⛔ 检查点：S2-2 之后（锚点不变量门）**
-> - [ ] SC-004 锚点矩阵 100%；SC-005 呈现参数零依赖 100%；SC-006 分页不丢不重 100%
-> - [ ] 人工审查后进入下一阶段
+> - [x] SC-004 锚点矩阵 100%；SC-005 呈现参数零依赖 100%；SC-006 分页不丢不重 100%
+> - [x] 人工审查后进入下一阶段
+>   - PM 注记（2026-10-11）：锚点不变量门通过（SC-004 480 断言/SC-005 64 组逐字节相同/SC-006 库内+CLI 1656 组逐字符相等）。KNOWN_DEFECT 1→0——诊断为第四次测量装置缺陷（漏算空格宽），引擎断行本身正确，变异验证在案（BASELINE §11.4）。`AnchorTarget::Scroll` 占位 [WIP] 待 Phase 5 补实。
 
 ---
 
@@ -137,29 +139,30 @@
 
 **Independent Test**: `tome layout --mode scroll` 视口区间并集逐字符等于原文（SC-006b）；两方向切换锚点不变（SC-005b）；滚动到未缓存区零抓取（FR-025）。
 
-- [ ] T025 [US7] 滚动流排布于 `crates/tome-reader/src/scroll/flow.rs`（FR-020 连续流无分页空白；FR-021 视口=字符区间与 Page 同构，不引入第二套坐标）
-  - [ ] SC-006b：`crates/tome-reader/tests/scroll_flow_integrity.rs`——视口区间并集与正文逐字符相等；相邻视口连续无缺口无重叠
-- [ ] T026 [US7] 滚动偏移↔字符位置双向映射于 `crates/tome-reader/src/scroll/map.rs`（FR-022/040：与 001 锚点口径一致）
-  - [ ] 互逆往返误差 ≤ 半个字形（`crates/tome-reader/tests/scroll_map_inverse.rs`，翻页与滚动两形态都可用）
-- [ ] T027 [US7] 翻页⇄滚动切换于 `crates/tome-reader/src/scroll/flow.rs`（FR-023：双向位置不丢；进度以切换稳定后的锚点为准，中间态不写库）
-  - [ ] SC-005b：`crates/tome-reader/tests/mode_switch_anchor.rs`——两方向切换锚点值 100% 不变且字符 100% 可见
-  - [ ] 切换过程中无进度写库（同文件断言）
-- [ ] T028 [US7] 滚动重排保锚点（FR-024：几何参数/窗口尺寸变化后锚点字符仍落视口内；resize 合并/节流不累积）
-  - [ ] 参数化测试（`crates/tome-reader/tests/scroll_relayout_anchor.rs`，含窗口连续变化）；无"保留像素偏移"式漂移断言
-- [ ] T029 [US7] 滚动不触发抓取（FR-025：未缓存区以明确占位/加载态呈现；继承 001 §FR-019b）
-  - [ ] 请求计数断言：`crates/tome-reader/tests/scroll_no_fetch.rs`——滚动到未缓存区抓取次数 = 0
-  - [ ] 加载态/占位可辨识（同文件断言其存在与文案标识）
-- [ ] T030 [US7] 按需释放 + 事件节流（FR-026 视口外的行可释放、超长章限定内存；FR-027 滚动事件合并/节流不累积排队）
-  - [ ] 20 万字章滚动：内存 ≤ 章节字节 ×8（`crates/tome-reader/tests/scroll_memory.rs`，SC-010 实测）
-  - [ ] 事件风暴（惯性滚动模拟）后无排队任务断言（同文件）
-- [ ] T031 [US7] 阅读记录两量产出与去重口径于 `crates/tome-reader/src/record.rs`（FR-039：已展示字符区间去重累计、回翻/回滚不重复、跨模式统一、上报节流；经 001 §FR-026b 接口落库，无界面可用）
-  - [ ] SC-013b：`crates/tome-reader/tests/record_dedup_cross_mode.rs`——同段字符两模式阅读字数相同；模式间来回切换只计一次
-  - [ ] 快速翻页不产生高频写库（同文件节流断言）
+- [x] T025 [US7] 滚动流排布于 `crates/tome-reader/src/scroll/flow.rs`（FR-020 连续流无分页空白；FR-021 视口=字符区间与 Page 同构，不引入第二套坐标）
+  - [x] SC-006b：`crates/tome-reader/tests/scroll_flow_integrity.rs`——视口区间并集与正文逐字符相等；相邻视口连续无缺口无重叠
+- [x] T026 [US7] 滚动偏移↔字符位置双向映射于 `crates/tome-reader/src/scroll/map.rs`（FR-022/040：与 001 锚点口径一致）
+  - [x] 互逆往返误差 ≤ 半个字形（`crates/tome-reader/tests/scroll_map_inverse.rs`，翻页与滚动两形态都可用）
+- [x] T027 [US7] 翻页⇄滚动切换于 `crates/tome-reader/src/scroll/flow.rs`（FR-023：双向位置不丢；进度以切换稳定后的锚点为准，中间态不写库）
+  - [x] SC-005b：`crates/tome-reader/tests/mode_switch_anchor.rs`——两方向切换锚点值 100% 不变且字符 100% 可见
+  - [x] 切换过程中无进度写库（同文件断言）
+- [x] T028 [US7] 滚动重排保锚点（FR-024：几何参数/窗口尺寸变化后锚点字符仍落视口内；resize 合并/节流不累积）
+  - [x] 参数化测试（`crates/tome-reader/tests/scroll_relayout_anchor.rs`，含窗口连续变化）；无"保留像素偏移"式漂移断言
+- [x] T029 [US7] 滚动不触发抓取（FR-025：未缓存区以明确占位/加载态呈现；继承 001 §FR-019b）
+  - [x] 请求计数断言：`crates/tome-reader/tests/scroll_no_fetch.rs`——滚动到未缓存区抓取次数 = 0
+  - [x] 加载态/占位可辨识（同文件断言其存在与文案标识）
+- [x] T030 [US7] 按需释放 + 事件节流（FR-026 视口外的行可释放、超长章限定内存；FR-027 滚动事件合并/节流不累积排队）
+  - [x] 20 万字章滚动：内存 ≤ 章节字节 ×8（`crates/tome-reader/tests/scroll_memory.rs`，SC-010 实测）
+  - [x] 事件风暴（惯性滚动模拟）后无排队任务断言（同文件）
+- [x] T031 [US7] 阅读记录两量产出与去重口径于 `crates/tome-reader/src/record.rs`（FR-039：已展示字符区间去重累计、回翻/回滚不重复、跨模式统一、上报节流；经 001 §FR-026b 接口落库，无界面可用）
+  - [x] SC-013b：`crates/tome-reader/tests/record_dedup_cross_mode.rs`——同段字符两模式阅读字数相同；模式间来回切换只计一次
+  - [x] 快速翻页不产生高频写库（同文件节流断言）
 
 > **⛔ 检查点：S2-3 之后（形态一致性门）**
-> - [ ] SC-005b 切换保锚点 100%；SC-006b 滚动流完整 100%；SC-013b 记录跨模式一致 100%
-> - [ ] FR-025 滚动到未缓存区不发起抓取（请求计数断言）且以明确占位/加载态呈现
-> - [ ] 人工审查后进入下一阶段
+> - [x] SC-005b 切换保锚点 100%；SC-006b 滚动流完整 100%；SC-013b 记录跨模式一致 100%
+> - [x] FR-025 滚动到未缓存区不发起抓取（请求计数断言）且以明确占位/加载态呈现
+> - [x] 人工审查后进入下一阶段
+>   - PM 注记（2026-10-11）：形态一致性门通过（SC-005b/006b/013b 全 100%，FR-025 零抓取三断言）。滚动维度锚点矩阵 [WIP] 已转正（真实 ScrollFlow）。**遗留补漏**：`ParagraphMode`（FR-018）schema 已备但引擎未施加缩进/间距——归 Phase 6 前导任务。scroll_memory.rs 的 unsafe 计数分配器批准（测试装置固有条件，生产代码仍 forbid）。
 
 ---
 

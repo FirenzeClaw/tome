@@ -1,4 +1,4 @@
-//! [DONE] TXT 目录规则求值与回退（tasks.md T076 / FR-020）
+//! \[DONE] TXT 目录规则求值与回退（tasks.md T076 / FR-020）
 //!
 //! # 本模块的职责边界
 //!
@@ -14,7 +14,7 @@
 //! 规则在此被**识别并跳过**，跳过原因进入 [`TocDetection::attempts`]，
 //! 让 `tome local toc` 能如实回答"为什么这条规则没生效"。
 //!
-//! > [WIP] 脚本形态（rule 以 `<js>` 包裹或经 `@js:` 前缀标记）目前只跳过并
+//! > \[WIP] 脚本形态（rule 以 `<js>` 包裹或经 `@js:` 前缀标记）目前只跳过并
 //! > 记录。接线到 `tome-js` 需要组合根注入 JS 运行时，属后续切片。
 //!
 //! # 为什么"命中即停"而不是"取产出最多者"
@@ -93,7 +93,7 @@ impl TocDetection {
     }
 }
 
-/// [DONE] FR-020 的规则回退求值：按 `sort_order` 依次尝试，第一条足够的胜出。
+/// \[DONE] FR-020 的规则回退求值：按 `sort_order` 依次尝试，第一条足够的胜出。
 pub fn detect(text: &str, rules: &[TxtTocRule]) -> TocDetection {
     let mut ordered: Vec<&TxtTocRule> = rules.iter().filter(|rule| rule.enabled).collect();
     // 主序 `sort_order`、次序 `name`（稳定）：同一份配置的多次运行必须

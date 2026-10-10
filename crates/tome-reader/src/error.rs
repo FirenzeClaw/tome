@@ -1,4 +1,4 @@
-//! [DONE] 本层错误类型与 `→ErrorKind` 映射（FR-057 / FR-058）
+//! \[DONE] 本层错误类型与 `→ErrorKind` 映射（FR-057 / FR-058）
 //!
 //! ## 为什么本层要有自己的错误类型
 //!
@@ -55,7 +55,7 @@ pub use crate::capability;
 /// - [`Self::TextModel`] → 输入本身有问题（可为空正文，通常静默降级）
 /// - [`Self::LayoutFailed`] → 排版内部失败（重试无意义，记录并降级）
 /// - [`Self::InvalidGeometry`] → 调用方传了非法几何（**调用方的 bug**，应修参数）
-/// - [`Self::Storage`] → 下层存储/内容通道失败（提示检查数据目录）
+/// - `Self::Storage`（存储/内容通道） → 下层存储/内容通道失败（提示检查数据目录）
 ///
 /// 把 `InvalidGeometry` 与 `LayoutFailed` 分开尤其重要：前者重试一万次也不会好，
 /// 后者可能是瞬时状态。若合成一类，上层只能一律刷新，浪费且误导。
@@ -272,7 +272,7 @@ impl ReaderError {
         }
     }
 
-    /// 转成 core 的 [`tome_core::ClassifiedError`]（跨 crate 边界的交付形态）。
+    /// 转成 core 的 [`ClassifiedError`](tome_core::error::ClassifiedError "ClassifiedError")（跨 crate 边界的交付形态）。
     #[must_use]
     pub fn to_classified(&self) -> ClassifiedError {
         let detail = self

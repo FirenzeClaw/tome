@@ -1,4 +1,4 @@
-//! [DONE] CLI 参数解析（tasks.md T028/T029 / `contracts/cli.md`）
+//! \[DONE] CLI 参数解析（tasks.md T028/T029 / `contracts/cli.md`）
 //!
 //! # 为什么手写解析而不引第三方库
 //!
@@ -163,6 +163,8 @@ pub enum Command {
         action: String,
         /// 动作的输入（`search` 时是关键词）
         input: Option<String>,
+        /// 输出规则求值轨迹（FR-037，逐步中间值）
+        trace: bool,
     },
     /// `info <source-id> <book-url>`（`contracts/cli.md` 的详情动作）
     Info {
@@ -262,6 +264,83 @@ pub enum Command {
         /// 是否把本次结果写为新基线（首轮基线落盘）
         write_baseline: bool,
     },
+
+    // ---- T093：契约里定义但此前未落地的命令面 ----
+    /// `run --rule <规则> --input <文本> --trace`（FR-037 的轨迹模式）
+    ///
+    /// # 为什么它不是 `Run` 的一个字段
+    ///
+    /// `Run` 的语义是"对**某个书源**执行某个动作"（需要 source-id）。
+    /// 轨迹模式的语义是"对**一条规则**求值并展开过程"——它不需要书源，
+    /// 也不需要动作。两者共用 `run` 这个入口词（契约如此），但**参数前提
+    /// 完全不同**，塞进同一个变体会让每个字段都变成"看情况可空"。
+    RuleTrace {
+        /// 规则原文
+        rule: String,
+        /// 求值输入（HTML 或 JSON 文本）
+        input: String,
+    },
+
+    /// `source group <源id...> --name <分组|->`（FR-001：分组与启停）
+    ///
+    /// `--name -` 表示**移出分组**（置空）。用 `-` 而非额外的 flag 形态：
+    /// 与 shell 惯例一致（`-` 多表示"空/标准输入"），且少一个 flag。
+    SourceGroup {
+        /// 要归组的书源 id（可多个）
+        source_ids: Vec<String>,
+        /// 目标分组名；`-` 表示移出分组
+        name: String,
+    },
+    /// `source enable|disable <源id...|--all>`（FR-001：启停）
+    SourceEnable {
+        /// 要启停的书源 id
+        source_ids: Vec<String>,
+        /// 是否作用于全部书源
+        all: bool,
+        /// `true` 启用、`false` 停用
+        enabled: bool,
+    },
+    /// `source groups`（列出分组）
+    SourceGroups,
+    /// `keyword list`（FR-018：搜索关键词收藏与复用）
+    KeywordList,
+    /// `keyword add <词>`
+    KeywordAdd {
+        /// 关键词
+        keyword: String,
+    },
+    /// `keyword remove <词>`
+    KeywordRemove {
+        /// 关键词
+        keyword: String,
+    },
+    /// `data export [--output <file>]`（FR-033）
+    DataExport {
+        /// 输出文件；`None` 表示写 stdout
+        output: Option<PathBuf>,
+    },
+    /// `data import <file>`（FR-033）
+    DataImport {
+        /// 备份文件
+        file: PathBuf,
+    },
+    /// `data clear-cache <chapters|images>`（SC-017）
+    DataClearCache {
+        /// 要清理的缓存类别（`chapters` / `images`）
+        kind: String,
+    },
+    /// `data delete [--yes]`（FR-035 / T091）
+    ///
+    /// # 为什么需要 `--yes`
+    ///
+    /// 这是**不可撤销**的完整删除。CLI 会被脚本调用，而脚本里一个空变量
+    /// 就可能导致参数错位——无确认地执行会让用户丢光数据。故默认要求显式
+    /// `--yes`，否则只打印"将要删除什么"并以**用法错误（2）**退出，
+    /// 让脚本能区分"没执行"与"执行失败"。
+    DataDelete {
+        /// 确认执行
+        yes: bool,
+    },
 }
 
 /// 全局选项。
@@ -273,6 +352,23 @@ pub struct GlobalOptions {
     pub network: NetworkMode,
     /// 数据目录
     pub data_dir: Option<PathBuf>,
+    /// 配置文件路径（`--config <path>`）
+    ///
+    /// `None` 时用数据目录下的 `config.toml`。
+    ///
+    /// # 为什么契约要求它（`contracts/cli.md` 全局约定）
+    ///
+    /// 它让"同一份数据 + 两套配置"可被对照运行（比如开了代理与没开代理），
+    /// 而差分测试正需要这种能力——否则验配置影响只能改数据目录里的文件，
+    /// 那会污染被对照的那一份。
+    pub config: Option<PathBuf>,
+    /// 界面语言（`--lang <zh|en>`，FR-044）
+    ///
+    /// # 为什么语言是 CLI 的全局选项而不是配置项
+    ///
+    /// 它要能**逐次调用**地切（CI 里跑同一个命令对比中英输出）。
+    /// 只放配置里就得为每次切换改文件。
+    pub language: crate::i18n::Language,
 }
 
 /// 解析结果。
@@ -310,7 +406,7 @@ pub enum ParseOutcome {
 
 /// 解析命令行参数（**不含**程序名）。
 ///
-/// [DONE] T028/T029 的入口。参数解析的全部规则集中在这里，
+/// \[DONE] T028/T029 的入口。参数解析的全部规则集中在这里，
 /// 便于让"用法错误 → 退出码 2"这条契约只需在一处保证。
 pub fn parse(args: &[String]) -> ParseOutcome {
     let mut options = GlobalOptions::default();
@@ -323,6 +419,13 @@ pub fn parse(args: &[String]) -> ParseOutcome {
     let mut source_file: Option<PathBuf> = None;
     let mut action: Option<String> = None;
     let mut input: Option<String> = None;
+    let mut config: Option<PathBuf> = None;
+    let mut language = crate::i18n::Language::default();
+    let mut trace = false;
+    let mut rule: Option<String> = None;
+    let mut output: Option<PathBuf> = None;
+    let mut yes = false;
+    let mut group_name: Option<String> = None;
     let mut corpus: Option<PathBuf> = None;
     let mut real_sources: Option<PathBuf> = None;
     let mut golden: Option<PathBuf> = None;
@@ -721,6 +824,68 @@ pub fn parse(args: &[String]) -> ParseOutcome {
                 report = Some(PathBuf::from(value));
                 2
             }
+            // T093：`run --trace`（FR-037）
+            "--trace" => {
+                trace = true;
+                1
+            }
+            // `--config <path>`（contracts/cli.md 全局约定）
+            "--config" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => return ParseOutcome::Usage("--config 需要一个路径".to_string()),
+                };
+                config = Some(PathBuf::from(value));
+                2
+            }
+            // `--lang <zh|en>`（FR-044）
+            "--lang" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => return ParseOutcome::Usage("--lang 需要 zh 或 en".to_string()),
+                };
+                let Some(parsed) = crate::i18n::Language::parse(value) else {
+                    return ParseOutcome::Usage(format!("不支持的语言 `{value}`（可用：zh / en）"));
+                };
+                language = parsed;
+                2
+            }
+            // T093：`run --rule <规则> --input <文本> --trace`（轨迹模式）
+            "--rule" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => return ParseOutcome::Usage("--rule 需要一条规则".to_string()),
+                };
+                rule = Some(value.clone());
+                2
+            }
+            // T093：`data export --output <file>`
+            "--output" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => return ParseOutcome::Usage("--output 需要一个路径".to_string()),
+                };
+                output = Some(PathBuf::from(value));
+                2
+            }
+            // T093：`data delete --yes`（不可撤销操作的确认）
+            "--yes" => {
+                yes = true;
+                1
+            }
+            // T093：`source group --name <分组|->`
+            "--name" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => {
+                        return ParseOutcome::Usage(
+                            "--name 需要一个分组名（或用 `-` 移出分组）".to_string(),
+                        )
+                    }
+                };
+                group_name = Some(value.clone());
+                2
+            }
             // 未知的 `--xxx` 报用法错
             other if other.starts_with("--") => {
                 return ParseOutcome::Usage(format!("未知选项 `{other}`"));
@@ -755,6 +920,9 @@ pub fn parse(args: &[String]) -> ParseOutcome {
         (None, None, false) => NetworkMode::Live,
     };
 
+    options.config = config;
+    options.language = language;
+
     // 命令
     let Some(subcommand) = positionals.first().map(String::as_str) else {
         return ParseOutcome::Usage(
@@ -785,9 +953,39 @@ pub fn parse(args: &[String]) -> ParseOutcome {
                     source_id: rest.get(1).cloned(),
                     all: check_all,
                 },
+                // `source group <源id...> --name <分组|->`（FR-001）
+                "group" => {
+                    let ids: Vec<String> = rest[1..].to_vec();
+                    if ids.is_empty() {
+                        return ParseOutcome::Usage(
+                            "source group 需要至少一个书源 id（用法：source group <id...> --name <分组>）"
+                                .to_string(),
+                        );
+                    }
+                    let Some(name) = group_name else {
+                        return ParseOutcome::Usage(
+                            "source group 需要 --name <分组>（用 `-` 表示移出分组）".to_string(),
+                        );
+                    };
+                    Command::SourceGroup {
+                        source_ids: ids,
+                        name,
+                    }
+                }
+                // `source enable|disable <源id...|--all>`（FR-001）
+                "enable" | "disable" => {
+                    let enabled = action == "enable";
+                    Command::SourceEnable {
+                        source_ids: rest[1..].to_vec(),
+                        all: check_all,
+                        enabled,
+                    }
+                }
+                // `source groups`
+                "groups" => Command::SourceGroups,
                 other => {
                     return ParseOutcome::Usage(format!(
-                        "未知的 source 动作 `{other}`（可用：import / list / check）"
+                        "未知的 source 动作 `{other}`（可用：import / list / check / group /                          enable / disable / groups）"
                     ));
                 }
             }
@@ -834,7 +1032,91 @@ pub fn parse(args: &[String]) -> ParseOutcome {
                 }
             }
         }
+        "keyword" => {
+            let Some(action) = rest.first().map(String::as_str) else {
+                return ParseOutcome::Usage(
+                    "keyword 需要一个动作（list / add / remove）".to_string(),
+                );
+            };
+            match action {
+                "list" => Command::KeywordList,
+                "add" => {
+                    let Some(keyword) = rest.get(1) else {
+                        return ParseOutcome::Usage("keyword add 需要 <关键词>".to_string());
+                    };
+                    Command::KeywordAdd {
+                        keyword: keyword.clone(),
+                    }
+                }
+                "remove" => {
+                    let Some(keyword) = rest.get(1) else {
+                        return ParseOutcome::Usage("keyword remove 需要 <关键词>".to_string());
+                    };
+                    Command::KeywordRemove {
+                        keyword: keyword.clone(),
+                    }
+                }
+                other => {
+                    return ParseOutcome::Usage(format!(
+                        "未知的 keyword 动作 `{other}`（可用：list / add / remove）"
+                    ));
+                }
+            }
+        }
+        "data" => {
+            let Some(action) = rest.first().map(String::as_str) else {
+                return ParseOutcome::Usage(
+                    "data 需要一个动作（export / import / clear-cache / delete）".to_string(),
+                );
+            };
+            match action {
+                "export" => Command::DataExport { output },
+                "import" => {
+                    let Some(file) = rest.get(1) else {
+                        return ParseOutcome::Usage("data import 需要 <file>".to_string());
+                    };
+                    Command::DataImport {
+                        file: PathBuf::from(file),
+                    }
+                }
+                "clear-cache" => {
+                    let Some(kind) = rest.get(1) else {
+                        return ParseOutcome::Usage(
+                            "data clear-cache 需要 <chapters|images>".to_string(),
+                        );
+                    };
+                    if kind != "chapters" && kind != "images" {
+                        return ParseOutcome::Usage(format!(
+                            "未知的缓存类别 `{kind}`（可用：chapters / images）"
+                        ));
+                    }
+                    Command::DataClearCache { kind: kind.clone() }
+                }
+                "delete" => Command::DataDelete { yes },
+                other => {
+                    return ParseOutcome::Usage(format!(
+                        "未知的 data 动作 `{other}`（可用：export / import / clear-cache / delete）"
+                    ));
+                }
+            }
+        }
         "run" => {
+            // `--rule` 存在时是**轨迹模式**：不需要书源与动作，
+            // 只要规则原文 + 输入文本（FR-037 的调试用法）
+            if let Some(rule) = rule {
+                if !trace {
+                    return ParseOutcome::Usage(
+                        "`--rule` 需与 `--trace` 同用（否则不知道要输出什么）".to_string(),
+                    );
+                }
+                return ParseOutcome::Run {
+                    options,
+                    command: Command::RuleTrace {
+                        rule,
+                        input: input.unwrap_or_default(),
+                    },
+                };
+            }
             let Some(source_id) = rest.first() else {
                 return ParseOutcome::Usage(
                     "run 需要 <source-id>（用法：run <source-id> --action search --input <关键词>）"
@@ -850,6 +1132,7 @@ pub fn parse(args: &[String]) -> ParseOutcome {
                 source_id: source_id.clone(),
                 action,
                 input,
+                trace,
             }
         }
         // `info <source-id> <book-url>`
@@ -1021,7 +1304,7 @@ pub fn parse(args: &[String]) -> ParseOutcome {
 
 /// 退出码映射（`contracts/cli.md` 的全局约定）。
 ///
-/// [DONE] 错误分类 → 退出码的**唯一**落点。
+/// \[DONE] 错误分类 → 退出码的**唯一**落点。
 ///
 /// ## 为什么"不支持能力"单独一个码（3）
 ///
@@ -1057,6 +1340,9 @@ pub fn help_text() -> String {
         "  tome source import <file> [--url <u>] [--stdin]   导入书源（三渠道）",
         "  tome source list [--group <g>] [--enabled]        列出书源（可按分组/启用过滤）",
         "  tome source check <id|--all>                       源可用性检查",
+        "  tome source group <id...> --name <分组|->          书源分组（`-` 移出分组）",
+        "  tome source enable|disable <id...|--all>           书源启停",
+        "  tome source groups                                 列出分组",
         "  tome search <source-id> <keyword>                  按书源搜索",
         "  tome search --source-file <f> <keyword>            用临时书源文件搜索",
         "  tome info <source-id> <book-url>                   书籍详情",
@@ -1065,7 +1351,13 @@ pub fn help_text() -> String {
         "  tome local import <path> [--copy] [--library <dir>] 导入本地书（TXT/EPUB/MOBI）",
         "  tome local toc <path>                              本地书目录识别",
         "  tome local scan <dir> [--library <dir>...]         库根扫描（多库根）",
-        "  tome run <source-id> --action <a> [--input <s>]     通用执行（--action search）",
+        "  tome run <source-id> --action <a> [--input <s>]     通用执行（search/info/toc/content）",
+        "  tome run --rule <规则> --input <文本> --trace       规则求值轨迹（FR-037）",
+        "  tome keyword list|add|remove <词>                  搜索关键词收藏（FR-018）",
+        "  tome data export [--output <file>]                 导出全部阅读数据（FR-033）",
+        "  tome data import <file>                            导入备份",
+        "  tome data clear-cache <chapters|images>            分别清理两种缓存（SC-017）",
+        "  tome data delete [--yes]                           完整删除用户数据（FR-035）",
         "  tome layout --text <file> [几何选项]                排版一章（不渲染）",
         "  tome layout --chapter <book>#<n> [几何选项]         同上（书架形式，WIP）",
         "  tome layout-anchor --text <f> --char <n>           位置换算与形态切换（SC-005b）",
@@ -1080,11 +1372,17 @@ pub fn help_text() -> String {
         "  --replay <dir>         从目录回放（未命中时补抓，除非加 --offline）",
         "  --offline              完全离线（须与 --replay 同用）",
         "  --data-dir <path>      数据目录",
+        "  --config <path>        配置文件（默认数据目录下的 config.toml）",
+        "  --lang zh|en           界面语言（默认 zh，FR-044）",
         "  --corpus <dir>         合成语料目录（verify 用）",
         "  --real-sources <dir>   真实书源目录（verify --real-sources 用）",
         "  --golden <dir>         对照基线目录（verify --real-sources 用）",
         "  --write-baseline       把本次结果写为新基线（首轮基线落盘用）",
         "  --report <file>        报告输出文件（verify 用，默认为 stdout）",
+        "  --rule <规则>          规则求值轨迹的规则（需与 --trace 同用）",
+        "  --trace                输出规则求值轨迹（FR-037）",
+        "  --output <file>        数据导出目标文件（data export 用）",
+        "  --yes                  确认执行不可撤销的操作（data delete 用）",
         "",
         "layout 选项（contracts/cli.md §2.1）：",
         "  --text <file>          正文文件（本阶段入口）",
@@ -1363,13 +1661,232 @@ mod tests {
 
     #[test]
     fn 未知子命令报用法错() {
-        // 用未实现的子命令（`contracts/cli.md` 定义了它，但本切片不实现）。
-        //
-        // 注意：`local` 已在 T076-T083 落地，故这里改用 `data`——它仍在
-        // `contracts/cli.md` 里被定义而尚未实现，是这条测试的好样本。
-        let text = parse_usage(&["data", "export"]);
-        assert!(text.contains("data"), "{text}");
-        assert!(text.contains("source import"), "应提示可用命令：{text}");
+        // 用**真正不存在的**子命令（T093 起 `data` 已落地，故不能再用它）。
+        let text = parse_usage(&["definitely-not-a-command"]);
+        assert!(
+            text.contains("缺少子命令") || text.contains("definitely"),
+            "{text}"
+        );
+    }
+
+    // ---------- T093：补齐的命令面 ----------
+
+    #[test]
+    fn 规则轨迹需要_trace_与_rule_同用() {
+        // `--rule` 单独给：不知道要输出什么，报用法错误
+        let text = parse_usage(&["run", "--rule", "p@text", "--input", "<p>x</p>"]);
+        assert!(text.contains("--trace"), "{text}");
+
+        // 两者同用：解析成 RuleTrace
+        let (_, command) = parse_ok(&["run", "--rule", "p@text", "--input", "<p>x</p>", "--trace"]);
+        match command {
+            Command::RuleTrace { rule, input } => {
+                assert_eq!(rule, "p@text");
+                assert_eq!(input, "<p>x</p>");
+            }
+            other => panic!("应为 RuleTrace，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn run_的动作模式仍可解析() {
+        let (_, command) = parse_ok(&["run", "src-id", "--action", "search", "--input", "词"]);
+        match command {
+            Command::Run {
+                source_id,
+                action,
+                input,
+                trace,
+            } => {
+                assert_eq!(source_id, "src-id");
+                assert_eq!(action, "search");
+                assert_eq!(input.as_deref(), Some("词"));
+                assert!(!trace, "没给 --trace 时不该为真");
+            }
+            other => panic!("应为 Run，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn 书源分组解析() {
+        let (_, command) = parse_ok(&[
+            "source",
+            "group",
+            "https://a.com",
+            "https://b.com",
+            "--name",
+            "玄幻",
+        ]);
+        match command {
+            Command::SourceGroup { source_ids, name } => {
+                assert_eq!(source_ids.len(), 2);
+                assert_eq!(name, "玄幻");
+            }
+            other => panic!("应为 SourceGroup，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn 书源分组移出用连字符() {
+        let (_, command) = parse_ok(&["source", "group", "https://a.com", "--name", "-"]);
+        match command {
+            Command::SourceGroup { name, .. } => assert_eq!(name, "-"),
+            other => panic!("应为 SourceGroup，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn 书源分组缺_name_是用法错误() {
+        let text = parse_usage(&["source", "group", "https://a.com"]);
+        assert!(text.contains("--name"), "{text}");
+    }
+
+    #[test]
+    fn 书源分组缺_id_是用法错误() {
+        let text = parse_usage(&["source", "group", "--name", "组"]);
+        assert!(text.contains("书源 id") || text.contains("id"), "{text}");
+    }
+
+    #[test]
+    fn 书源启停解析() {
+        let (_, command) = parse_ok(&["source", "enable", "https://a.com"]);
+        match command {
+            Command::SourceEnable {
+                source_ids,
+                all,
+                enabled,
+            } => {
+                assert_eq!(source_ids, vec!["https://a.com"]);
+                assert!(!all);
+                assert!(enabled, "enable 应为 true");
+            }
+            other => panic!("应为 SourceEnable，实际 {other:?}"),
+        }
+
+        let (_, command) = parse_ok(&["source", "disable", "--all"]);
+        match command {
+            Command::SourceEnable { all, enabled, .. } => {
+                assert!(all);
+                assert!(!enabled, "disable 应为 false");
+            }
+            other => panic!("应为 SourceEnable，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn 列出分组可解析() {
+        let (_, command) = parse_ok(&["source", "groups"]);
+        assert!(matches!(command, Command::SourceGroups));
+    }
+
+    #[test]
+    fn 关键词命令解析() {
+        let (_, command) = parse_ok(&["keyword", "list"]);
+        assert!(matches!(command, Command::KeywordList));
+
+        let (_, command) = parse_ok(&["keyword", "add", "斗破"]);
+        match command {
+            Command::KeywordAdd { keyword } => assert_eq!(keyword, "斗破"),
+            other => panic!("应为 KeywordAdd，实际 {other:?}"),
+        }
+
+        let (_, command) = parse_ok(&["keyword", "remove", "斗破"]);
+        match command {
+            Command::KeywordRemove { keyword } => assert_eq!(keyword, "斗破"),
+            other => panic!("应为 KeywordRemove，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn 关键词缺词是用法错误() {
+        assert!(parse_usage(&["keyword", "add"]).contains("关键词"));
+        assert!(parse_usage(&["keyword", "remove"]).contains("关键词"));
+    }
+
+    #[test]
+    fn 数据命令解析() {
+        let (_, command) = parse_ok(&["data", "export"]);
+        assert!(matches!(command, Command::DataExport { output: None }));
+
+        let (_, command) = parse_ok(&["data", "export", "--output", "/tmp/b.json"]);
+        match command {
+            Command::DataExport { output } => {
+                assert_eq!(output, Some(PathBuf::from("/tmp/b.json")));
+            }
+            other => panic!("应为 DataExport，实际 {other:?}"),
+        }
+
+        let (_, command) = parse_ok(&["data", "import", "/tmp/b.json"]);
+        match command {
+            Command::DataImport { file } => assert_eq!(file, PathBuf::from("/tmp/b.json")),
+            other => panic!("应为 DataImport，实际 {other:?}"),
+        }
+
+        for kind in ["chapters", "images"] {
+            let (_, command) = parse_ok(&["data", "clear-cache", kind]);
+            match command {
+                Command::DataClearCache { kind: got } => assert_eq!(got, kind),
+                other => panic!("应为 DataClearCache，实际 {other:?}"),
+            }
+        }
+
+        let (_, command) = parse_ok(&["data", "delete"]);
+        match command {
+            Command::DataDelete { yes } => assert!(!yes, "没给 --yes 时应为 false"),
+            other => panic!("应为 DataDelete，实际 {other:?}"),
+        }
+
+        let (_, command) = parse_ok(&["data", "delete", "--yes"]);
+        match command {
+            Command::DataDelete { yes } => assert!(yes),
+            other => panic!("应为 DataDelete，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn 未知缓存类别是用法错误() {
+        let text = parse_usage(&["data", "clear-cache", "everything"]);
+        assert!(
+            text.contains("chapters") && text.contains("images"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn 全局_flag_齐全() {
+        // contracts/cli.md 的全局约定：--format / --data-dir / --config / --offline
+        let (options, _) = parse_ok(&[
+            "--format",
+            "human",
+            "--data-dir",
+            "/tmp/d",
+            "--config",
+            "/tmp/c.toml",
+            "--lang",
+            "en",
+            "keyword",
+            "list",
+        ]);
+        assert_eq!(options.format, OutputFormat::Human);
+        assert_eq!(options.data_dir, Some(PathBuf::from("/tmp/d")));
+        assert_eq!(options.config, Some(PathBuf::from("/tmp/c.toml")));
+        assert_eq!(options.language, crate::i18n::Language::En);
+    }
+
+    #[test]
+    fn 不支持的语言是用法错误() {
+        let text = parse_usage(&["--lang", "jp", "keyword", "list"]);
+        assert!(text.contains("zh") && text.contains("en"), "{text}");
+    }
+
+    #[test]
+    fn config_缺路径是用法错误() {
+        assert!(parse_usage(&["--config"]).contains("--config"));
+    }
+
+    #[test]
+    fn lang_缺值是用法错误() {
+        assert!(parse_usage(&["--lang"]).contains("--lang"));
     }
 
     // ---------- verify（SC-002a 的载体） ----------

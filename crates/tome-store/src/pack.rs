@@ -1,4 +1,4 @@
-//! [DONE] Pack 章节缓存容器（tasks.md T060 / FR-029、FR-030、FR-031）
+//! \[DONE] Pack 章节缓存容器（tasks.md T060 / FR-029、FR-030、FR-031）
 //!
 //! # 为什么是容器而不是"一章一文件"
 //!
@@ -104,7 +104,7 @@ pub const MAX_RECORD_BYTES: u32 = 64 * 1024 * 1024;
 /// 同时要满足 SC-005（总字节数 ≤ 正文 × 1.01）：头部 14 字节 + 每记录 4 字节
 /// 前缀，按 6 KB/章计开销约 0.07%，充裕地落在 1.01 以内。
 ///
-/// [WORKAROUND] 硬编码默认值：`config.toml` 的存储子集（T062）里有
+/// \[WORKAROUND] 硬编码默认值：`config.toml` 的存储子集（T062）里有
 /// `chapter_pack_bytes` 字段，组合根会注入；此处只是无配置时的取值。
 pub const DEFAULT_PACK_CAPACITY_BYTES: u64 = 32 * 1024 * 1024;
 
@@ -283,7 +283,7 @@ impl PackStore {
     ///
     /// | 查什么 | 次数 | 做法 |
     /// |---|---|---|
-    /// | 章节属于哪本书、该书当前该写哪个容器 | 1 | [`Self::locate_write_target`] 一次问清 |
+    /// | 章节属于哪本书、该书当前该写哪个容器 | 1 | `Self::locate_write_target` 一次问清 |
     /// | 提交索引 | 1 | 事务内的 upsert |
     ///
     /// 两次都在 actor 上排队，而**文件写入与 fsync 不占队列**——那才是

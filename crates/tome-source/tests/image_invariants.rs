@@ -397,3 +397,169 @@ fn sc014_部分图片失败时其余图片仍可取到() {
     assert_eq!(set.fetched_count(), 2, "能取的图必须取到");
     assert_eq!(set.placeholder_count(), 1, "只有坏的那张走占位");
 }
+
+// ---------------------------------------------------------------------------
+// 图片在正文里的**位置**（PM 裁决 OQ#13 / `contracts/seams.md` §2）
+// ---------------------------------------------------------------------------
+
+/// 造一个含内嵌图的正文源与 HTML。
+fn source_and_html_with_image() -> (ParsedSource, String) {
+    let json = r#"[{
+        "bookSourceName": "插图源",
+        "bookSourceUrl": "https://img.example.com",
+        "ruleContent": "{\"content\":\"@css:.content p\"}"
+    }]"#;
+    let parsed = parse_sources(json).expect("源应能解析");
+    let source = parsed.sources.into_iter().next().expect("应有一个源");
+
+    let html = r#"<html><body>
+        <div class="content">
+          <p>第一段文字。</p>
+          <p><img src="/images/a.png" alt="插画甲"/></p>
+          <p>第二段文字。</p>
+        </div>
+    </body></html>"#
+        .to_string();
+    (source, html)
+}
+
+/// 图片锚点带字符位置，且位置落在正文规则产出的文本范围内。
+#[test]
+fn image_anchors_carry_positions() {
+    let (source, html) = source_and_html_with_image();
+    let anchors = image::extract_image_anchors(&source, &html, "https://img.example.com")
+        .expect("应能提取锚点");
+
+    assert_eq!(anchors.len(), 1, "应认出一张图：{anchors:?}");
+    let anchor = &anchors[0];
+    assert_eq!(
+        anchor.url, "https://img.example.com/images/a.png",
+        "地址应补全为绝对地址"
+    );
+    assert_eq!(anchor.alt.as_deref(), Some("插画甲"));
+
+    // 正文是 `@css:.content p` 的逐元素文本 join("\n")，
+    // 故"第一段文字。"（6 字）+ 换行 = 7 是图片所在位置
+    assert_eq!(
+        anchor.char_offset,
+        Some(7),
+        "图片应在第一段（6 字）与换行之后"
+    );
+}
+
+/// 无图章节给出空锚点列表（而不是报错）。
+#[test]
+fn no_images_yields_empty_anchors() {
+    let json = r#"[{
+        "bookSourceName": "无图源",
+        "bookSourceUrl": "https://plain.example.com",
+        "ruleContent": "{\"content\":\"@css:.content p\"}"
+    }]"#;
+    let parsed = parse_sources(json).expect("应能解析");
+    let source = parsed.sources.into_iter().next().expect("应有源");
+    let html = r#"<div class="content"><p>纯文字，没有图。</p></div>"#;
+
+    let anchors =
+        image::extract_image_anchors(&source, html, "https://plain.example.com").expect("应能提取");
+    assert!(anchors.is_empty());
+}
+
+/// 净化改了**图片之前**的文本时，位置被正确左移。
+#[test]
+fn anchors_shift_after_purify() {
+    let (_, html) = source_and_html_with_image();
+    let raw = "第一段文字。\n\n第二段文字。";
+    let purified = "首段文字。\n\n第二段文字。";
+
+    // 锚点相对 raw 的偏移（第一段 6 字 + 换行 = 7）
+    let anchors = vec![image::ImageAnchor {
+        url: "https://img.example.com/images/a.png".to_string(),
+        char_offset: Some(7),
+        alt: Some("插画甲".to_string()),
+    }];
+
+    let refs = image::align_anchors_after_purify(raw, purified, &anchors);
+    assert_eq!(refs.len(), 1, "上下文未变，图应仍能定位");
+    // 推演：原始偏移 7，其 7 字前缀含被改的「第一段文字。」故匹配不上；
+    // 逐级退到 5 字前缀「段文字。+换行」在净化后位于 1..6，故图片落到 6
+    // （原 7 减去被删掉的 1 字）
+    assert_eq!(
+        refs[0].char_offset, 6,
+        "少了 1 个字，图片偏移应从 7 左移到 6"
+    );
+    assert_eq!(refs[0].cache_key, "https://img.example.com/images/a.png");
+    assert_eq!(refs[0].alt.as_deref(), Some("插画甲"));
+    let _ = html;
+}
+
+/// 净化未改文本时，偏移原样保留（最常见路径）。
+#[test]
+fn anchors_unchanged_when_purify_is_identity() {
+    let text = "第一段。\n图在这里\n第二段。";
+    let anchors = vec![image::ImageAnchor {
+        url: "u".to_string(),
+        char_offset: Some(4),
+        alt: None,
+    }];
+    let refs = image::align_anchors_after_purify(text, text, &anchors);
+    assert_eq!(refs.len(), 1);
+    assert_eq!(refs[0].char_offset, 4);
+}
+
+/// **位置无法确定**的图被丢弃（不硬塞一个猜的偏移）。
+#[test]
+fn unlocatable_anchor_is_dropped() {
+    let raw = "原始文本。\n图\n后文。";
+    let purified = "完全换了一句话。\n图\n后文。";
+    let anchors = vec![image::ImageAnchor {
+        url: "u".to_string(),
+        char_offset: Some(5),
+        alt: None,
+    }];
+    let refs = image::align_anchors_after_purify(raw, purified, &anchors);
+    assert!(
+        refs.is_empty(),
+        "上下文被改掉的图应被丢弃——位置错的图比没有图更糟"
+    );
+}
+
+/// 没有位置的图（正文规则之外的页头/页脚图）不产出 `ImageRef`。
+#[test]
+fn anchor_without_position_is_dropped() {
+    let text = "正文";
+    let anchors = vec![image::ImageAnchor {
+        url: "header.png".to_string(),
+        char_offset: None,
+        alt: None,
+    }];
+    let refs = image::align_anchors_after_purify(text, text, &anchors);
+    assert!(refs.is_empty(), "没有位置的图无处可插，应丢弃");
+}
+
+/// 产出的 `ImageRef` 按位置**升序**（乱序会让两张图互换位置）。
+#[test]
+fn refs_are_sorted_by_position() {
+    // 输入故意给成逆序。两个锚点各自都有 ≥16 字的前文，
+    // 故在"净化未改文本"这条路径上偏移原样保留。
+    let text = "abcdefghijklmnopqrstuvwxyz0123456789|ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    let anchors = vec![
+        image::ImageAnchor {
+            url: "second.png".to_string(),
+            char_offset: Some(40),
+            alt: None,
+        },
+        image::ImageAnchor {
+            url: "first.png".to_string(),
+            char_offset: Some(20),
+            alt: None,
+        },
+    ];
+    let refs = image::align_anchors_after_purify(text, text, &anchors);
+    assert_eq!(refs.len(), 2, "两个锚点都应保留");
+    assert_eq!(refs[0].cache_key, "first.png", "应按时序排列");
+    assert_eq!(refs[1].cache_key, "second.png");
+    assert!(
+        refs[0].char_offset < refs[1].char_offset,
+        "排序后的偏移应递增"
+    );
+}

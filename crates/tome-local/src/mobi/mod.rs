@@ -1,4 +1,4 @@
-//! [DONE] MOBI / AZW3 解析（tasks.md T078-T081 / FR-022）
+//! \[DONE] MOBI / AZW3 解析（tasks.md T078-T081 / FR-022）
 //!
 //! # 规格原文
 //!
@@ -12,9 +12,9 @@
 //!
 //! | 阶段 | 内容 | 状态 |
 //! |---|---|---|
-//! | 一 | PalmDB + 头 + EXTH + trailing 剥离 + PalmDOC + MOBI6 纯文本 + guide 型 TOC | **[DONE]** |
-//! | 二 | HUFF/CDIC 解压（`-c2` 文件） | **[DONE]** |
-//! | 三 | KF8 FDST primary flow | **[DONE]** |
+//! | 一 | PalmDB + 头 + EXTH + trailing 剥离 + PalmDOC + MOBI6 纯文本 + guide 型 TOC | **\[DONE]** |
+//! | 二 | HUFF/CDIC 解压（`-c2` 文件） | **\[DONE]** |
+//! | 三 | KF8 FDST primary flow | **\[DONE]** |
 //! | 四（可选） | SKEL/FRAG 拼接、图片提取 | 不属本切片 |
 //!
 //! # 三个格式形态与它们的正文位置
@@ -177,7 +177,7 @@ fn adjust_to_char_boundary(text: &str, offset: usize) -> usize {
     candidate.min(text.len())
 }
 
-/// [DONE] MOBI 解析主入口（T078-T081）。
+/// \[DONE] MOBI 解析主入口（T078-T081）。
 pub fn parse(bytes: &[u8]) -> LocalResult<ParsedMobi> {
     let mut warnings = Vec::new();
 
@@ -837,7 +837,7 @@ fn collapse_blank_lines(text: &str, map: &[usize]) -> (String, Vec<usize>) {
 /// KF8 为 UTF-8）。本实现统一按 UTF-8 处理：若编码字段不是 UTF-8，
 /// 由 [`crate::mobi::header::TextEncoding`] 报告，调用方据此展示。
 ///
-/// > [UNCERTAIN] 非 UTF-8 的 MOBI6 文件（`encoding = 1252` 且含非 ASCII）
+/// > \[UNCERTAIN] 非 UTF-8 的 MOBI6 文件（`encoding = 1252` 且含非 ASCII）
 /// > 会在这里产生替换字符。真实语料里这类文件极少（Kindle 生态早已
 /// > UTF-8 化），故当前不做转码。若日后出现，在此处按 `encoding` 字段
 /// > 转码即可（接口已经把它传下来了）。

@@ -8,7 +8,7 @@
 //!
 //! # 关于本文件里的 `expect`
 //!
-//! [WORKAROUND] `.clippy.toml` 的 `allow-expect-in-tests` 覆盖 `#[test]` 函数，
+//! \[WORKAROUND] `.clippy.toml` 的 `allow-expect-in-tests` 覆盖 `#[test]` 函数，
 //! 但**不覆盖**本文件里的辅助函数（如 `run`、`temp_dir`）。
 //! 这些辅助函数若失败，说明测试环境本身有问题（runtime 建不起来、临时目录建不了），
 //! 此时让调用它的那个测试当场失败是正确行为。故显式豁免并说明理由。

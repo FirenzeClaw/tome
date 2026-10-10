@@ -1,4 +1,4 @@
-//! [DONE] 按源限速（tasks.md T018 / FR-008）
+//! \[DONE] 按源限速（tasks.md T018 / FR-008）
 //!
 //! FR-008 要求书源能声明"请求间隔"，宪法原则 V 与 AGENTS.md 安全红线进一步要求
 //! "遵守书源声明的请求间隔，**不得绕过限速**"。本模块是这条要求的唯一执行点。
@@ -40,7 +40,7 @@
 //!
 //! # 缺口：`RequestSpec` 没有请求间隔字段
 //!
-//! [WORKAROUND] FR-008 明确要求"书源声明的……请求间隔"，但 T012 定稿的
+//! \[WORKAROUND] FR-008 明确要求"书源声明的……请求间隔"，但 T012 定稿的
 //! `RequestSpec` 字段清单里**没有**间隔字段（只有 `timeout_ms` 与 `rate_limit_key`）。
 //! 本模块因此把间隔做成**执行器侧配置注入**：
 //! [`RateLimiter::set_interval`] 按 key 覆盖、[`RateLimiter::set_default_interval`]
@@ -103,7 +103,7 @@ impl Default for RateLimiter {
 }
 
 impl RateLimiter {
-    /// [DONE] 新建调度器，全部 key 用默认间隔（零 = 不限速）。
+    /// \[DONE] 新建调度器，全部 key 用默认间隔（零 = 不限速）。
     pub fn new() -> Self {
         Self::with_default_interval(DEFAULT_REQUEST_INTERVAL)
     }
@@ -126,7 +126,7 @@ impl RateLimiter {
         self.lock_state().default_interval = interval;
     }
 
-    /// 设置某个 key 的请求间隔（[WORKAROUND] 见模块文档：间隔本应随 `RequestSpec` 传递）。
+    /// 设置某个 key 的请求间隔（\[WORKAROUND] 见模块文档：间隔本应随 `RequestSpec` 传递）。
     ///
     /// `interval` 为 0 表示该 key 不限速。
     ///
@@ -168,7 +168,7 @@ impl RateLimiter {
     /// 声明**更短**时同样生效：若那构成"绕过限速"，责任在书源而非引擎——
     /// 引擎的职责是"尊重声明的间隔"，不是"审查声明是否够保守"。
     ///
-    /// 标 `[DONE]`：这是 R2 的落点，被 [`Self::plan`] 消费。
+    /// 标 `\[DONE]`：这是 R2 的落点，被 [`Self::plan`] 消费。
     pub fn set_declared_interval(&self, key: &str, interval: Option<Duration>) {
         // `None` 不动状态：语义是"书源没说话"，而非"书源要求零间隔"。
         // 若这里把 None 当作零去写，会让"未声明的 key"意外获得零间隔，

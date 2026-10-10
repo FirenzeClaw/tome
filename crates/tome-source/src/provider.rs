@@ -1,4 +1,4 @@
-//! [DONE] `ContentProvider` 的网络书 adapter（tasks.md T074 / A4 / SC-008）
+//! \[DONE] `ContentProvider` 的网络书 adapter（tasks.md T074 / A4 / SC-008）
 //!
 //! # 这个 adapter 存在的意义
 //!
@@ -58,10 +58,19 @@ pub struct NetworkContentProvider {
     /// 用 `Mutex<HashMap>` 而不是每次重抓：命中缓存时零成本，未命中时
     /// 回落去抓（见 [`NetworkContentProvider::chapter_text`]）。
     ///
-    /// `[UNCERTAIN]` 这个暂存没有上限。真实使用下它最多持有"一本书的
+    /// `\[UNCERTAIN]` 这个暂存没有上限。真实使用下它最多持有"一本书的
     /// 邻域几章"（几 MB），而进程生命周期内读过的书也不多。若日后发现
     /// 内存增长不可控，应换成 LRU 而非继续放大。
-    memo: std::sync::Mutex<std::collections::HashMap<(String, i32), String>>,
+    /// 暂存内容 = **原始正文 + 图片锚点**。
+    ///
+    /// # 为什么图片锚点也要缓存
+    ///
+    /// 锚点是相对**原始正文**的字符偏移。若只缓存正文、每次重算锚点，
+    /// 就得保留原始 HTML——那比锚点本身大得多。锚点是小结构
+    /// （URL + 偏移 + alt），随正文一起缓存最省。
+    memo: std::sync::Mutex<
+        std::collections::HashMap<(String, i32), (String, Vec<crate::image::ImageAnchor>)>,
+    >,
 }
 
 impl std::fmt::Debug for NetworkContentProvider {
@@ -146,20 +155,35 @@ impl NetworkContentProvider {
             self.host.as_ref(),
             self.cache.as_deref(),
         )?;
-        self.remember(&parsed.source.id, chapter_index, &outcome.raw);
+        // 这里只要文本（锚点解析用），故不提取图片锚点——
+        // 白算一遍锚点只为丢掉它是浪费。`chapter_content` 那条路径才需要图。
+        self.remember(&parsed.source.id, chapter_index, &outcome.raw, &[]);
         Ok(outcome.raw)
     }
 
     /// 记住一章的文本（供锚点解析复用）。
-    fn remember(&self, source_id: &str, chapter_index: i32, text: &str) {
+    fn remember(
+        &self,
+        source_id: &str,
+        chapter_index: i32,
+        text: &str,
+        anchors: &[crate::image::ImageAnchor],
+    ) {
         self.memo
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert((source_id.to_string(), chapter_index), text.to_string());
+            .insert(
+                (source_id.to_string(), chapter_index),
+                (text.to_string(), anchors.to_vec()),
+            );
     }
 
-    /// 取暂存的章节文本。
-    fn recall(&self, source_id: &str, chapter_index: i32) -> Option<String> {
+    /// 取暂存的章节文本与图片锚点。
+    fn recall(
+        &self,
+        source_id: &str,
+        chapter_index: i32,
+    ) -> Option<(String, Vec<crate::image::ImageAnchor>)> {
         self.memo
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -205,8 +229,8 @@ impl ContentProvider for NetworkContentProvider {
         let source_id = parsed.source.id.clone();
 
         // 复用暂存（同一章被反复读时不再走缓存/网络）
-        let (raw, title, from_cache) = match self.recall(&source_id, chapter_index) {
-            Some(text) => (text, String::new(), true),
+        let (raw, title, from_cache, anchors) = match self.recall(&source_id, chapter_index) {
+            Some((text, anchors)) => (text, String::new(), true, anchors),
             None => {
                 let Some(chapter) = self
                     .chapter_at(book, chapter_index)
@@ -222,8 +246,23 @@ impl ContentProvider for NetworkContentProvider {
                     self.cache.as_deref(),
                 )
                 .map_err(|error| error.to_error_kind())?;
-                self.remember(&source_id, chapter_index, &outcome.raw);
-                (outcome.raw, outcome.title, outcome.from_cache)
+
+                // 图片锚点：与正文**同源**产出（同一次 HTML 解析）。
+                //
+                // ## 为什么取不到就退化为空列表而不是报错
+                //
+                // SC-014 明确"图片失败 MUST NOT 中断正文获取"。这一条同样
+                // 适用于"图片位置算不出来"（书源没写 content 规则、HTML
+                // 结构怪异）——读者要的是正文，图是附加物。
+                let anchors = crate::image::extract_image_anchors(
+                    &parsed,
+                    outcome.raw_html(),
+                    chapter.url.as_deref().unwrap_or(&source_id),
+                )
+                .unwrap_or_default();
+
+                self.remember(&source_id, chapter_index, &outcome.raw, &anchors);
+                (outcome.raw, outcome.title, outcome.from_cache, anchors)
             }
         };
 
@@ -241,7 +280,8 @@ impl ContentProvider for NetworkContentProvider {
         Ok(ChapterContent {
             chapter_index,
             title,
-            content: purified,
+            content: purified.clone(),
+            images: crate::image::align_anchors_after_purify(&raw, &purified, &anchors),
             from_cache,
         })
     }

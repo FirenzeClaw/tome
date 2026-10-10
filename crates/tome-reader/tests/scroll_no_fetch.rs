@@ -90,6 +90,8 @@ impl ContentProvider for CountingHost {
             title: String::new(),
             content: self.content.clone(),
             from_cache: true,
+            // 滚动零抓取用例的语料是纯正文（FR-025 关切的是抓取次数，不是图片）
+            images: Vec::new(),
         })
     }
 

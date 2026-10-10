@@ -260,7 +260,7 @@ impl fmt::Debug for Document {
 impl Document {
     /// 解析一段 HTML（HTML5 树构造，对齐 WHATWG 规范）。
     ///
-    /// [DONE] 从字符串到可查询 DOM 的唯一常规路径。
+    /// \[DONE] 从字符串到可查询 DOM 的唯一常规路径。
     /// 字节到字符串的解码是 charset 层的关切（FR-009），不在本 crate。
     pub fn parse_html(html: &str) -> Self {
         let sink = SinkBuilder::new();
@@ -900,7 +900,7 @@ impl SinkBuilder {
     /// 故 `NodeKind::CData` 只能由 XML 解析路径（S1-3）或调用方手工构造。
     ///
     /// 提供不依赖外部解析器的构造入口，使 `::cdata` 与
-    /// [`Self::node_value`] 的 CData 分支可被直接验证，而不是留一段
+    /// `Self::node_value` 的 CData 分支可被直接验证，而不是留一段
     /// "写了但永远走不到"的代码。
     pub fn create_cdata(&self, text: &str) -> NodeRef {
         let id = self.push_node(NodeData::CData(RefCell::new(text.to_string())));
@@ -1081,7 +1081,7 @@ impl TreeSink for SinkBuilder {
     type Output = Document;
     type ElemName<'a> = ElementName;
 
-    /// [DONE] 交出解析结果。sink 在解析结束后才被消费，故无需再做同步。
+    /// \[DONE] 交出解析结果。sink 在解析结束后才被消费，故无需再做同步。
     fn finish(self) -> Self::Output {
         self.document
     }

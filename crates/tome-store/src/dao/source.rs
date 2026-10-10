@@ -1,4 +1,4 @@
-//! [DONE] DAO·书源与分组（tasks.md T056 / FR-001、FR-026、FR-035）
+//! \[DONE] DAO·书源与分组（tasks.md T056 / FR-001、FR-026、FR-035）
 //!
 //! # 一张表装四类源
 //!

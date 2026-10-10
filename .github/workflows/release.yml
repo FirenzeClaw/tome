@@ -1,0 +1,278 @@
+name: Release
+
+# 三平台 release 产物 + 体积基线监控（tasks.md T095 / SC-009、SC-010）
+#
+# ## 两条 Success Criteria 分别要什么
+#
+# | SC | 原文 | 本工作流怎么落地 |
+# |---|---|---|
+# | **SC-010** | 三个目标平台均能构建并产出**可运行**产物（100%） | 三平台 release 构建 + **实跑 `--help`**（"可构建"不等于"可运行"，见下） |
+# | **SC-009** | 体积基线被记录在案（不设上限判据）；不引入与功能无关的膨胀 | 产出体积记录并上传 artifact，附构建期比对 |
+#
+# ## 为什么"实跑一次"是必要的（不是走过场）
+#
+# SC-010 说的是产物**可运行**。`cargo build --release` 成功只证明能链接，
+# 不证明能启动——漏链的动态库、缺失的数据文件、平台特有的初始化失败都
+# 在链接之后才暴露。故每个平台构建完立刻跑一次 `tome --help`：
+# 它是最小的"进程能起来并正常退出"的证明，且不依赖网络与外部资源。
+#
+# ## 为什么体积只记录不判定上限
+#
+# SC-009 明确"不设上限判据"——`<20 MB` 的目标基线由 S3 规格承接。故这里
+# **只记录**，并在 PR 场景下打印与 base 分支的对比供人看。刻意不做
+# "超过 X 就 fail"：那会把一个**观测指标**变成**硬门槛**，而硬门槛在
+# 体积尚未优化的阶段会频繁拦截合法提交。
+
+on:
+  push:
+    tags:
+      # 打 tag 才出正式产物（避免每个 main 提交都消耗三平台 runner）
+      - "v*"
+  pull_request:
+    branches: [main]
+    paths:
+      # 只在可能影响产物体积的东西变化时跑——本工作流比 ci.yml 贵
+      # （三平台 release 构建），不该被一个文档提交触发。
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "crates/**"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 三平台 release 产物
+  # ---------------------------------------------------------------------------
+  release:
+    name: release (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # 一个平台失败不取消另外两个：三平台一致性是承诺（SC-010 要 100%），
+      # 需要同时看到三个平台的真实结果。
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-gnu
+            os: windows-latest
+            target: x86_64-pc-windows-gnu
+            binary: tome-cli.exe
+          - name: macos
+            os: macos-latest
+            target: aarch64-apple-darwin
+            binary: tome-cli
+          - name: linux
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: tome-cli
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 仓库根 rust-toolchain.toml 钉的是 stable-x86_64-pc-windows-gnu
+      # （Windows 开发者的 ABI 选择）；该三元组在 macos/ubuntu 上不存在，
+      # 故各平台显式覆盖。RUSTUP_TOOLCHAIN 是官方的覆盖机制。
+      - name: 安装工具链（${{ matrix.target }}）
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+        env:
+          RUSTUP_TOOLCHAIN: stable-${{ matrix.target }}
+
+      - name: 缓存 cargo 构建产物
+        uses: Swatinem/rust-cache@v2
+        with:
+          # release profile 的缓存与 debug 分开，避免互相驱逐
+          key: release-${{ matrix.name }}
+
+      # -----------------------------------------------------------------------
+      # 构建（release profile：Cargo.toml 里已配 LTO=fat / panic=abort / strip）
+      # -----------------------------------------------------------------------
+      - name: cargo build --release
+        run: cargo build --release --bin tome-cli --target ${{ matrix.target }}
+        env:
+          RUSTUP_TOOLCHAIN: stable-${{ matrix.target }}
+
+      # -----------------------------------------------------------------------
+      # SC-010：产物**可运行**（不只是可构建）
+      #
+      # 跑 `--help` 是最小的可用性证明：进程能启动、能初始化、能正常退出，
+      # 且不依赖网络与外部资源（CI 上无外网时也不该失败）。
+      # 退出码必须为 0——非 0 说明启动路径有问题。
+      # -----------------------------------------------------------------------
+      - name: 冒烟测试（产物可运行）
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="target/${{ matrix.target }}/release/${{ matrix.binary }}"
+          if [ ! -f "$binary" ]; then
+            echo "::error::未找到产物 $binary"
+            exit 1
+          fi
+          echo "--- 产物信息 ---"
+          ls -l "$binary"
+
+          echo "--- 跑 --help（退出码必须为 0）---"
+          "$binary" --help > /dev/null
+          echo "冒烟测试通过：产物可运行"
+
+      # -----------------------------------------------------------------------
+      # SC-011 的**平台级**补充证据
+      #
+      # ubuntu runner 没有 X11/Wayland，是真正的无图形环境。在这里跑
+      # `verify --corpus`（纯计算、不联网、不需要图形）能证明"引擎在无
+      # 图形环境下可用"——这是 T094 的本地环境模拟给不了的**真实**证据。
+      #
+      # 用 `--data-dir` 指向临时目录：runner 的工作目录不该留痕。
+      # -----------------------------------------------------------------------
+      - name: 无头环境验证（仅 linux，真实无图形环境）
+        if: matrix.name == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="target/${{ matrix.target }}/release/${{ matrix.binary }}"
+          data_dir="$(mktemp -d)"
+
+          echo "--- 确认本 runner 无图形环境 ---"
+          if [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
+            echo "本 runner 居然有显示服务（DISPLAY=$DISPLAY）——该断言的前提不成立"
+            exit 1
+          fi
+          echo "DISPLAY 与 WAYLAND_DISPLAY 均未设置（真实无头环境）"
+
+          echo "--- 在无头环境下跑合成语料校验 ---"
+          "$binary" verify --corpus tests/corpus/ --data-dir "$data_dir" > /dev/null
+          echo "无头环境验证通过"
+
+      # -----------------------------------------------------------------------
+      # SC-009：体积基线记录（**只记录，不判定上限**）
+      # -----------------------------------------------------------------------
+      - name: 记录产物体积
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p size-report
+          binary="target/${{ matrix.target }}/release/${{ matrix.binary }}"
+
+          size_bytes=$(wc -c < "$binary")
+          size_kib=$(( size_bytes / 1024 ))
+          size_mib=$(awk "BEGIN { printf \"%.2f\", $size_bytes / 1048576 }")
+
+          {
+            echo "# tome-cli release 产物体积（${{ matrix.name }}）"
+            echo
+            echo "- commit: \`${GITHUB_SHA}\`"
+            echo "- target: \`${{ matrix.target }}\`"
+            echo "- 生成时间: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            echo
+            echo "| 项 | 值 |"
+            echo "|---|---|"
+            echo "| 字节 | ${size_bytes} |"
+            echo "| KiB | ${size_kib} |"
+            echo "| MiB | ${size_mib} |"
+            echo
+            echo "> SC-009 明确**不设上限判据**：\`<20 MB\` 的目标基线由 S3 规格承接。"
+            echo "> 本文件是**观测记录**，用于发现某次提交让它突然变大。"
+            echo
+            echo '```'
+            echo "${binary}"
+            ls -l "$binary"
+            echo '```'
+          } > "size-report/tome-cli-size-${{ matrix.name }}.md"
+
+          # 同时输出一份机器可读的（便于后续自动化比对）
+          {
+            echo "{"
+            echo "  \"platform\": \"${{ matrix.name }}\","
+            echo "  \"target\": \"${{ matrix.target }}\","
+            echo "  \"commit\": \"${GITHUB_SHA}\","
+            echo "  \"bytes\": ${size_bytes}"
+            echo "}"
+          } > "size-report/tome-cli-size-${{ matrix.name }}.json"
+
+          echo "--- 体积记录 ---"
+          cat "size-report/tome-cli-size-${{ matrix.name }}.md"
+
+      # PR 场景下与 base 分支的**已记录**体积对比（若有）。
+      # 刻意只"打印差异"不"判定失败"（见文件头对 SC-009 的说明）。
+      - name: 体积对比提示
+        if: github.event_name == 'pull_request'
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          binary="target/${{ matrix.target }}/release/${{ matrix.binary }}"
+          size_bytes=$(wc -c < "$binary")
+          echo "当前体积：${size_bytes} 字节"
+          echo "（与 base 的对比需历史 artifact 支持；SC-009 不设上限判据，"
+          echo "  故此处仅打印当前值，供人对照上次的 artifact 记录）"
+
+      # -----------------------------------------------------------------------
+      # 上传产物与体积记录
+      # -----------------------------------------------------------------------
+      - name: 上传 release 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: tome-cli-${{ matrix.name }}
+          path: target/${{ matrix.target }}/release/${{ matrix.binary }}
+          # 产物是本次构建的特定结果，不该被后续运行覆盖
+          overwrite: false
+          retention-days: 30
+
+      - name: 上传体积记录
+        uses: actions/upload-artifact@v4
+        with:
+          name: size-${{ matrix.name }}
+          path: size-report/
+          # 体积是长期观测序列，每次运行的记录都要留住才能看出趋势
+          overwrite: false
+          retention-days: 90
+
+      - name: 失败时上传 debug 日志
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-debug-${{ matrix.name }}
+          path: |
+            target/**/*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # 汇总：三平台全部成功才算通过（SC-010 的"100%"）
+  # ---------------------------------------------------------------------------
+  #
+  # ## 为什么需要一个汇总 job
+  #
+  # 矩阵 job 的部分失败在 GitHub 的"必需检查"里不易表达——分支保护通常
+  # 只能勾"某个 check"，而矩阵会产生多个。一个依赖全部矩阵结果的汇总 job
+  # 给出**单一可勾选**的结论，同时把"哪个平台挂了"打印出来。
+  summary:
+    name: 三平台汇总
+    needs: release
+    # `always()` 让它在矩阵失败时也跑——否则失败时这个 job 被跳过，
+    # 分支保护看到的是"未完成"而不是"失败"，语义更差。
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: 核对三平台结果
+        run: |
+          set -euo pipefail
+          result="${{ needs.release.result }}"
+          echo "release 矩阵结果：$result"
+          if [ "$result" != "success" ]; then
+            echo "::error::三平台 release 未全部成功（SC-010 要求 100%）"
+            exit 1
+          fi
+          echo "三平台产物均已构建、冒烟测试通过，体积已记录"

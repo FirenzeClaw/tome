@@ -205,7 +205,7 @@ fn unquote_pattern(text: &str) -> String {
 impl ReplaceChain {
     /// 按序应用全部替换（FR-004 的"可叠加"）。
     ///
-    /// [DONE] 替换链求值的唯一入口。
+    /// \[DONE] 替换链求值的唯一入口。
     ///
     /// ## 三条实现取舍
     ///
@@ -216,7 +216,7 @@ impl ReplaceChain {
     /// 3. **单条替换失败不中断整条链**：正则编译失败或回溯超限时跳过该条，
     ///    保留前一条的结果。理由：净化规则链是"尽力清理正文"的场合，
     ///    中断会让用户拿到未净化的全文（更糟），跳过只是少清一处。
-    ///    `[UNCERTAIN]` 这个取向未与上游行为对照，S1-6 的差分基线会给出结论。
+    ///    `\[UNCERTAIN]` 这个取向未与上游行为对照，S1-6 的差分基线会给出结论。
     pub fn apply(&self, text: &str, limits: RegexLimits) -> String {
         let mut result = text.to_string();
         for replacement in &self.replacements {

@@ -1,4 +1,4 @@
-//! # [WIP] tome-cli —— CLI 验证器
+//! # \[WIP] tome-cli —— CLI 验证器
 //!
 //! 引擎的无界面调用入口，也是**组合根**：所有实现 crate 在此被装配起来。
 //! 子命令规划见 `specs/001-pc-engine-core/contracts/cli.md`：
@@ -28,14 +28,16 @@
 //!
 //! ## 完成度
 //!
-//! [WIP] `source import` 与 `search` 已实现（S1-1 切片）；
+//! \[WIP] `source import` 与 `search` 已实现（S1-1 切片）；
 //! `info` / `toc` / `content` / `run` / `verify` / `local` / `data`
 //! 属后续切片（`contracts/cli.md` 定义了它们的契约）。
 
 #![forbid(unsafe_code)]
 
 pub mod commands;
+pub mod data_commands;
 pub mod flags;
+pub mod i18n;
 pub mod js_host;
 pub mod reader_commands;
 // `local` 是 T076-T083 的 CLI 面，全部实现收在这一个文件里（P7 合并）。

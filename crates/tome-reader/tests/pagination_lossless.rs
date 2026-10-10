@@ -586,6 +586,8 @@ impl ContentProvider for CountingProvider {
             title: String::new(),
             content: self.content.clone(),
             from_cache: true,
+            // 本用例的语料是纯正文，不含图片引用（FR-049 的图文混排在 T039 接线）
+            images: Vec::new(),
         })
     }
 

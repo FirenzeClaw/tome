@@ -1,4 +1,4 @@
-//! [DONE] 图片抓取管线（tasks.md T068 / FR-019，SC-014、SC-018）
+//! \[DONE] 图片抓取管线（tasks.md T068 / FR-019，SC-014、SC-018）
 //!
 //! # 两条不变量
 //!
@@ -7,7 +7,7 @@
 //!
 //! ## SC-014 的落地：图片结果**不是错误**
 //!
-//! [`ImageOutcome`] 里没有 `Err` 分支承载"这张图没取到"——它是
+//! `ImageOutcome` 里没有 `Err` 分支承载"这张图没取到"——它是
 //! [`ImageResult::Placeholder`]。类型层面就让"图片失败"无法传播成
 //! "正文失败"。调用方想忽略图片时不必写 `try/catch`，想展示占位时
 //! 拿到的就是占位。
@@ -24,7 +24,7 @@
 //! 带同一套。少带一个 `Referer` 就足以让图床返回 403——而表现为
 //! "正文正常、封面全裂"。
 //!
-//! 故 [`image_spec`] 从**同一个** `base_spec` 出发，只改 URL 与方法：
+//! 故 `image_spec` 从**同一个** `base_spec` 出发，只改 URL 与方法：
 //! 请求头、Cookie、字符集声明、限速键全部一致。任何"图片请求单独构造头"
 //! 的做法都会让两者漂移。
 
@@ -47,7 +47,7 @@ pub mod image_keys {
 /// ## 为什么没有 `Failed` 变体
 ///
 /// 见模块文档 SC-014 的说明——"没取到"在这里是**正常的正常结果**，
-/// 由 [`Placeholder`] 承载。诊断信息进 [`Placeholder::reason`]，
+/// 由 [`Placeholder`] 承载。诊断信息进 `Placeholder::reason`，
 /// 供界面展示"这张图为什么是占位"。
 ///
 /// [`Placeholder`]: ImageResult::Placeholder
@@ -283,7 +283,7 @@ pub fn fetch_image(
 /// 比正文动作的 15 秒短：图片是**辅助内容**，为它让读者等 15 秒不划算。
 /// 8 秒足以覆盖常见图床，超时的图直接走占位。
 ///
-/// [UNCERTAIN] 慢速图床（境外 CDN、大尺寸原图）可能超过 8 秒。若实测
+/// \[UNCERTAIN] 慢速图床（境外 CDN、大尺寸原图）可能超过 8 秒。若实测
 /// 发现占位率偏高，应改为可配置而非直接调大——占位是一个**可接受**的
 /// 结果（SC-014 的设计前提），调大超时会让读者为辅助内容等更久。
 pub const IMAGE_TIMEOUT_MS: u64 = 8_000;
@@ -372,6 +372,273 @@ pub fn chapter_images(
     let base = chapter.url.as_deref().unwrap_or(&parsed.source.id);
     let urls = extract_image_urls(parsed, html, base)?;
     fetch_images(parsed, &urls, host, cache, policy)
+}
+
+/// 正文里一张图片的位置（T084 裁决 OQ#13 的 `ImageRef` 的源数据）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageAnchor {
+    /// 图片地址（已补全为绝对地址）
+    pub url: String,
+    /// 图片在**该元素文本**里的位置（`None` = 位置无法确定）
+    pub char_offset: Option<i64>,
+    /// 替代文本
+    pub alt: Option<String>,
+}
+
+/// 从正文页 HTML 提取图片的**位置信息**（`ImageRef` 的位置来源）。
+///
+/// # 位置是怎么算的
+///
+/// 正文文本由 `ruleContent.content` 规则求值得到（见
+/// [`crate::content::parse_chapter_content`]），其形态是"匹配到的元素
+/// **按文档顺序**逐个取文本再换行拼接"。故图片的位置可以用同一条思路算：
+///
+/// ```text
+///   元素序列：  [<p>图一前</p>] [<img src=A>] [<p>图一后</p>]
+///   文本拼接：  "图一前" + "\n" + "" + "\n" + "图一后"
+///                        ↑ 图片落在这一段的边界处
+/// ```
+///
+/// 故本函数返回的 `char_offset` 是**该图片所在元素之前已累积的文本长度**
+/// （含分隔换行）——即"图片插进正文流的那个位置"。
+///
+/// ## 为什么 `char_offset` 是 `Option`
+///
+/// 图片可能出现在正文规则**匹配不到**的位置（页头广告图、页脚 logo）。
+/// 那些图片没有正文位置可言——把它们硬塞进某个偏移会让排版把页头横幅
+/// 插进正文中间。此时给 `None`，由调用方决定"要不要这张图"
+/// （`ImageRef` 只收有位置的）。
+///
+/// # 为什么不在这里做净化
+///
+/// 净化会改变文本长度（替换规则删字），故净化后的位置与净化前不同。
+/// 这个换算需要知道净化改了什么——那是 [`crate::purify`] 的关切。
+/// 本函数只给**原始文本坐标系**里的位置；调用方（provider）负责
+/// 与净化后的坐标对齐（`align_anchors_after_purify`）。
+pub fn extract_image_anchors(
+    parsed: &ParsedSource,
+    html: &str,
+    base_url: &str,
+) -> Result<Vec<ImageAnchor>, SourceError> {
+    let source = &parsed.source;
+    let document = tome_rule::dom::Document::parse_html(html);
+
+    // 正文规则决定"哪些元素参与正文"——图片位置必须与它同源
+    let Some(rule_content) = source.rule_content.as_deref() else {
+        return Ok(Vec::new());
+    };
+    let rules = action::parse_rule_object(parsed, "ruleContent", Some(rule_content))?;
+    let Some(content_rule) = rules.get(crate::content::content_keys::CONTENT) else {
+        return Ok(Vec::new());
+    };
+
+    // 按文档顺序取正文元素，累积文本长度——每遇到含图元素就记一个位置
+    let nodes = tome_rule::css_post::select_nodes(&document, content_rule)
+        .map_err(|error| SourceError::rule_eval(&error, "content"))?;
+
+    let mut anchors = Vec::new();
+    let mut accumulated = 0i64;
+    for node in &nodes {
+        // 该元素的文本（与正文拼接同口径：取其文本内容）
+        let text = node.text();
+        // 这个元素里的图：位置 = 累积长度 + 图在该元素**内部**的偏移
+        for (inner_offset, url, alt) in images_within(node, base_url, &source.id) {
+            anchors.push(ImageAnchor {
+                url,
+                char_offset: Some(accumulated + inner_offset),
+                alt,
+            });
+        }
+        // 累积：文本长度 + 拼接用的换行（正文是 join("\n")）
+        accumulated += text.chars().count() as i64 + 1;
+    }
+
+    // 正文规则之外的内嵌图（页头/页脚）：位置无法确定
+    for (_, url, alt) in images_within(&document.root(), base_url, &source.id) {
+        if !anchors.iter().any(|anchor| anchor.url == url) {
+            anchors.push(ImageAnchor {
+                url,
+                char_offset: None,
+                alt,
+            });
+        }
+    }
+
+    Ok(anchors)
+}
+
+/// 某个节点内部的所有 `<img>`，返回 `(元素内字符偏移, 绝对地址, alt)`。
+fn images_within(
+    node: &tome_rule::dom::NodeRef,
+    base_url: &str,
+    source_id: &str,
+) -> Vec<(i64, String, Option<String>)> {
+    let mut found = Vec::new();
+    // 逐字符遍历该子树的文本，遇到 img 元素时记下当前长度
+    collect_images(node, base_url, source_id, &mut 0, &mut found);
+    found
+}
+
+/// 递归收集图片，`cursor` 是已见过的文本长度（元素内偏移）。
+fn collect_images(
+    node: &tome_rule::dom::NodeRef,
+    base_url: &str,
+    source_id: &str,
+    cursor: &mut i64,
+    out: &mut Vec<(i64, String, Option<String>)>,
+) {
+    // 图片元素：记位置（此时 cursor 就是它前面的文本长度），**不推进 cursor**
+    // ——`<img>` 自身没有文本，不影响后续文本的位置
+    let tag = node.qualified_name();
+    if tag.eq_ignore_ascii_case("img") {
+        if let Some(src) = node.attr("src") {
+            if !src.trim().is_empty() {
+                let alt = node.attr("alt").filter(|text| !text.trim().is_empty());
+                // 书源规则里的 `imageUrl` 优先于 HTML 的 src（与
+                // `extract_image_urls` 的分支顺序一致）
+                out.push((*cursor, action::absolute_url(source_id, &src), alt));
+            }
+        }
+    }
+    let _ = base_url;
+
+    for child in node.children() {
+        collect_images(&child, base_url, source_id, cursor, out);
+    }
+}
+
+/// 把**原始正文**坐标系里的图片锚点换算到**净化后正文**坐标系（PM 裁决 OQ#13）。
+///
+/// # 为什么必须换算
+///
+/// `ImageRef::char_offset` 的语义是"图片在 `ChapterContent::content`（净化后
+/// 正文）里的字符位置"——因为 S2 排版读的就是净化后的文本。而锚点是相对
+/// `raw`（净化前）算的：净化会删字（替换规则去掉广告串），故两者不同。
+///
+/// # 换算法：按公共前后缀逐步校正
+///
+/// 净化是"文本→文本"的变换，本函数不知道它具体改了什么（那是
+/// [`crate::purify`] 的关切，且规则是可配置的）。故用**位置校正**：
+///
+/// ```text
+///   raw:       "AAA ███ BBB"      （███ 是广告，会被删）
+///   purified:  "AAA  BBB"
+///   锚点在 raw 的 9  →  校正后应在 purified 的 5
+/// ```
+///
+/// 对**每个**锚点，找它在 raw 里的上下文片段是否仍出现在 purified 里，
+/// 据此校正。片段匹配失败的锚点被**丢弃**——位置错误的图比没有图更糟
+/// （它会被插到完全无关的段落里）。
+///
+/// ## 为什么不做"逐字对齐"
+///
+/// 逐字对齐（编辑距离）是 O(n·m)，正文动辄几万字，每次读章都跑一次
+/// 不划算。本函数是 O(锚点数 × 片段长度)，锚点数通常是个位数。
+///
+/// ## 为什么不丢弃全部（净化过就不给图）
+///
+/// 那会让"配了净化规则的书"完全看不到插图——而净化规则的典型用途是
+/// 去广告串，与图片毫无关系。保留能定位的图才是符合预期的行为。
+#[must_use]
+pub fn align_anchors_after_purify(
+    raw: &str,
+    purified: &str,
+    anchors: &[ImageAnchor],
+) -> Vec<tome_core::seam::ImageRef> {
+    // 净化没改长度时（最常见：没有匹配的替换规则）偏移直接可用
+    if raw == purified {
+        let mut refs: Vec<tome_core::seam::ImageRef> = anchors
+            .iter()
+            .filter_map(|anchor| {
+                anchor
+                    .char_offset
+                    .map(|char_offset| tome_core::seam::ImageRef {
+                        char_offset,
+                        cache_key: anchor.url.clone(),
+                        alt: anchor.alt.clone(),
+                    })
+            })
+            .collect();
+        // 排序**不能只在慢路径做**：S2 排版按顺序插入图片，乱序会让两张图
+        // 互换位置。这条快捷路径同样要保证"产出按位置升序"。
+        refs.sort_by_key(|image| image.char_offset);
+        return refs;
+    }
+
+    let raw_chars: Vec<char> = raw.chars().collect();
+    let purified_chars: Vec<char> = purified.chars().collect();
+
+    const CONTEXT: usize = 16;
+    /// 上下文的最小长度 —— 更短的会误命中（见下方说明）。
+    const MIN_CONTEXT: usize = 4;
+
+    let mut refs = Vec::new();
+    for anchor in anchors {
+        let Some(char_offset) = anchor.char_offset else {
+            // 位置未知（正文规则之外的图）：丢弃。
+            // `ImageRef` 只收"能插进排版流"的图——没有位置的图无处可插。
+            continue;
+        };
+        let offset = char_offset as usize;
+        if offset >= raw_chars.len() {
+            continue;
+        }
+
+        if offset == 0 {
+            // 锚点在正文最开头：净化不会改变"开头"这件事
+            refs.push(tome_core::seam::ImageRef {
+                char_offset: 0,
+                cache_key: anchor.url.clone(),
+                alt: anchor.alt.clone(),
+            });
+            continue;
+        }
+
+        let purified_text: String = purified_chars.iter().collect();
+
+        // ## 为什么从长到短逐级尝试上下文
+        //
+        // 用整段前缀做定位**太脆**：只要窗口里有**任何一个**字符被净化规则
+        // 碰到（哪怕只是把一个全角标点换成半角），整段就匹配不上，图被丢弃。
+        // 而实测中"离图片最近的几个字"通常没被改动（净化规则改的是广告串，
+        // 那往往离正文里的图很远）。
+        //
+        // 故从 16 字逐级退到 2 字：先用长上下文精确定位（最准），
+        // 失败就退到短上下文（更容易命中，但也更容易匹配到别处——
+        // 故配合 `rfind` 取最后一个，偏向"靠后"的一处）。
+        //
+        // 退到 `MIN_CONTEXT` 字仍失败才放弃。**不能退到 2 字**：短上下文会
+        // 误命中重复出现的片段（实测：2 字的"。"+换行在净化后的文本另一处
+        // 出现，把图片定位到了错误的段落）。4 字是"不会偶然重复"的下限。
+        let mut relocated = None;
+        let mut length = CONTEXT.min(offset);
+        while length >= MIN_CONTEXT {
+            let start = offset - length;
+            let prefix: String = raw_chars[start..offset].iter().collect();
+            if let Some(found_byte) = purified_text.rfind(&prefix) {
+                let end_byte = found_byte + prefix.len();
+                relocated = Some(purified_text[..end_byte].chars().count() as i64);
+                break;
+            }
+            length -= 1;
+        }
+
+        let Some(new_offset) = relocated else {
+            // 连 2 字上下文都找不到：位置无从确定，丢弃。
+            // 位置错的图比没有图更糟——它会被插到无关段落里。
+            continue;
+        };
+
+        refs.push(tome_core::seam::ImageRef {
+            char_offset: new_offset,
+            cache_key: anchor.url.clone(),
+            alt: anchor.alt.clone(),
+        });
+    }
+
+    // 按位置排序：S2 排版按顺序插入图片，乱序会让两张图互换位置
+    refs.sort_by_key(|image| image.char_offset);
+    refs
 }
 
 /// `tome_store::ImageCache` 的 `ImageCache` 适配（T068 的接线点）。

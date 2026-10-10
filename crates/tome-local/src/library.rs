@@ -1,4 +1,4 @@
-//! [DONE] 库根目录扫描与导入（tasks.md T082 / FR-023、FR-024、FR-025）
+//! \[DONE] 库根目录扫描与导入（tasks.md T082 / FR-023、FR-024、FR-025）
 //!
 //! # 三条规格原文
 //!
@@ -51,7 +51,7 @@ const MAX_SCAN_DEPTH: usize = 32;
 /// 不至于让扫描去读一个 10 GB 的文件。超限的文件被**跳过并记录**，
 /// 不是静默忽略。
 ///
-/// [WORKAROUND] 硬编码常量：改为随配置注入。当前阶段保持无配置依赖。
+/// \[WORKAROUND] 硬编码常量：改为随配置注入。当前阶段保持无配置依赖。
 pub const MAX_BOOK_BYTES: u64 = 1024 * 1024 * 1024;
 
 /// 导入方式（FR-023 的"只索引"与 FR-024 的"可选复制"）。
@@ -134,7 +134,7 @@ pub struct ScanReport {
     pub duplicates: Vec<PathBuf>,
 }
 
-/// [DONE] 扫描一个库根目录（**只读**，FR-023）。
+/// \[DONE] 扫描一个库根目录（**只读**，FR-023）。
 ///
 /// 递归遍历、识别格式、计算身份。不修改任何文件。
 pub fn scan_root(root: &Path) -> ScanReport {
@@ -153,7 +153,7 @@ pub fn scan_root(root: &Path) -> ScanReport {
     report
 }
 
-/// [DONE] 扫描多个库根，并按身份合并（FR-023 的多库根 + 边缘情况）。
+/// \[DONE] 扫描多个库根，并按身份合并（FR-023 的多库根 + 边缘情况）。
 ///
 /// # 为什么"多库根指向同一文件"必须识别为一本
 ///
@@ -372,7 +372,7 @@ fn is_hidden(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// [DONE] FR-024：把文件复制到库目录（**可选**行为，显式调用）。
+/// \[DONE] FR-024：把文件复制到库目录（**可选**行为，显式调用）。
 ///
 /// # 复制而非移动
 ///

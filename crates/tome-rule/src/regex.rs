@@ -34,7 +34,7 @@
 //! `fancy-regex` 把 `\h` 当十六进制数字位；Java 的 `\h` 是水平空白。
 //! 本实现只做**显式记录**（[`PatternKind`] 的分类会把它算作 fancy 特性），
 //! 不做改写——改写需要完整的词法状态机，且这条差异影响面小（R5 列为实测分叉之一）。
-//! 标 `[UNCERTAIN]` 待 S1-3 合成语料统计实际影响。
+//! 标 `\[UNCERTAIN]` 待 S1-3 合成语料统计实际影响。
 //!
 //! # 灾难性回溯护栏
 //!
@@ -675,7 +675,7 @@ impl CompiledRegex {
     /// 替换**全部**匹配。
     ///
     /// `replacement` 必须是已经过 [`translate_replacement`] 翻译的 Rust 形式替换串；
-    /// 调用方通常用 [`replace_all_java`] 一步到位。
+    /// 调用方通常用 `replace_all_java` 一步到位。
     pub fn replace_all(
         &self,
         haystack: &str,
@@ -741,7 +741,7 @@ fn check_input_length(haystack: &str, limits: RegexLimits) -> Result<(), RuleErr
 /// `IndexOutOfBoundsException` 不同。选择**对齐 Rust 的空串行为**而非抛错：
 /// 书源规则的替换串里出现越界引用的常见原因是规则本身写得糙，抛错会让整条
 /// 规则链失败，而空串只是让那个位置留白——后者更符合"尽量产出结果"的取向。
-/// 这点标 `[UNCERTAIN]`：S1-3 合成语料会统计实际影响。
+/// 这点标 `\[UNCERTAIN]`：S1-3 合成语料会统计实际影响。
 pub fn translate_replacement(java_replacement: &str) -> String {
     let chars: Vec<char> = java_replacement.chars().collect();
     let mut output = String::with_capacity(java_replacement.len() + 8);

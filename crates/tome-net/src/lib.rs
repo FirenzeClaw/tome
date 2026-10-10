@@ -1,4 +1,4 @@
-//! # [DONE] tome-net —— 网络层
+//! # \[DONE] tome-net —— 网络层
 //! 负责一切对外 HTTP 通信：请求执行、Cookie 管理、代理配置、按书源声明的限速、
 //! 响应字符集探测与解码，并提供 `RequestSpec` 的**回放 adapter**（录制→回放，
 //! 使规则引擎的测试无需真实联网）。
@@ -37,7 +37,7 @@
 //!    与目标站故障在分类层即可区分（FR-008 边缘情况）。
 //! 2. `RequestSpec` 新增 `request_interval_ms`——请求间隔现在是规则引擎可以
 //!    声明的字段，不再只靠执行器侧注入。
-//! 3. [`NetHost::fetch`] 对"事务完成但状态非 2xx"返回 `Ok(Response)`——
+//! 3. `NetHost::fetch`（实现见 [`crate::executor`]） 对"事务完成但状态非 2xx"返回 `Ok(Response)`——
 //!    接缝只报传输层失败，错误分类权在调用方（书源的 `check` 脚本需要读
 //!    403 验证页正文）。详见 [`executor`] 的模块文档。
 

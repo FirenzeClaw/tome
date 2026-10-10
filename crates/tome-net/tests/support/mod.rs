@@ -19,7 +19,7 @@
 //!
 //! # 关于夹具里的 `expect`
 //!
-//! [WORKAROUND] `.clippy.toml` 的 `allow-expect-in-tests` 只覆盖 `#[test]`
+//! \[WORKAROUND] `.clippy.toml` 的 `allow-expect-in-tests` 只覆盖 `#[test]`
 //! 函数与 `#[cfg(test)]` 模块，**不覆盖 tests/ 下的公共夹具函数**（那正是
 //! 本文件）。夹具失败就意味着测试环境本身有问题（绑定不了回环端口），
 //! 此时 panic 是唯一合理的反应——返回 `Result` 会逼每个测试写一遍

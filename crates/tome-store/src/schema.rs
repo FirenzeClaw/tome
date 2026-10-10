@@ -1,4 +1,4 @@
-//! [DONE] v1 schema 与迁移脚本（tasks.md T053 / `data-model.md`）
+//! \[DONE] v1 schema 与迁移脚本（tasks.md T053 / `data-model.md`）
 //!
 //! # 迁移机制
 //!

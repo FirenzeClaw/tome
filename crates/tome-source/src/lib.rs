@@ -38,6 +38,7 @@
 #![forbid(unsafe_code)]
 
 pub mod action;
+pub mod change_source;
 pub mod content;
 pub mod error;
 pub mod image;
@@ -45,6 +46,7 @@ pub mod info;
 pub mod js;
 
 pub use error::SourceError;
+pub mod purify;
 pub mod search;
 pub mod source;
 pub mod toc;

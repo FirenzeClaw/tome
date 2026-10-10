@@ -268,13 +268,12 @@ impl OffscreenRenderer {
         }
         queue.submit(Some(encoder.finish()));
 
-        // --- 字形覆盖：逐个 `write_texture` ---
+        // --- 字形绘制：真实位图 → 图集 → WGSL 采样 ---
         //
-        // 用 `write_texture` 而非着色器画字形四边形，理由见
-        // [`paint_glyph_coverage`]：本任务验证的是**离屏链路**，
-        // 而 `write_texture` 让"渲染真的发生了"有一个与字体无关的
-        // 确定性判据（跨平台一致，不受系统字体漂移影响）。
-        paint_glyph_coverage(queue, &texture, batch, self.width, self.height);
+        // research R2 的既定方案。见 [`draw_glyphs`]：必须真的过一遍着色器
+        // （不是拷贝），否则测的是"搬运无差异"——那正是 S2-0 spike 首轮的
+        // 假绿教训（BASELINE §8.2）。
+        draw_glyphs(device, queue, &view, batch, cache)?;
 
         // --- 读回 ---
         let bytes_per_pixel = 4u32;
@@ -366,94 +365,324 @@ impl OffscreenRenderer {
     }
 }
 
-/// 把字形四边形的覆盖区域写成**前景色**（离屏链路的可测内容）。
+/// 绘制真实字形位图（WGSL 采样 + alpha 混合）。
 ///
-/// ## 为什么用 `write_texture` 而不是着色器
+/// ## 为什么必须过一遍着色器（而不是 CPU 合成后拷贝）
 ///
-/// 本任务（T035）的验收是**离屏链路**可用（建纹理 → 写入 → 256 对齐读回 →
-/// map/poll），不是字形位图的采样正确性（那属绘制细化）。用"按几何填实心块"
-/// 表达字形覆盖让判据有一个**与字体无关**的确定性——跨平台逐像素一致，
-/// 不受系统字体漂移影响。而 R4 把"runner 镜像的系统字体漂移"列为最大 flaky 源。
+/// S2-0 spike 的 T009 首轮（BASELINE §8.2）把 CPU 像素直接
+/// `copy_buffer_to_texture` 再读回，结果"后端差异恰好为 0"——因为
+/// **GPU 一次算术都没做**，测的是"拷贝无差异"。那次结论被推翻重做。
 ///
-/// 这正是像素快照（T036/SC-011）需要的输入性质：基线比对要的是**我们自己
-/// 的绘制结果**稳定，不是"系统字体渲染出来长什么样"。
+/// 故字形位图经图集纹理上传后，由 WGSL **采样并混合**到目标纹理上。
+/// 这样跨后端差异才测的是本项目真实会遇到的东西（采样约定 + 混合算术）。
 ///
-/// ## 为什么是逐字形一次 `write_texture`
+/// ## 与 spike `blit.wgsl` 的一致性
 ///
-/// `write_texture` 内部带一次缓冲上传，逐次调用对一页（几百个字形）而言
-/// 是可接受的。若有性能要求再聚合为单次大上传——但那是 T050 的性能任务，
-/// 本处优先让行为简单可验。
+/// 三条刻意复现（那处已实测跨后端逐像素一致）：点采样（`textureLoad`）、
+/// 标准 source-over 混合、整像素对齐绘制。见
+/// [`super::glyph_atlas::GLYPH_SHADER`] 的文档。
 ///
-/// [WORKAROUND] 真实字形位图绘制（绑 atlas 纹理 + WGSL 采样）属绘制细化；
-/// 替换时删除本函数，改用 `RenderBatch::encode` 产出的位图。替换计划写在
-/// `specs/002-typesetting-renderer/tasks.md` 的 T042（痕迹渲染）处。
-fn paint_glyph_coverage(
+/// ## 缺字（无位图）的处置
+///
+/// 位图为空时**跳过该字形**——不画实心块冒充它。FR-047 的"缺字占位"
+/// （tofu）由字体栈自身的 `.notdef` 字形提供：系统字体链连 `.notdef` 都没有
+/// 时，画任何东西都是伪装，故跳过并让上层的诊断报告缺字。
+fn draw_glyphs(
+    device: &wgpu::Device,
     queue: &wgpu::Queue,
-    texture: &wgpu::Texture,
+    target_view: &wgpu::TextureView,
     batch: &RenderBatch,
-    width: u32,
-    height: u32,
-) {
-    use tome_core::model::theme::Color;
-
-    // 前景色：正文墨色（与主题的阅读层底色可区分）
-    let foreground = Color::rgb(0x2E, 0x24, 0x18);
-
-    for glyph in batch.glyphs() {
-        // 批次给出的 `y` 是**基线**，故字形块从基线上方 `height` 处起
-        let left = glyph.x.max(0.0).round() as u32;
-        let top = (glyph.y - glyph.height).max(0.0).round() as u32;
-        let block_width = glyph.width.ceil().max(1.0) as u32;
-        let block_height = glyph.height.ceil().max(1.0) as u32;
-
-        if left >= width || top >= height {
-            continue;
-        }
-        let right = (left + block_width).min(width);
-        let bottom = (top + block_height).min(height);
-        let columns = right - left;
-        let rows = bottom - top;
-        if columns == 0 || rows == 0 {
-            continue;
-        }
-
-        // `write_texture` 也要求 bytes_per_row 256 对齐（与读回同一个坑）
-        let aligned_row = aligned_bytes_per_row(columns, 4) as usize;
-        let mut data = vec![0u8; aligned_row * rows as usize];
-        for row in 0..rows as usize {
-            for column in 0..columns as usize {
-                let index = row * aligned_row + column * 4;
-                data[index] = foreground.red;
-                data[index + 1] = foreground.green;
-                data[index + 2] = foreground.blue;
-                data[index + 3] = 0xFF;
-            }
-        }
-
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d {
-                    x: left,
-                    y: top,
-                    z: 0,
-                },
-                aspect: wgpu::TextureAspect::All,
-            },
-            &data,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(aligned_row as u32),
-                rows_per_image: Some(rows),
-            },
-            wgpu::Extent3d {
-                width: columns,
-                height: rows,
-                depth_or_array_layers: 1,
-            },
-        );
+    cache: &mut GlyphCache,
+) -> Result<(), PipelineError> {
+    if batch.glyphs().is_empty() {
+        return Ok(());
     }
+
+    // --- 1. 把字形转成待打包的放置描述 ---
+    let placements: Vec<super::glyph_atlas::GlyphPlacement> = batch
+        .glyphs()
+        .iter()
+        .map(|glyph| super::glyph_atlas::GlyphPlacement {
+            glyph: super::glyph_cache::GlyphRef {
+                font_id: glyph.font_id,
+                glyph_id: glyph.glyph_id,
+                font_weight: glyph.font_weight,
+            },
+            font_size: glyph.font_size,
+            x_px: glyph.x,
+            baseline_y_px: glyph.y,
+            subpixel_x: glyph.subpixel_x,
+            available: true,
+        })
+        .collect();
+
+    // --- 2. 栅格化 + 打包进一张图集（CPU 侧，一次批量）---
+    let packed = super::glyph_atlas::pack_glyphs(cache, &placements);
+    if packed.instance_count() == 0 {
+        // 一个字形都没栅格化出来（字体栈异常）——如实报错而非静默出空白图
+        return Err(PipelineError::Readback {
+            detail: "全部字形都取不到位图（字体栈异常）".to_owned(),
+        });
+    }
+
+    // --- 3. 图集纹理上传（一次 `write_texture` 整张，R2 第 5 条）---
+    let atlas_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("tome-glyph-atlas"),
+        size: wgpu::Extent3d {
+            width: packed.size,
+            height: packed.size,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        // 单通道灰度：swash 的 `Mask` 位图就是 8 位 alpha
+        format: wgpu::TextureFormat::R8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &atlas_texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &packed.pixels,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(packed.size),
+            rows_per_image: Some(packed.size),
+        },
+        wgpu::Extent3d {
+            width: packed.size,
+            height: packed.size,
+            depth_or_array_layers: 1,
+        },
+    );
+
+    // --- 4. 着色器与管线 ---
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("tome-glyph-shader"),
+        source: wgpu::ShaderSource::Wgsl(super::glyph_atlas::GLYPH_SHADER.into()),
+    });
+
+    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("tome-glyph-bind-layout"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+        ],
+    });
+
+    let atlas_view = atlas_texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("tome-glyph-sampler"),
+        // 最近邻：与点采样一致（字形位图 1:1 贴合）
+        mag_filter: wgpu::FilterMode::Nearest,
+        min_filter: wgpu::FilterMode::Nearest,
+        mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+        ..Default::default()
+    });
+
+    // 墨色 uniform（正文色，FR-030：由主题给出）
+    let ink = batch.text_color();
+    let ink_uniform = InkColorGpu {
+        rgb: [
+            f32::from(ink.red) / 255.0,
+            f32::from(ink.green) / 255.0,
+            f32::from(ink.blue) / 255.0,
+            1.0,
+        ],
+    };
+    let ink_buffer = {
+        use wgpu::util::DeviceExt as _;
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("tome-glyph-ink"),
+            contents: bytemuck::bytes_of(&ink_uniform),
+            usage: wgpu::BufferUsages::UNIFORM,
+        })
+    };
+
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("tome-glyph-bind-group"),
+        layout: &bind_group_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&atlas_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(&sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: ink_buffer.as_entire_binding(),
+            },
+        ],
+    });
+
+    // --- 5. 实例缓冲：像素坐标 → 裁剪空间 ---
+    let canvas_w = batch.background().width.max(1) as f32;
+    let canvas_h = batch.background().height.max(1) as f32;
+    let to_clip_x = |value: f32| (value / canvas_w) * 2.0 - 1.0;
+    let to_clip_y = |value: f32| 1.0 - (value / canvas_h) * 2.0;
+
+    let instances: Vec<GlyphInstanceGpu> = packed
+        .instances
+        .iter()
+        .filter_map(|instance| *instance)
+        .map(|instance| {
+            let [x0, y0, x1, y1] = instance.rect_px;
+            GlyphInstanceGpu {
+                rect: [to_clip_x(x0), to_clip_y(y0), to_clip_x(x1), to_clip_y(y1)],
+                uv_rect: instance.uv_rect,
+            }
+        })
+        .collect();
+
+    if instances.is_empty() {
+        return Ok(());
+    }
+
+    let instance_buffer = create_instance_buffer(device, &instances);
+
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("tome-glyph-pipeline-layout"),
+        bind_group_layouts: &[Some(&bind_group_layout)],
+        immediate_size: 0,
+    });
+
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("tome-glyph-pipeline"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[Some(GlyphInstanceGpu::LAYOUT)],
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            ..Default::default()
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: OFFSCREEN_FORMAT,
+                // 标准 source-over：`src * srcAlpha + dst * (1 - srcAlpha)`
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("tome-glyph-encoder"),
+    });
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("tome-glyph-pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    // `Load`：保有底色与已画的内容，只在其上叠加字形
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &bind_group, &[]);
+        pass.set_vertex_buffer(0, instance_buffer.slice(..));
+        pass.draw(0..6, 0..instances.len() as u32);
+    }
+    queue.submit(Some(encoder.finish()));
+
+    Ok(())
+}
+
+/// 墨色 uniform 的 GPU 布局（`vec4<f32>`，与 WGSL 的 `InkColor` 一致）。
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct InkColorGpu {
+    rgb: [f32; 4],
+}
+
+/// 实例属性的 GPU 布局（与 WGSL 的 `Instance` 结构一一对应）。
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct GlyphInstanceGpu {
+    rect: [f32; 4],
+    uv_rect: [f32; 4],
+}
+
+impl GlyphInstanceGpu {
+    /// 顶点缓冲布局：两条 `Float32x4` 实例属性（步进 32 字节，按实例递增）。
+    const LAYOUT: wgpu::VertexBufferLayout<'static> = wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<GlyphInstanceGpu>() as wgpu::BufferAddress,
+        step_mode: wgpu::VertexStepMode::Instance,
+        attributes: &[
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: 0,
+                shader_location: 0,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: 16,
+                shader_location: 1,
+            },
+        ],
+    };
+}
+
+/// 建实例缓冲并上传。
+fn create_instance_buffer(device: &wgpu::Device, instances: &[GlyphInstanceGpu]) -> wgpu::Buffer {
+    use wgpu::util::DeviceExt as _;
+    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("tome-glyph-instances"),
+        contents: bytemuck::cast_slice(instances),
+        usage: wgpu::BufferUsages::VERTEX,
+    })
 }
 
 /// 离屏渲染失败时的**能力错误**映射（FR-053/FR-057）。

@@ -492,6 +492,53 @@ impl GlyphCache {
         true
     }
 
+    /// 按**完整键**取既有条目（T035 的真实位图路径用）。
+    ///
+    /// 与 [`Self::entry_for`] 的区别：后者按（字形 + 字号 + x 偏移）**重算**
+    /// 键；本函数接受调用方已经算好的键——真实位图路径从 `GlyphCacheKey`
+    /// 直接查，避免"键算两遍可能不一致"。
+    #[must_use]
+    pub fn entry_for_key(&self, key: &GlyphCacheKey) -> Option<&GlyphEntry> {
+        self.entries.get(key)
+    }
+
+    /// 栅格化但**不计入缓存**（返回位图供调用方消费）。
+    ///
+    /// ## 为什么不复用 [`Self::rasterize`]
+    ///
+    /// `rasterize` 的职责是"维护缓存"（命中计数、atlas 分配、待上传队列）；
+    /// 本函数只要位图。若复用它，真实位图路径会把位图**同时**塞进
+    /// T033 的 atlas 与本模块的张量/图集——同一份数据两处占内存，且
+    /// 两边的"命中率"语义会互相污染（一个路径的访问改变另一个的统计）。
+    ///
+    /// 故本函数只做"查 swash 缓存并交出位图"这一件事。
+    /// **swash 自身的缓存仍然生效**（同一 `SwashCache` 实例），故重复调用
+    /// 不会重复光栅化。
+    pub fn rasterize_uncached(
+        &mut self,
+        glyph: GlyphRef,
+        font_size: f32,
+        x_offset: f32,
+    ) -> Option<cosmic_text::SwashImage> {
+        let key = GlyphCacheKey {
+            font_id: glyph.font_id,
+            glyph_id: glyph.glyph_id,
+            font_size_bits: font_size.to_bits(),
+            bucket: SubpixelBucket::for_x(x_offset),
+        };
+        let (cache_key, _x, _y) = CacheKey::new(
+            glyph.font_id,
+            glyph.glyph_id,
+            font_size,
+            (key.bucket.center_px(), 0.0),
+            glyph.font_weight,
+            CacheKeyFlags::DISABLE_HINTING,
+        );
+        self.swash_cache
+            .get_image(&mut self.font_system, cache_key)
+            .clone()
+    }
+
     /// 取既有条目（不触发栅格化）。
     #[must_use]
     pub fn entry_for(

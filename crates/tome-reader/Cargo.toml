@@ -67,6 +67,10 @@ wgpu = { version = "30.0", optional = true, default-features = false, features =
 swash = { version = "0.2", optional = true }
 # atlas 打包（glyphon 同款 BucketedAtlasAllocator）
 etagere = { version = "0.3", optional = true }
+# 实例数据的字节视图（`[f32; 4]` → `&[u8]` 上传顶点缓冲）。
+# wgpu 自身依赖它，此处显式声明是因为本层**直接**在实例缓冲上用
+# （不显式声明就只能经传递依赖，而 Rust 不允许跨 crate 转发的 use）。
+bytemuck = { version = "1", features = ["derive"] }
 
 # 语料装载（`src/corpus.rs`，T004）。与 001 的 `tome_rule::corpus` 同构——
 # 装载与校验逻辑放在**库**里而非测试里，理由是：S2-1 起各切片的验收测试

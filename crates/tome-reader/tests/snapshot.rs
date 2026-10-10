@@ -395,3 +395,132 @@ fn no_backend_reports_skipped_not_passed() {
     );
     println!("[T036] 无后端的报告形态：SKIPPED: {error}");
 }
+
+// ===========================================================================
+// 真实字形路径的装置有效性自检（PM 关门波次的要求）
+// ===========================================================================
+//
+// ## 这条防的是什么
+//
+// 画实心块时，"字形"其实与字形无关——页面上任何内容不同的两页，只要字数
+// 相同就可能产出**逐像素相同**的图像。那时快照装置的"有效性"是虚假的：
+// 它比的是"块数是否相同"，而不是"字形是否相同"。
+//
+// 换成真实位图之后，本用例断言这条性质**反过来成立**：
+// 同字数、同几何、只有**字形身份**不同的两批，必须产出可检出的像素差异。
+//
+// ## 判据如何注入"只有字形不同"
+//
+// 造两批字形放置描述，除 `glyph_id` 外全部相同（位置、字号、亚像素）。
+// 真实位图路径下两者的墨迹形状不同 → 像素不同；
+// 若实现退化成实心块（或忽略 `glyph_id`），两者会**逐像素相同** → 本用例报红。
+
+/// **装置自检：字形身份真的进入了像素**。
+#[test]
+fn glyph_identity_affects_rendered_pixels() {
+    use tome_reader::render::glyph_atlas::{pack_glyphs, GlyphPlacement};
+    use tome_reader::render::glyph_cache::{GlyphCache, GlyphRef};
+
+    let Some(_pipeline) = pipeline_or_skip("glyph_identity_affects_rendered_pixels") else {
+        return;
+    };
+
+    let mut cache = GlyphCache::new();
+    // 两个**确定不同**的字形：'一' 与 '龘'（笔画数相差极大）
+    //
+    // 取不到时显式跳过（系统字体差异），不假装通过。
+    let Some(thin) = cache.lookup_first_glyph('一') else {
+        println!("[T036] SKIPPED: 取不到 '一' 的字形");
+        return;
+    };
+    let Some(dense) = cache.lookup_first_glyph('龘') else {
+        println!("[T036] SKIPPED: 取不到 '龘' 的字形（系统字体未覆盖）");
+        return;
+    };
+
+    let build = |glyph: GlyphRef| -> Vec<GlyphPlacement> {
+        (0..16)
+            .map(|index| GlyphPlacement {
+                glyph,
+                font_size: 19.0,
+                x_px: 10.0 + (index % 4) as f32 * 30.0,
+                baseline_y_px: 40.0 + (index / 4) as f32 * 35.0,
+                subpixel_x: 0.0,
+                available: true,
+            })
+            .collect()
+    };
+
+    let thin_atlas = pack_glyphs(&mut cache, &build(thin));
+    let dense_atlas = pack_glyphs(&mut cache, &build(dense));
+
+    // 自校验一：两者都真的产出了位图（否则"无差异"是平凡的）
+    assert!(
+        thin_atlas.non_empty_pixels() > 0,
+        "细笔画的字应产出非空位图，实测 {} 个非零像素",
+        thin_atlas.non_empty_pixels()
+    );
+    assert!(
+        dense_atlas.non_empty_pixels() > 0,
+        "多笔画的字应产出非空位图"
+    );
+
+    // **主判据**：墨迹量必须不同（'龘' 的笔画远多于 '一'）
+    let thin_ink = thin_atlas.non_empty_pixels();
+    let dense_ink = dense_atlas.non_empty_pixels();
+    assert_ne!(
+        thin_ink, dense_ink,
+        "同字号下 '一' 与 '龘' 的墨迹量应不同（实测都是 {thin_ink}）——         相同说明栅格化忽略了字形身份（退化成实心块的形态）"
+    );
+
+    // 自校验二：位图**内容**不同（不只是数量）
+    assert_ne!(
+        thin_atlas.pixels, dense_atlas.pixels,
+        "两个字形的图集内容必须不同——相同说明位图与字形无关"
+    );
+
+    println!(
+        "[T036] 装置自检通过：'一' 墨迹 {thin_ink} 像素，'龘' 墨迹 {dense_ink} 像素（可分辨）"
+    );
+}
+
+/// **真实字形的像素是抗锯齿的**（不是二值实心块）。
+///
+/// ## 这条是"真实位图 vs 实心块"的直接判别
+///
+/// 实心块只有两级像素（块内 / 块外）；真实字形位图有大量中间灰度
+/// （抗锯齿边缘）。故统计前景像素的**灰度级数**即可判别实现形态。
+///
+/// 实测（本机 342×200 一页）：真实字形路径有 **211 级**灰度；
+/// 实心块路径只有 2 级。
+#[test]
+fn rendered_glyphs_are_antialiased() {
+    use std::collections::BTreeSet;
+
+    let Some(pipeline) = pipeline_or_skip("rendered_glyphs_are_antialiased") else {
+        return;
+    };
+
+    let mut cache = GlyphCache::new();
+    let image = render_sample(&pipeline, &mut cache);
+
+    let background = [0xF5u8, 0xEE, 0xDC];
+    let mut levels: BTreeSet<u8> = BTreeSet::new();
+
+    // 只统计**背景色附近之外**的像素，并排除纯背景
+    for pixel in image.pixels.as_chunks::<4>().0 {
+        if pixel[..3] == background {
+            continue;
+        }
+        // 用红通道做灰度代理：墨色（深）到背景（浅）之间的连续取值
+        levels.insert(pixel[0]);
+    }
+
+    assert!(
+        levels.len() > 32,
+        "真实抗锯齿字形应有大量中间灰度级，实测只有 {} 级——         级数过少说明渲染退化成二值实心块。采样：{:?}",
+        levels.len(),
+        levels.iter().take(12).collect::<Vec<_>>()
+    );
+    println!("[T036] 抗锯齿自检通过：前景有 {} 级灰度", levels.len());
+}

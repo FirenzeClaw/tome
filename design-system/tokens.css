@@ -5,6 +5,12 @@
    ============================================================ */
 
 :root {
+  /* ---- 布局骨架（§7 AppShell 的尺寸基线） ---- */
+  --topbar-h: 56px;
+  --sidebar-w: 240px;
+  --sidebar-w-collapsed: 64px;
+  --control-h: 32px;
+
   /* ---- 间距（4px 网格） ---- */
   --sp-1: 4px;   --sp-2: 8px;   --sp-3: 12px;  --sp-4: 16px;
   --sp-5: 20px;  --sp-6: 24px;  --sp-8: 32px;  --sp-10: 40px;  --sp-12: 48px;
@@ -30,7 +36,10 @@
   --reading-font-size: 19px;
   --reading-line-height: 1.85;
   --reading-measure: 36em;
+  --reading-measure-max: 42em;
   --reading-gutter: 64px;
+  --reading-paragraph-indent: 2em;
+  --reading-paragraph-gap: 0.4em;
 
   /* ---- 布局骨架 ---- */
   --topbar-h: 56px;
@@ -67,7 +76,7 @@
   --state-success: #3F5C4A;
   --state-warning: #B8862B;
   --state-error:   #A32B1F;
-  --state-info:    #4A5A6B;
+  --state-info:    #665A4F;  /* 暖中性灰——原蓝灰 #4A5A6B 违反 §8 禁蓝条款，已重调 */
 
   --shadow-sm: 0 1px 2px rgba(70,52,28,.10);
   --shadow-md: 0 6px 16px -4px rgba(70,52,28,.16);
@@ -86,18 +95,18 @@
   color-scheme: dark;
 
   --bg-base:      #000000;   /* 真黑 */
-  --bg-surface:   #0B0B0D;
-  --bg-elevated:  #141417;
+  --bg-surface:   #0D0B0B;   /* 暖偏近黑（原 #0B0B0D 冷偏，违反 §8 禁蓝条款） */
+  --bg-elevated:  #171414;
   --bg-reading:   #000000;
-  --bg-inset:     #101013;
+  --bg-inset:     #131010;
 
-  --border-subtle: #1E1E23;
-  --border-strong: #32323A;
+  --border-subtle: #231E1E;
+  --border-strong: #3A3232;
 
   --text-primary:   #E6E4DE;  /* 暖白，非纯白 */
   --text-secondary: #9A9790;
   --text-tertiary:  #6A6761;
-  --text-inverse:   #0B0B0D;
+  --text-inverse:   #0D0B0B;
 
   --accent-primary:   #D9794A;  /* 炭火橙 */
   --accent-hover:     #E88F5F;
@@ -108,7 +117,7 @@
   --state-success: #7FA88C;
   --state-warning: #D9AE5C;
   --state-error:   #E06B5C;
-  --state-info:    #8FA3B8;
+  --state-info:    #B8AFA0;  /* 暖中性灰——原蓝灰 #8FA3B8 违反 §8 禁蓝条款，已重调 */
 
   --shadow-sm: 0 1px 2px rgba(0,0,0,.60);
   --shadow-md: 0 6px 16px -4px rgba(0,0,0,.75);
@@ -117,6 +126,22 @@
   --paper-noise: none;
   --paper-noise-opacity: 0;
   --overlay-bg: rgba(0,0,0,.66);
+}
+
+/* ============================================================
+   主题预览色卡（设置页「外观主题」用）
+   —— 两套主题的预览色卡是**恒定的**（不随当前主题变化），
+      故单独声明；页面引用变量而非内联十六进制（MASTER §2 规矩）。
+   ============================================================ */
+:root {
+  --swatch-day-bg:    #F5EEDC;
+  --swatch-day-a:     #8C3A1E;
+  --swatch-day-b:     #3F5C4A;
+  --swatch-day-c:     #B8862B;
+  --swatch-night-bg:  #000000;
+  --swatch-night-a:   #D9794A;
+  --swatch-night-b:   #7FA88C;
+  --swatch-night-c:   #D9AE5C;
 }
 
 /* ============================================================

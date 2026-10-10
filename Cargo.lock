@@ -2450,6 +2450,7 @@ dependencies = [
  "tome-net",
  "tome-rule",
  "tome-store",
+ "zip",
 ]
 
 [[package]]
@@ -2466,6 +2467,7 @@ dependencies = [
  "tome-core",
  "tome-net",
  "toml",
+ "zip",
 ]
 
 [[package]]

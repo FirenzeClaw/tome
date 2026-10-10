@@ -45,6 +45,7 @@
 #![deny(unsafe_code)]
 
 pub mod backup;
+pub mod backup_android;
 pub mod config;
 pub mod dao;
 pub mod datadir;

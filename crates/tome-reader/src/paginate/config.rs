@@ -228,6 +228,106 @@ impl GeometryConfig {
     pub fn line_height_px(&self) -> f32 {
         f32::from(self.font_size_px) * self.line_height
     }
+
+    /// 逐字段校验，**返回第一个非法字段的名字**（ASCII 标识）。
+    ///
+    /// ## 为什么校验落在几何子集上（而不是 `ReadingConfig`）
+    ///
+    /// 分页函数的签名只接受 `&GeometryConfig`（FR-028 的子集分离），故它
+    /// 只能调用这里的校验。若校验留在 `ReadingConfig` 上，分页就只剩两个
+    /// 选择：要么不校验（非法几何静默进入计算），要么要求调用方传整份配置
+    /// （破坏子集分离）。放在几何上两个问题一起消掉。
+    ///
+    /// ## 为什么逐个查而不是合并判断
+    ///
+    /// 合并判断（一个大 `if` 里 `&&` 所有条件）只能告诉调用方"配置非法"，
+    /// 而调用方的处置是"回退那个非法字段"——它需要知道**是哪一个**。
+    pub fn validate(&self) -> Result<(), &'static str> {
+        validate_font_size(self.font_size_px)?;
+        validate_line_height(self.line_height)?;
+        validate_measure_em(self.measure_em)?;
+        validate_measure_em(self.measure_max_em)?;
+        validate_gutter_px(self.gutter_px)?;
+        validate_paragraph_mode(&self.paragraph_mode)?;
+        Ok(())
+    }
+
+    /// 从 JSON 反序列化并校验（供单独存几何的场合）。
+    pub fn from_json(json: &str) -> Result<Self, ReaderConfigError> {
+        let geometry: Self = serde_json::from_str(json)
+            .map_err(|error| ReaderConfigError::parse(error.to_string()))?;
+        geometry
+            .validate()
+            .map_err(ReaderConfigError::invalid_field)?;
+        Ok(geometry)
+    }
+
+    /// 序列化为 JSON 文本。
+    pub fn to_json(&self) -> Result<String, ReaderConfigError> {
+        serde_json::to_string(self).map_err(|error| ReaderConfigError::serialize(error.to_string()))
+    }
+}
+
+// --- 字段级校验 ------------------------------------------------------------
+//
+// 自由函数而非 `GeometryConfig` 的方法：调用方常需要**单独验一个值**
+// （CLI 解析出一个字号后立刻判断合法性），那时手里还没有整份配置。
+
+/// 校验字号（px）。`Err` 侧是字段名（ASCII 标识）。
+pub fn validate_font_size(value: u16) -> Result<(), &'static str> {
+    if FONT_SIZE_RANGE.contains(&value) {
+        Ok(())
+    } else {
+        Err("font_size")
+    }
+}
+
+/// 校验行高（字号倍数）。
+///
+/// ## 为什么显式排除 NaN
+///
+/// `LINE_HEIGHT_RANGE.contains(&f32::NAN)` 返回 `false`（NaN 与任何值比较
+/// 都是 false），故 NaN 天然被拒。此处把该性质写出来，是为了让"NaN 也被拒"
+/// 成为**有意为之**而非巧合——它由测试钉住。
+pub fn validate_line_height(value: f32) -> Result<(), &'static str> {
+    if value.is_nan() || !LINE_HEIGHT_RANGE.contains(&value) {
+        Err("line_height")
+    } else {
+        Ok(())
+    }
+}
+
+/// 校验版心（em）。
+///
+/// 上界取 [`DEFAULT_MEASURE_MAX_EM`]（42em）：版心目标超过单栏上限在语义上
+/// 自相矛盾（"目标比上限还大"），属配置错误。
+pub fn validate_measure_em(value: f32) -> Result<(), &'static str> {
+    let valid = value.is_finite() && value > 0.0 && value <= DEFAULT_MEASURE_MAX_EM;
+    if valid {
+        Ok(())
+    } else {
+        Err("measure_em")
+    }
+}
+
+/// 校验中缝（px）。
+///
+/// `u16` 本身非负，故当前恒通过。本函数的存在让"中缝也走白名单"在调用点
+/// 一致（而非"这个字段恰好不用校验"），并给日后"中缝不得超过版心"这类
+/// 约束留了落点。
+pub fn validate_gutter_px(value: u16) -> Result<(), &'static str> {
+    let _ = value;
+    Ok(())
+}
+
+/// 校验段模式与段量（负值/NaN 被拒）。
+pub fn validate_paragraph_mode(value: &ParagraphMode) -> Result<(), &'static str> {
+    let em = value.amount_em();
+    if em.is_finite() && em >= 0.0 {
+        Ok(())
+    } else {
+        Err("paragraph_mode")
+    }
 }
 
 /// **呈现子集**：只决定绘制的参数（FR-028）。
@@ -291,79 +391,37 @@ impl ReadingConfig {
 
     // --- 校验（FR-013 / spec §Edge Cases）---
 
-    /// 校验字号（px）。
+    /// 校验整份配置（委托给几何子集的校验）。
     ///
-    /// `Err` 侧是非法字段名（ASCII 标识），供调用方定位并回落。
-    pub fn validate_font_size(value: u16) -> Result<(), &'static str> {
-        if FONT_SIZE_RANGE.contains(&value) {
-            Ok(())
-        } else {
-            Err("font_size")
-        }
-    }
-
-    /// 校验行高（字号倍数）。
-    ///
-    /// ## 为什么显式排除 NaN
-    ///
-    /// `LINE_HEIGHT_RANGE.contains(&f32::NAN)` 返回 `false`（NaN 与任何值
-    /// 比较都是 false），故 NaN 天然被拒。此处把该性质写出来是为了让
-    /// "NaN 也被拒"成为**有意为之**而非巧合——它由测试钉住。
-    pub fn validate_line_height(value: f32) -> Result<(), &'static str> {
-        if value.is_nan() || !LINE_HEIGHT_RANGE.contains(&value) {
-            Err("line_height")
-        } else {
-            Ok(())
-        }
-    }
-
-    /// 校验版心目标（em）。
-    ///
-    /// 上界取 [`DEFAULT_MEASURE_MAX_EM`]（42em）：版心目标超过单栏上限
-    /// 在语义上自相矛盾（"目标比上限还大"），属配置错误。
-    pub fn validate_measure_em(value: f32) -> Result<(), &'static str> {
-        let valid = value.is_finite() && value > 0.0 && value <= DEFAULT_MEASURE_MAX_EM;
-        if valid {
-            Ok(())
-        } else {
-            Err("measure_em")
-        }
-    }
-
-    /// 校验中缝（px）。
-    pub fn validate_gutter_px(value: u16) -> Result<(), &'static str> {
-        // `u16` 本身非负，故只需接受即可——此函数的存在让"中缝也走白名单"
-        // 这件事在调用点一致（而非"这个字段恰好不用校验"）。
-        // 保留 `value` 参数的判据位以便日后加"中缝不得超过版心"这类约束。
-        let _ = value;
-        Ok(())
-    }
-
-    /// 校验段模式与段量。
-    pub fn validate_paragraph_mode(value: &ParagraphMode) -> Result<(), &'static str> {
-        let em = value.amount_em();
-        if em.is_finite() && em >= 0.0 {
-            Ok(())
-        } else {
-            Err("paragraph_mode")
-        }
-    }
-
-    /// 校验整份配置：逐字段检查，**返回第一个非法字段的名字**。
-    ///
-    /// ## 为什么逐个 `validate_*` 而不是合并判断
-    ///
-    /// 合并判断（如一个大 `if` 里 `&&` 所有条件）只能告诉调用方"配置非法"，
-    /// 而调用方的处置是"回退那个非法字段"——它需要知道**是哪一个**。
-    /// 逐个走让错误标识携带那个信息，且新增字段时只加一行。
+    /// 呈现子集**不参与校验**——它的字段都是枚举与 `bool`，非法状态在类型上
+    /// 不可构造。这个不对称是"子集分离"的附带好处：呈现参数不可能让配置非法。
     pub fn validate(&self) -> Result<(), &'static str> {
-        Self::validate_font_size(self.geometry.font_size_px)?;
-        Self::validate_line_height(self.geometry.line_height)?;
-        Self::validate_measure_em(self.geometry.measure_em)?;
-        Self::validate_measure_em(self.geometry.measure_max_em)?;
-        Self::validate_gutter_px(self.geometry.gutter_px)?;
-        Self::validate_paragraph_mode(&self.geometry.paragraph_mode)?;
-        Ok(())
+        self.geometry.validate()
+    }
+
+    /// 校验字号（px）——转发到字段级校验（[`validate_font_size`]）。
+    pub fn validate_font_size(value: u16) -> Result<(), &'static str> {
+        validate_font_size(value)
+    }
+
+    /// 校验行高——转发到字段级校验（[`validate_line_height`]）。
+    pub fn validate_line_height(value: f32) -> Result<(), &'static str> {
+        validate_line_height(value)
+    }
+
+    /// 校验版心——转发到字段级校验（[`validate_measure_em`]）。
+    pub fn validate_measure_em(value: f32) -> Result<(), &'static str> {
+        validate_measure_em(value)
+    }
+
+    /// 校验中缝——转发到字段级校验（[`validate_gutter_px`]）。
+    pub fn validate_gutter_px(value: u16) -> Result<(), &'static str> {
+        validate_gutter_px(value)
+    }
+
+    /// 校验段模式——转发到字段级校验（[`validate_paragraph_mode`]）。
+    pub fn validate_paragraph_mode(value: &ParagraphMode) -> Result<(), &'static str> {
+        validate_paragraph_mode(value)
     }
 
     // --- 序列化（作为 Book.read_config 的 schema）---

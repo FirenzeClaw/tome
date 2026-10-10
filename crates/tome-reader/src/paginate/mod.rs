@@ -19,4 +19,7 @@
 //! [`config::ReadingConfig`] 把几何与呈现拆成两个字段，
 //! 分页函数只接受 `geometry` 那一个。
 
+pub mod booksem;
 pub mod config;
+pub mod page;
+pub mod spread;

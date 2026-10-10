@@ -295,7 +295,7 @@ pub const SEARCH_TIMEOUT_MS: u64 = 15_000;
 /// `Source::rate_limit_ms` 是 `Option<i64>`，而 `RequestSpec.request_interval_ms`
 /// 是 `Option<u32>`：负数与超出 u32 的荒唐值（书源是不可信输入）一律视为"未声明"，
 /// 而不是截断——截断会把 `-1` 变成 0（反而变成"要求零间隔"，比未声明更激进）。
-fn interval_from_source(source: &Source) -> Option<u32> {
+pub fn interval_from_source(source: &Source) -> Option<u32> {
     source
         .rate_limit_ms
         .and_then(|millis| u32::try_from(millis).ok())
@@ -308,7 +308,7 @@ fn interval_from_source(source: &Source) -> Option<u32> {
 ///
 /// 已是绝对 URL（含 scheme）时原样返回；无法补全时也原样返回（让下游的
 /// scheme 校验给出准确错误，而不是在这里猜一个 host）。
-fn resolve_relative(base: &str, url: &str) -> String {
+pub fn resolve_relative(base: &str, url: &str) -> String {
     if url.contains("://") {
         return url.to_string();
     }

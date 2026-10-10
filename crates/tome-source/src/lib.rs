@@ -37,9 +37,12 @@
 
 #![forbid(unsafe_code)]
 
+pub mod action;
 pub mod error;
+pub mod info;
 pub mod js;
 
 pub use error::SourceError;
 pub mod search;
 pub mod source;
+pub mod toc;

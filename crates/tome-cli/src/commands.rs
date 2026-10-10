@@ -493,37 +493,19 @@ fn render_coverage(coverage: &tome_rule::coverage::CoverageMatrix) -> serde_json
 
 /// 为语料沙箱装配宿主 API（T085 的 FR-005b 落地）。
 ///
-/// # 为什么用 `bare` 桥
+/// # 为什么委托给 `tome-rule`
 ///
-/// 语料用例验证的是**规则语法与宿主函数的语义**，不是网络/存储集成。
-/// 用 `bare` 有两层收益：
+/// 宿主 API 的注册清单（FR-005 八类）只有一份，且组装它需要
+/// `RuleMarkupHost`（在 `tome-rule` 里）。故真正的装配在
+/// [`tome_rule::js_bridge::JobRuntime::install_host_api`]，这里只是调用它。
 ///
-/// 1. **可复现**——纯函数用例不因网络状态而红绿不定，那是差分语料的
-///    基本前提（否则同一次提交两次跑出两种结果）。
-/// 2. **无副作用**——不会因为跑一次 `verify` 就写盘或发包。
-///
-/// 走 `bare` 时网络/存储类函数仍会被注册，只是缺底层能力。它们要么
-/// 返回能力错误（可被语料如实断言），要么按实现空转——两者都不影响
-/// 纯函数用例。
-///
-/// # 与管线路径的关系
-///
-/// 真实的抓取路径（`search`/`content` 等）由 `root.rs` 装配**带网络与存储**
-/// 的桥。本函数只服务 `verify --corpus`，两者共用同一套注册代码
-/// （[`crate::js_host::register_host_api`]），故不会出现"测试台支持、
-/// 生产路径不支持"的漂移。
+/// 早先这里自己写了一遍注册——结果是 `tome-rule` 自己的语料校验
+/// （`corpus_gate`）跑不了带 `java.*` 的用例，因为它不能依赖上层 CLI。
+/// 下沉之后两条路径共用同一份注册，不会再有"CLI 支持、语料台不支持"的漂移。
 fn install_corpus_host_api(runtime: &mut tome_rule::js_bridge::JobRuntime) -> Result<(), String> {
-    let context = tome_js::JsContext::for_source("<corpus>".to_string());
-    let bridge = tome_js::HostBridge::bare(context);
-
     runtime
-        .install_bridge(bridge)
-        .map_err(|error| format!("装配宿主桥失败：{error}"))?;
-
-    // 注册 `java.*` 宿主函数（必须在语料求值之前）
-    runtime
-        .with_context(|ctx| crate::js_host::register_host_api(&ctx))
-        .map_err(|error| format!("注册宿主 API 失败：{error}"))
+        .install_host_api()
+        .map_err(|error| format!("装配离线宿主 API 失败：{error}"))
 }
 
 /// `run <source-id> --action <a> [--input <s>]`：通用执行入口。

@@ -120,6 +120,79 @@ impl JobRuntime {
         self.sandbox.install_host_bridge(bridge)
     }
 
+    /// 装配**离线的**宿主 API 并装进沙箱（T085 的收口）。
+    ///
+    /// # 它解决什么问题
+    ///
+    /// `java.*` 宿主函数必须被注册，`@js:java.base64Encode(...)` 之类的规则
+    /// 才可求值。而组装这些注册的是**上层**（组合根 `tome-cli`）——那让
+    /// `tome-rule` 自己的语料校验跑不了带宿主调用的用例（它不该依赖上层）。
+    ///
+    /// 本函数把"按 FR-005 八类注册 `java.*`"这件事下沉到 `tome-rule`：
+    /// 它依赖 `tome-js`（本就依赖）且能提供 `RuleMarkupHost`（在 `tome-rule`
+    /// 里）。于是**任何**建 `JobRuntime` 的地方都能拿到完整宿主面，
+    /// 不必各自重来一遍——也不会出现"CLI 支持、语料台不支持"的漂移。
+    ///
+    /// # 为什么叫"离线"
+    ///
+    /// 它用 `HostBridge::bare`：不带网络与存储。语料校验是**纯函数**性质的
+    /// 语法点验证，不该发请求或读盘。真实抓取路径仍在 `tome-cli` 装配
+    /// （那里注入真实的 `NetHost`/`StoreHost`）。
+    pub fn install_host_api(&mut self) -> Result<(), SandboxError> {
+        // 已装过就不重复装（重复注册会让 `debug_assert` 的计数虚高）
+        if self.bridge_summary != "未注入宿主桥" {
+            return Ok(());
+        }
+
+        let context = tome_js::JsContext::for_source("<runtime>".to_string());
+        self.install_bridge(HostBridge::bare(context))?;
+
+        self.with_context(|ctx| {
+            let java = tome_js::Object::new(ctx.clone())
+                .map_err(|error| format!("建 java 对象失败：{error}"))?;
+
+            let (net, _store) = {
+                let bridged = ctx.userdata::<HostBridge>().ok_or_else(|| {
+                    "宿主桥未注入（install_host_api 应在 install_bridge 之后）".to_string()
+                })?;
+                (bridged.net.clone(), bridged.store.clone())
+            };
+
+            let mut registered = 0usize;
+
+            registered += tome_js::api::net::register(&ctx, &java, net)
+                .map_err(|error| format!("注册网络类 API 失败：{error}"))?;
+            registered += tome_js::api::text::register(&ctx, &java)
+                .map_err(|error| format!("注册文本类 API 失败：{error}"))?;
+            registered += tome_js::api::crypto::register(&ctx, &java)
+                .map_err(|error| format!("注册加密类 API 失败：{error}"))?;
+            // 网页标记解析落到本 crate 的 DOM 上（见 `markup_host`）
+            let markup: std::sync::Arc<dyn tome_js::api::data::MarkupHost> =
+                std::sync::Arc::new(crate::markup_host::RuleMarkupHost::new());
+            registered += tome_js::api::data::register(&ctx, &java, Some(markup))
+                .map_err(|error| format!("注册数据类 API 失败：{error}"))?;
+            registered += tome_js::api::util::register(&ctx, &java)
+                .map_err(|error| format!("注册工具类 API 失败：{error}"))?;
+            registered += tome_js::api::state::register(&ctx, &java)
+                .map_err(|error| format!("注册状态类 API 失败：{error}"))?;
+            registered += tome_js::api::register_all_unsupported(&ctx, &java)
+                .map_err(|error| format!("注册能力桩失败：{error:?}"))?;
+
+            ctx.globals()
+                .set("java", java)
+                .map_err(|error| format!("设置全局 java 失败：{error}"))?;
+
+            // 至少应注册几十个函数；太少说明某个模块静默失败了
+            if registered < 40 {
+                return Err(format!(
+                    "宿主 API 注册数量异常（{registered}），检查各模块的 register 是否都被调用"
+                ));
+            }
+            Ok(())
+        })
+        .map_err(|reason| SandboxError::Setup { reason })
+    }
+
     /// 在沙箱内装配全局对象（注册宿主函数、上下文对象）。
     ///
     /// 与 `tome_js::Sandbox::with_context` 同源，此处只是转发以便调用方

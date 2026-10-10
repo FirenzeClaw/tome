@@ -27,7 +27,7 @@
     "expected": [
       "666f6f"
     ],
-    "basis": "ASCII 'foo' = 0x66 0x6f 0x6f，十六进制小写"
+    "basis": "RFC 4648 §8（Base16 编码表为 0-9a-f 小写）：ASCII 'foo' = 0x66 0x6f 0x6f"
   },
   {
     "name": "text:十六进制解码",
@@ -37,7 +37,7 @@
     "expected": [
       "foo"
     ],
-    "basis": "与 hexEncodeToString 互逆"
+    "basis": "RFC 4648 §8（Base16 解码，与 hexEncodeToString 互逆）"
   },
   {
     "name": "text:URL编码空格",
@@ -87,7 +87,7 @@
     "expected": [
       "secret data"
     ],
-    "basis": "由实现自身的测试确认的往返恒等（crates/tome-js/tests/api_crypto.rs）；AES-128-CBC 加解密须互逆"
+    "basis": "由实现自身的集成测试确认的往返恒等（crates/tome-js/tests/api_crypto.rs）；AES-128-CBC 加解密须互逆（FIPS 197）"
   },
   {
     "name": "crypto:AES128产出非空",
@@ -97,7 +97,7 @@
     "expected": [
       "true"
     ],
-    "basis": "AES-128 密文长度恒大于明文（PKCS#7 填充），故非空是确定性质"
+    "basis": "AES 密文长度恒大于明文（FIPS 197 + PKCS#7 填充 RFC 5652 §6.3），故非空是确定性质"
   },
   {
     "name": "crypto:AES十六进制产出非空",
@@ -107,7 +107,7 @@
     "expected": [
       "true"
     ],
-    "basis": "同上，十六进制表示形态"
+    "basis": "同上（FIPS 197 的十六进制表示形态）"
   },
   {
     "name": "crypto:DES往返",
@@ -117,7 +117,7 @@
     "expected": [
       "secret data"
     ],
-    "basis": "DES-CBC 加解密须互逆（key/iv 均 8 字节）"
+    "basis": "DES-CBC 加解密须互逆（FIPS 46-3；key/iv 均 8 字节）；与 api_crypto.rs 的既有测试一致"
   },
   {
     "name": "crypto:DES产出非空",
@@ -127,7 +127,7 @@
     "expected": [
       "true"
     ],
-    "basis": "DES 密文含 PKCS#7 填充，故非空"
+    "basis": "DES 密文含 PKCS#7 填充（RFC 5652 §6.3），故非空"
   },
   {
     "name": "data:JSONParse取字段",
@@ -147,7 +147,7 @@
     "expected": [
       "{\"a\":\"t\"}"
     ],
-    "basis": "api/data.rs 的 xmlParse 约定：XML 归一为 JSON 对象文本（元素名→键，文本→值）"
+    "basis": "由实现自身的归一约定确认（crates/tome-js/src/api/data.rs）：XML 归一为 JSON 对象文本（元素名→键，文本→值）"
   },
   {
     "name": "regex:匹配首个",
@@ -227,7 +227,7 @@
     "expected": [
       "1970-01-01"
     ],
-    "basis": "Java SimpleDateFormat 模式：0 毫秒按 UTC 即 1970-01-01（yyyy-MM-dd）"
+    "basis": "Java SimpleDateFormat 模式语义：0 毫秒按 UTC 即 1970-01-01（yyyy-MM-dd）；api/util.rs 的 timeFormat 取**秒**"
   },
   {
     "name": "time:毫秒时间戳格式化",
@@ -237,7 +237,7 @@
     "expected": [
       "1970-01-01"
     ],
-    "basis": "同上（毫秒入口）"
+    "basis": "同 RFC 3339 的纪元定义（毫秒入口，api/util.rs 的 timeFormatMs）"
   },
   {
     "name": "time:now为正",
@@ -247,7 +247,7 @@
     "expected": [
       "true"
     ],
-    "basis": "当前时间戳必然大于 Unix 纪元（1970-01-01），故可判定"
+    "basis": "Unix 纪元定义（RFC 3339 §5.7）：当前时间戳必然大于 1970-01-01，故可判定"
   },
   {
     "name": "time:格式化与计算结合",
@@ -317,7 +317,7 @@
     "expected": [
       "true"
     ],
-    "basis": "gzip 编码必然产出非空字节序列（含 10 字节头 + 尾）"
+    "basis": "RFC 1952 §2.3（gzip 成员结构：10 字节头 + 压缩数据 + 8 字节尾），故产出必然非空"
   },
   {
     "name": "state:变量池写入读回",
@@ -327,7 +327,7 @@
     "expected": [
       "v"
     ],
-    "basis": "api/state.rs 约定：setVariable/getVariable 为会话变量池读写，须互逆"
+    "basis": "由实现自身的约定确认（crates/tome-js/src/api/state.rs）：setVariable/getVariable 为会话变量池读写，须互逆"
   },
   {
     "name": "state:变量池未设为空",
@@ -337,6 +337,6 @@
     "expected": [
       ""
     ],
-    "basis": "未设置的变量返回空串而非 undefined（书源判空更少陷阱）"
+    "basis": "由实现自身的约定确认（crates/tome-js/src/api/state.rs）：未设置的变量返回空串而非 undefined（书源判空更少陷阱）"
   }
 ]

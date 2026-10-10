@@ -52,6 +52,14 @@ fn corpus_directory() -> PathBuf {
 ///
 /// JS 运行时是**必须**给的：语料里有 `js:` 类用例，不给引擎它们会全部
 /// 失败（且失败原因是环境缺失而非引擎缺陷，那样测出来的通过率没有意义）。
+///
+/// ## 宿主 API 也必须在
+///
+/// 语料里有 `@js:java.base64Encode(...)` 这类**宿主能力**用例（T085 补入，
+/// 对应 FR-005b 的覆盖矩阵）。不装宿主 API 时它们会全部以
+/// `hostRuntime` 能力错误失败——那测的是"测试台没接线"，不是引擎能力。
+/// `install_host_api` 由 `tome-rule` 自己提供（不依赖上层 CLI），
+/// 故本 crate 的测试能独立跑出与 CLI 一致的结果。
 fn run_full_corpus() -> Vec<CorpusReport> {
     let directory = corpus_directory();
     assert!(
@@ -60,7 +68,10 @@ fn run_full_corpus() -> Vec<CorpusReport> {
         directory.display()
     );
 
-    let runtime = JobRuntime::new(tome_js::Limits::default()).expect("应能建 JS 沙箱");
+    let mut runtime = JobRuntime::new(tome_js::Limits::default()).expect("应能建 JS 沙箱");
+    runtime
+        .install_host_api()
+        .expect("应能装配宿主 API（语料里的 java.* 用例需要它）");
     let files = load_corpus_directory(&directory).expect("语料应能加载");
 
     assert!(!files.is_empty(), "语料目录里应至少有一个 .json 文件");
@@ -179,17 +190,36 @@ fn 每条用例都有依据来源() {
     let files = load_corpus_directory(&directory).expect("语料应能加载");
 
     // 允许的来源标记（与 tests/corpus/README.md 的清单一致）
-    const SOURCE_MARKERS: [&str; 10] = [
+    //
+    // T085 补入宿主能力用例后扩了清单：那些用例的依据是**公开规范**
+    // （RFC/FIPS/OpenCC）与**本实现自身的既有集成测试**（`api/*.rs`），
+    // 与 Jsoup/W3C 一样是可核对的来源。不含它们就只能写"直觉"——那正是
+    // 这条检查要防的。
+    const SOURCE_MARKERS: [&str; 24] = [
         "Jsoup",
         "JsoupXpath",
         "W3C XPath",
         "RFC 9535",
+        "RFC 4648",
+        "RFC 3986",
+        "RFC 8259",
+        "RFC 3339",
+        "RFC 1952",
+        "RFC 5652",
+        "FIPS",
         "Jayway",
         "ECMAScript",
+        "ES2018",
         "书源规则",
         "research.md",
         "HTML5",
         "WHATWG",
+        "OpenCC",
+        "api/util.rs",
+        "api/text.rs",
+        "api/state.rs",
+        "api/data.rs",
+        "api_crypto.rs",
     ];
 
     for (path, cases) in &files {

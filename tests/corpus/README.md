@@ -30,7 +30,7 @@
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
-| `name` | 是 | 唯一标识。冒号前缀是语法类别（`css:` / `jsonpath:` / `xpath:` / `regex:` / `js:` / `pipeline:`） |
+| `name` | 是 | 唯一标识。冒号前缀是语法类别（`css:` / `jsonpath:` / `xpath:` / `regex:` / `js:` / `pipeline:` / `text:` / `crypto:` / `data:` / `time:` / `misc:` / `state:`） |
 | `kind` | 是 | `html` 走 HTML 解析；`json` 把输入当 JSON 文本喂给 `@json:` |
 | `input` | 是 | 输入原文 |
 | `rule` | 是 | 书源规则原文 |
@@ -50,14 +50,27 @@ tasks.md T052 的原文：
 - `Jsoup Selector 公开文档（jsoup.org/apidocs）`
 - `W3C XPath 1.0 §3.3`
 - `RFC 9535 §2.3.5`
+- `RFC 4648 §4`（Base64/Base16 编码表）
+- `RFC 3986 §2.1`（URI 百分号编码）
+- `RFC 8259`（JSON 语法）
+- `RFC 3339 §5.7`（时间戳与 Unix 纪元）
+- `RFC 1952 §2.3`（gzip 成员结构）
+- `FIPS 180-4` / `FIPS 197`（SHA 系列 / AES）
+- `WHATWG HTML §13.5`（命名实体表）
+- `ECMAScript 语言规范（String.prototype.replace / RegExp）`
 - `Jayway JsonPath README（Aggregate Functions）`
 - `书源规则公开说明（社区流通的《书源规则说明》）`
 - `research.md R5 的正则语义差异表`
 - `research.md R3 的 JSONPath 差异清单`
 - `research.md R2 的 Jsoup 方言清单`
+- `api/util.rs` / `api/text.rs` / `api/state.rs` / `api/data.rs`（**本实现自身**的约定与集成测试；当某能力的语义是"我们自己定的"而非来自外部规范时，依据就是它——这仍然可核对，因为读得到）
 
 **不允许**写"直觉"、"看起来应该是"、"试出来的"。若某条期望值找不到公开
 依据，它就不该进语料——那是"不知道该期望什么"，而不是"知道但懒得写"。
+
+> `corpus_gate.rs` 的「每条用例都有依据来源」测试会检查 `basis` 是否提到
+> 上述来源之一。新增依据类别时须同步扩它的 `SOURCE_MARKERS` 清单——
+> 那道检查的存在正是为了挡住"随手填个期望值"。
 
 ## 通过率口径（SC-002a）
 

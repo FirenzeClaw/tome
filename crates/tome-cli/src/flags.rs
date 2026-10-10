@@ -77,8 +77,56 @@ impl NetworkMode {
     }
 }
 
+/// `layout` 子命令的参数（`contracts/cli.md` §2.1 的选项面）。
+///
+/// ## 两个正文来源
+///
+/// - `chapter`：契约定义的形式（`<book>#<index>`）。要求该书在书架里——
+///   那是 S3 与 001 组合根的职责，S2-1 阶段排版层尚无书架接线。
+/// - `text_file`：**本阶段的替代入口**，直接给一份正文文件。它的存在
+///   让本切片可独立验证（Independent Test 的要求），但不改变 `chapter`
+///   的契约地位。
+///
+/// ## 为什么选项收进结构体而不摊在枚举变体里
+///
+/// 十二个字段共同构成"一次 layout 调用的参数"——给它们一个名字比摊平
+/// 清楚；且摊平会让该变体显著大于其它变体（clippy 的
+/// `large_enum_variant` 会告警，而它的 Box 建议只是把问题挪走）。
+///
+/// `[WIP]` `chapter` 的接线待书架就绪。
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct LayoutArgs {
+    /// `--chapter <book>#<index>`（书架形式，待接线）
+    pub chapter: Option<String>,
+    /// `--text <file>`（本阶段入口）
+    pub text_file: Option<PathBuf>,
+    /// `--mode paginated|scroll`（默认 paginated）
+    pub mode: Option<String>,
+    /// `--width <px>` 阅读区**可用**宽度
+    pub width: Option<f32>,
+    /// `--height <px>` 阅读区**可用**高度
+    pub height: Option<f32>,
+    /// `--font-size <px>`（14-30，默认 19）
+    pub font_size: Option<f32>,
+    /// `--line-height <x>`（1.75-2.2，默认 1.85）
+    pub line_height: Option<f32>,
+    /// `--paragraph-mode indent|gap`
+    pub paragraph_mode: Option<String>,
+    /// `--measure-em <n>`（默认 36，上限 42）
+    pub measure_em: Option<f32>,
+    /// `--gutter <px>`（默认 64）
+    pub gutter: Option<f32>,
+    /// `--spread auto|single|double`
+    pub spread: Option<String>,
+    /// `--anchor <char_offset>`
+    pub anchor: Option<usize>,
+}
+
 /// 解析出的命令。
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `[NOTE]` **不派生 `Eq`**：`layout` 的几何选项含 `f32`（宽高/字号/
+/// 行高），而浮点没有全序——`Eq` 会让"NaN == NaN 为假"这类语义混进来。
+/// `PartialEq` 足够（解析测试与命令比较都只用它）。
+#[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     /// `source import <file|--url <u>|--stdin>`
     SourceImport {
@@ -174,6 +222,10 @@ pub enum Command {
         /// `--copy` 用于 `local import`，此处仅为签名一致而占位（未使用）
         _unused: (),
     },
+    /// `layout --chapter <book>#<n>` 或 `layout --text <file>`（`contracts/cli.md` §2.1）
+    ///
+    /// 排版与分页/滚动流计算。**不渲染**（纯计算，无需图形环境）。
+    Layout(LayoutArgs),
     /// `verify --corpus <dir> [--report <file>]`（`contracts/cli.md`）
     ///
     /// 跑合成语料差分：逐条比对引擎输出与期望，输出一致率与逐条 diff。
@@ -215,7 +267,24 @@ pub struct GlobalOptions {
 }
 
 /// 解析结果。
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// `[NOTE]` 同 [`Command`]：不派生 `Eq`（含 `Command`，后者含 `f32`）。
+///
+/// ## 为什么在此豁免 `clippy::large_enum_variant`
+///
+/// `Run` 变体内联 `Command`（最大约 280 字节），而 `Usage`/`Help` 只有
+/// 24 字节——clippy 因此告警。**不在本任务内改 Box**，理由：
+///
+/// 1. `ParseOutcome` 是**解析路径上的短命值**：`parse()` 产出后立刻在
+///    `main` 里被解构消费，不做存储、不跨线程传递。按值大小的影响是
+///    栈上一次拷贝，而 Box 会为此引入一次堆分配——**这个交换不划算**。
+/// 2. Box 会把改动扩散到 5 处调用点（含两个既有的集成测试），
+///    而收益仅是消除一个 lint。这属于"为 lint 而改结构"，不是改进。
+///
+/// `[NOTE]` 若日后 `Command` 继续膨胀（如再加几个带多字段的子命令），
+/// **应当**重新评估——那时的 Box 是有意义的。判据是 `Command` 的最大
+/// 变体尺寸，而非 lint 是否报警。
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ParseOutcome {
     /// 解析成功
     Run {
@@ -250,6 +319,19 @@ pub fn parse(args: &[String]) -> ParseOutcome {
     let mut golden: Option<PathBuf> = None;
     let mut write_baseline_flag = false;
     let mut report: Option<PathBuf> = None;
+    // --- `layout` 子命令的选项（contracts/cli.md §2.1）---
+    let mut chapter: Option<String> = None;
+    let mut text_file: Option<PathBuf> = None;
+    let mut layout_mode: Option<String> = None;
+    let mut width: Option<f32> = None;
+    let mut height: Option<f32> = None;
+    let mut font_size: Option<f32> = None;
+    let mut line_height: Option<f32> = None;
+    let mut paragraph_mode: Option<String> = None;
+    let mut measure_em: Option<f32> = None;
+    let mut gutter: Option<f32> = None;
+    let mut spread: Option<String> = None;
+    let mut anchor_offset: Option<usize> = None;
     let mut group: Option<String> = None;
     let mut enabled_only = false;
     let mut check_all = false;
@@ -372,6 +454,180 @@ pub fn parse(args: &[String]) -> ParseOutcome {
                     None => return ParseOutcome::Usage("--source-file 需要一个路径".to_string()),
                 };
                 source_file = Some(PathBuf::from(value));
+                2
+            }
+            // --- layout 子命令的选项（contracts/cli.md §2.1）---
+            "--chapter" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value.clone(),
+                    None => return ParseOutcome::Usage("--chapter 需要一个值".to_string()),
+                };
+                chapter = Some(value);
+                2
+            }
+            "--text" => {
+                // 排版验证需要一个**正文来源**。`--chapter <book>#<n>` 要求
+                // 书在书架里（S3 与 001 组合根的职责）；S2-1 阶段排版层尚无
+                // 书架接线，故提供 `--text <file>` 直接给正文，使本切片可
+                // 独立验证（Independent Test 的要求）。
+                let value = match args.get(index + 1) {
+                    Some(value) => PathBuf::from(value),
+                    None => return ParseOutcome::Usage("--text 需要一个文件路径".to_string()),
+                };
+                text_file = Some(value);
+                2
+            }
+            "--mode" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value.as_str(),
+                    None => return ParseOutcome::Usage("--mode 需要一个值".to_string()),
+                };
+                if value != "paginated" && value != "scroll" {
+                    return ParseOutcome::Usage(format!(
+                        "--mode 只接受 paginated 或 scroll，实际 `{value}`"
+                    ));
+                }
+                layout_mode = Some(value.to_string());
+                2
+            }
+            "--width" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => return ParseOutcome::Usage("--width 需要一个数值".to_string()),
+                };
+                match value.parse::<f32>() {
+                    Ok(parsed) if parsed > 0.0 => width = Some(parsed),
+                    Ok(_) => return ParseOutcome::Usage("--width 必须为正数".to_string()),
+                    Err(_) => {
+                        return ParseOutcome::Usage(format!("--width 不是数值：`{value}`"));
+                    }
+                }
+                2
+            }
+            "--height" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => return ParseOutcome::Usage("--height 需要一个数值".to_string()),
+                };
+                match value.parse::<f32>() {
+                    Ok(parsed) if parsed > 0.0 => height = Some(parsed),
+                    Ok(_) => return ParseOutcome::Usage("--height 必须为正数".to_string()),
+                    Err(_) => {
+                        return ParseOutcome::Usage(format!("--height 不是数值：`{value}`"));
+                    }
+                }
+                2
+            }
+            "--font-size" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => return ParseOutcome::Usage("--font-size 需要一个数值".to_string()),
+                };
+                match value.parse::<f32>() {
+                    // FR-013 的范围 14-30
+                    Ok(parsed) if (14.0..=30.0).contains(&parsed) => font_size = Some(parsed),
+                    Ok(parsed) => {
+                        return ParseOutcome::Usage(format!(
+                            "--font-size 须在 14-30 之间（FR-013），实际 {parsed}"
+                        ));
+                    }
+                    Err(_) => {
+                        return ParseOutcome::Usage(format!("--font-size 不是数值：`{value}`"));
+                    }
+                }
+                2
+            }
+            "--line-height" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => return ParseOutcome::Usage("--line-height 需要一个数值".to_string()),
+                };
+                match value.parse::<f32>() {
+                    // FR-013 的范围 1.75-2.2（下限是无障碍强制，裁决 OQ#19→A）
+                    Ok(parsed) if (1.75..=2.2).contains(&parsed) => line_height = Some(parsed),
+                    Ok(parsed) => {
+                        return ParseOutcome::Usage(format!(
+                            "--line-height 须在 1.75-2.2 之间（FR-013 / MASTER §2.3 强制下限），实际 {parsed}"
+                        ));
+                    }
+                    Err(_) => {
+                        return ParseOutcome::Usage(format!("--line-height 不是数值：`{value}`"));
+                    }
+                }
+                2
+            }
+            "--paragraph-mode" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value.as_str(),
+                    None => {
+                        return ParseOutcome::Usage("--paragraph-mode 需要一个值".to_string());
+                    }
+                };
+                if value != "indent" && value != "gap" {
+                    return ParseOutcome::Usage(format!(
+                        "--paragraph-mode 只接受 indent 或 gap，实际 `{value}`"
+                    ));
+                }
+                paragraph_mode = Some(value.to_string());
+                2
+            }
+            "--measure-em" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => return ParseOutcome::Usage("--measure-em 需要一个数值".to_string()),
+                };
+                match value.parse::<f32>() {
+                    // FR-013：目标 36em，上限 42em
+                    Ok(parsed) if parsed > 0.0 && parsed <= 42.0 => measure_em = Some(parsed),
+                    Ok(parsed) => {
+                        return ParseOutcome::Usage(format!(
+                            "--measure-em 须在 (0, 42] 之间（FR-013 上限 42em），实际 {parsed}"
+                        ));
+                    }
+                    Err(_) => {
+                        return ParseOutcome::Usage(format!("--measure-em 不是数值：`{value}`"));
+                    }
+                }
+                2
+            }
+            "--gutter" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => return ParseOutcome::Usage("--gutter 需要一个数值".to_string()),
+                };
+                match value.parse::<f32>() {
+                    Ok(parsed) if parsed >= 0.0 => gutter = Some(parsed),
+                    Ok(_) => return ParseOutcome::Usage("--gutter 不能为负".to_string()),
+                    Err(_) => {
+                        return ParseOutcome::Usage(format!("--gutter 不是数值：`{value}`"));
+                    }
+                }
+                2
+            }
+            "--spread" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value.as_str(),
+                    None => return ParseOutcome::Usage("--spread 需要一个值".to_string()),
+                };
+                if value != "auto" && value != "single" && value != "double" {
+                    return ParseOutcome::Usage(format!(
+                        "--spread 只接受 auto/single/double，实际 `{value}`"
+                    ));
+                }
+                spread = Some(value.to_string());
+                2
+            }
+            "--anchor" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => return ParseOutcome::Usage("--anchor 需要一个数值".to_string()),
+                };
+                match value.parse::<usize>() {
+                    Ok(parsed) => anchor_offset = Some(parsed),
+                    Err(_) => {
+                        return ParseOutcome::Usage(format!("--anchor 不是非负整数：`{value}`"));
+                    }
+                }
                 2
             }
             "--corpus" => {
@@ -624,6 +880,21 @@ pub fn parse(args: &[String]) -> ParseOutcome {
             }
         }
         // [P7-MERGE] `local` 子命令（T076-T083）
+        // `layout`（contracts/cli.md §2.1）
+        "layout" => Command::Layout(LayoutArgs {
+            chapter,
+            text_file,
+            mode: layout_mode,
+            width,
+            height,
+            font_size,
+            line_height,
+            paragraph_mode,
+            measure_em,
+            gutter,
+            spread,
+            anchor: anchor_offset,
+        }),
         "local" => {
             let Some(action) = rest.first().map(String::as_str) else {
                 return ParseOutcome::Usage(
@@ -729,6 +1000,8 @@ pub fn help_text() -> String {
         "  tome local toc <path>                              本地书目录识别",
         "  tome local scan <dir> [--library <dir>...]         库根扫描（多库根）",
         "  tome run <source-id> --action <a> [--input <s>]     通用执行（--action search）",
+        "  tome layout --text <file> [几何选项]                排版一章（不渲染）",
+        "  tome layout --chapter <book>#<n> [几何选项]         同上（书架形式，WIP）",
         "  tome verify --corpus <dir> [--report <file>]       跑合成语料差分（SC-002a）",
         "  tome verify --real-sources <dir> --golden <dir>     真实书源对照基线（SC-002b）",
         "              [--write-baseline] [--report <file>]",
@@ -744,6 +1017,19 @@ pub fn help_text() -> String {
         "  --golden <dir>         对照基线目录（verify --real-sources 用）",
         "  --write-baseline       把本次结果写为新基线（首轮基线落盘用）",
         "  --report <file>        报告输出文件（verify 用，默认为 stdout）",
+        "",
+        "layout 选项（contracts/cli.md §2.1）：",
+        "  --text <file>          正文文件（本阶段入口）",
+        "  --chapter <book>#<n>   目标章节（书架形式，WIP）",
+        "  --mode paginated|scroll  阅读形态（默认 paginated）",
+        "  --width/--height <px>  阅读区**可用**宽高（不是窗口宽高）",
+        "  --font-size <px>       阅读字号 14-30（默认 19）",
+        "  --line-height <x>      行高 1.75-2.2（默认 1.85）",
+        "  --paragraph-mode indent|gap  段首缩进（默认）或段间距",
+        "  --measure-em <n>       版心目标 em（默认 36，上限 42）",
+        "  --gutter <px>          双页中缝（默认 64）",
+        "  --spread auto|single|double  单双页模式（默认 auto）",
+        "  --anchor <offset>      报告该锚点落在哪一行",
         "  -h, --help             显示本帮助",
         "",
         "退出码：0 成功 / 1 业务错误 / 2 用法错误 / 3 不支持能力",

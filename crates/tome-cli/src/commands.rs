@@ -221,6 +221,8 @@ pub fn run_with_js(
             roots,
             _unused: _,
         } => crate::local::run_scan(options, directory, roots),
+        // S2 排版层（contracts/cli.md §2.1）
+        Command::Layout(_) => crate::reader_commands::run_layout(options, command),
         Command::Verify { corpus, report } => run_verify(corpus, report.as_deref()),
         // T086：真实书源档（SC-002b）。它**真的发请求**，故需要网络宿主。
         Command::VerifyReal {

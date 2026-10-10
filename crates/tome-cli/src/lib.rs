@@ -37,6 +37,7 @@
 pub mod commands;
 pub mod flags;
 pub mod js_host;
+pub mod reader_commands;
 // `local` 是 T076-T083 的 CLI 面，全部实现收在这一个文件里（P7 合并）。
 pub mod local;
 pub mod pipeline_commands;

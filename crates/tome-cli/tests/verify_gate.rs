@@ -172,6 +172,153 @@ fn 达标时无失败条目() {
 }
 
 // ---------------------------------------------------------------------------
+// 覆盖率矩阵（FR-005b / T085）
+// ---------------------------------------------------------------------------
+
+/// 报告的 `coverage` 段结构完整（T085 的主验收项）。
+#[test]
+fn 报告含覆盖率矩阵() {
+    let directory = corpus_directory();
+    let (_, stdout, _) = run_verify(&directory.to_string_lossy());
+    let report: serde_json::Value = serde_json::from_str(&stdout).expect("报告应是合法 JSON");
+
+    let coverage = report.get("coverage").expect("报告应含 coverage 段");
+
+    // 汇总数字
+    for key in ["total", "covered", "rate"] {
+        assert!(!coverage[key].is_null(), "coverage 应含 {key}：{coverage}");
+    }
+    let total = coverage["total"].as_u64().expect("total 应是整数");
+    let covered = coverage["covered"].as_u64().expect("covered 应是整数");
+    assert!(
+        total >= 30,
+        "FR-005b 清单应有足够规模（八类能力逐项），实际 {total} 项"
+    );
+    assert!(covered <= total, "覆盖数不该超过总数");
+
+    // 逐项明细
+    let items = coverage["items"].as_array().expect("应含 items 数组");
+    assert_eq!(
+        items.len() as u64,
+        total,
+        "items 条数应与 total 一致（逐项覆盖，不抽样）"
+    );
+    for item in items {
+        assert!(item["id"].is_string(), "每项应有 id：{item}");
+        assert!(item["category"].is_string(), "每项应有 category：{item}");
+        assert!(
+            item["description"].is_string(),
+            "每项应有 description：{item}"
+        );
+        assert!(item["covered"].is_u64(), "每项应有 covered：{item}");
+    }
+
+    // 按类别聚合：FR-005 的八类应都能在报告里看到
+    let by_category = coverage["by_category"]
+        .as_array()
+        .expect("应含 by_category 数组");
+    let categories: Vec<&str> = by_category
+        .iter()
+        .filter_map(|entry| entry["category"].as_str())
+        .collect();
+    for required in [
+        "network",
+        "textEncoding",
+        "crypto",
+        "structuredData",
+        "regex",
+        "timeDate",
+        "misc",
+        "hostState",
+    ] {
+        assert!(
+            categories.contains(&required),
+            "FR-005 的类别 {required} 应出现在覆盖矩阵里，实际 {categories:?}"
+        );
+    }
+}
+
+/// 缺口被逐条列出（tasks.md 的验收原文：「任一能力无对应用例则报告缺口」）。
+#[test]
+fn 覆盖率矩阵列出缺口() {
+    let directory = corpus_directory();
+    let (_, stdout, _) = run_verify(&directory.to_string_lossy());
+    let report: serde_json::Value = serde_json::from_str(&stdout).expect("报告应是合法 JSON");
+
+    let coverage = &report["coverage"];
+    let gaps = coverage["gaps"].as_array().expect("应含 gaps 数组");
+    let items = coverage["items"].as_array().expect("应含 items 数组");
+
+    // 缺口与逐项明细必须自洽：gaps 恰好是 items 里 covered == 0 的那些。
+    // 这条断言防的是"缺口清单与明细用的是两套判据"——那会让报告自相矛盾。
+    let expected_gaps: Vec<&str> = items
+        .iter()
+        .filter(|item| item["covered"].as_u64() == Some(0))
+        .filter_map(|item| item["id"].as_str())
+        .collect();
+    let actual_gaps: Vec<&str> = gaps.iter().filter_map(|gap| gap["id"].as_str()).collect();
+    assert_eq!(
+        actual_gaps, expected_gaps,
+        "gaps 应与 items 中 covered==0 的项一致"
+    );
+
+    // 每个缺口都要说明"缺的是哪项能力"，否则报告无法据以补用例
+    for gap in gaps {
+        assert!(gap["id"].is_string(), "缺口应有 id：{gap}");
+        assert!(gap["category"].is_string(), "缺口应有所属类别：{gap}");
+        assert!(gap["description"].is_string(), "缺口应有说明：{gap}");
+    }
+
+    println!(
+        "覆盖矩阵：{}/{} 已覆盖，{} 项缺口",
+        coverage["covered"],
+        coverage["total"],
+        gaps.len()
+    );
+}
+
+/// 宿主 API 真的接进了语料沙箱（T085 的实测回归）。
+///
+/// ## 这条测试守的是什么
+///
+/// 首版 `verify --corpus` 建的是**裸**沙箱（无宿主桥），后果是
+/// FR-005b 能力清单里**没有一项**能被语料覆盖——任何 `java.*` 调用都报
+/// `hostRuntime` 能力错误，覆盖矩阵永远停在 25%。
+///
+/// 那不是引擎不支持，而是测试台没接线。本测试断言"接线在"：
+/// 至少若干 `java.*` 能力是被真实覆盖的。若有人把宿主 API 的注入
+/// 拿掉，覆盖数会掉回个位数，这条测试立刻变红。
+#[test]
+fn 宿主_api_已接入语料沙箱() {
+    let directory = corpus_directory();
+    let (_, stdout, _) = run_verify(&directory.to_string_lossy());
+    let report: serde_json::Value = serde_json::from_str(&stdout).expect("报告应是合法 JSON");
+
+    let items = report["coverage"]["items"]
+        .as_array()
+        .expect("应含 items 数组");
+
+    // 这些能力若未接线，会全部落到 gaps 里
+    for id in [
+        "text.base64",
+        "text.hex",
+        "crypto.aes",
+        "misc.htmlEntity",
+        "time.format",
+        "state.variables",
+    ] {
+        let item = items
+            .iter()
+            .find(|item| item["id"].as_str() == Some(id))
+            .unwrap_or_else(|| panic!("清单里应有 {id}"));
+        assert!(
+            item["covered"].as_u64().unwrap_or(0) > 0,
+            "能力 {id} 无用例覆盖——宿主 API 可能未接入语料沙箱（见 install_corpus_host_api）"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // 未达标路径（门必须真的会拦）
 // ---------------------------------------------------------------------------
 

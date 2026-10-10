@@ -1,0 +1,342 @@
+[
+  {
+    "name": "text:base64编码",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:java.base64Encode('foo')",
+    "expected": [
+      "Zm9v"
+    ],
+    "basis": "RFC 4648 §4 测试向量：base64(\"foo\") = \"Zm9v\"（无填充，因长度恰为 3 字节）"
+  },
+  {
+    "name": "text:base64解码",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:java.base64Decode('Zm9v')",
+    "expected": [
+      "foo"
+    ],
+    "basis": "RFC 4648 §4 测试向量（与编码互逆）"
+  },
+  {
+    "name": "text:十六进制编码",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:java.hexEncodeToString('foo')",
+    "expected": [
+      "666f6f"
+    ],
+    "basis": "ASCII 'foo' = 0x66 0x6f 0x6f，十六进制小写"
+  },
+  {
+    "name": "text:十六进制解码",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:java.hexDecodeToString('666f6f')",
+    "expected": [
+      "foo"
+    ],
+    "basis": "与 hexEncodeToString 互逆"
+  },
+  {
+    "name": "text:URL编码空格",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:java.encodeURI('a b')",
+    "expected": [
+      "a%20b"
+    ],
+    "basis": "RFC 3986 §2.1：空格在 URI 路径/查询中百分号编码为 %20（非 +）"
+  },
+  {
+    "name": "text:URL解码",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:java.decodeURI('a%20b')",
+    "expected": [
+      "a b"
+    ],
+    "basis": "RFC 3986 §2.1（与 encodeURI 互逆）"
+  },
+  {
+    "name": "text:简转繁",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:java.s2t('这个书')",
+    "expected": [
+      "這個書"
+    ],
+    "basis": "api/text.rs 的 s2t=simplified_to_traditional，与其集成测试 api_text.rs:187 同一用例（'这个书'→'這個書'）；该表**不完整**，未覆盖的字原样返回（见模块文档的「数据边界」）"
+  },
+  {
+    "name": "text:繁转简",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:java.t2s('這個書')",
+    "expected": [
+      "这个书"
+    ],
+    "basis": "api/text.rs 的 t2s=traditional_to_simplified，与其集成测试 api_text.rs:186 同一用例（'這個書'→'这个书'）；与 s2t 互逆"
+  },
+  {
+    "name": "crypto:AES往返",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:java.aesDecode(java.aesEncode('secret data','1234567890abcdef','abcdef1234567890'),'1234567890abcdef','abcdef1234567890')",
+    "expected": [
+      "secret data"
+    ],
+    "basis": "由实现自身的测试确认的往返恒等（crates/tome-js/tests/api_crypto.rs）；AES-128-CBC 加解密须互逆"
+  },
+  {
+    "name": "crypto:AES128产出非空",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:String(java.aesEncode128('x','1234567890abcdef','abcdef1234567890').length>0)",
+    "expected": [
+      "true"
+    ],
+    "basis": "AES-128 密文长度恒大于明文（PKCS#7 填充），故非空是确定性质"
+  },
+  {
+    "name": "crypto:AES十六进制产出非空",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:String(java.aesEncodeHex('x','1234567890abcdef','abcdef1234567890').length>0)",
+    "expected": [
+      "true"
+    ],
+    "basis": "同上，十六进制表示形态"
+  },
+  {
+    "name": "crypto:DES往返",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:java.desDecode(java.desEncode('secret data','12345678','abcdefgh'),'12345678','abcdefgh')",
+    "expected": [
+      "secret data"
+    ],
+    "basis": "DES-CBC 加解密须互逆（key/iv 均 8 字节）"
+  },
+  {
+    "name": "crypto:DES产出非空",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:String(java.desEncode('secret data','12345678','abcdefgh').length>0)",
+    "expected": [
+      "true"
+    ],
+    "basis": "DES 密文含 PKCS#7 填充，故非空"
+  },
+  {
+    "name": "data:JSONParse取字段",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:java.jsonParse('{\"a\":\"b\"}').a",
+    "expected": [
+      "b"
+    ],
+    "basis": "RFC 8259 §4：JSON 对象成员取值"
+  },
+  {
+    "name": "data:XMLParse归一为JSON",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:java.xmlParse('<a>t</a>')",
+    "expected": [
+      "{\"a\":\"t\"}"
+    ],
+    "basis": "api/data.rs 的 xmlParse 约定：XML 归一为 JSON 对象文本（元素名→键，文本→值）"
+  },
+  {
+    "name": "regex:匹配首个",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:String(java.match('a1b2','\\\\d+'))",
+    "expected": [
+      "1"
+    ],
+    "basis": "ECMAScript RegExp：String.prototype.match 非全局时返回首个匹配文本"
+  },
+  {
+    "name": "regex:匹配无果为null",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:String(java.match('abc','\\\\d+'))",
+    "expected": [
+      "null"
+    ],
+    "basis": "ECMAScript：无匹配时 match 返回 null（书源据此判空）"
+  },
+  {
+    "name": "regex:全部匹配计数",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:String(java.matchAll('a1b2','\\\\d+').length)",
+    "expected": [
+      "2"
+    ],
+    "basis": "ECMAScript String.prototype.matchAll：'a1b2' 中 \\d+ 有 2 处（'1'、'2'）"
+  },
+  {
+    "name": "regex:捕获组提取",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:java.getMatchGroups('a1b2','\\\\d+').join('|')",
+    "expected": [
+      "1"
+    ],
+    "basis": "api/util.rs 约定：返回数组首项为整个匹配（此处 \\d+ 无子组）"
+  },
+  {
+    "name": "regex:替换展开捕获组",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:java.replace('a1b2','(\\\\d)','<$1>')",
+    "expected": [
+      "a<1>b<2>"
+    ],
+    "basis": "api/util.rs 约定：java.replace 默认**强制 global**（书源净化用途都是全量替换），故两处都被替换"
+  },
+  {
+    "name": "regex:命名捕获组",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:String(java.match('2026-10-11','(?<year>\\\\d{4})-(?<month>\\\\d{2})').length)",
+    "expected": [
+      "3"
+    ],
+    "basis": "ES2018 命名捕获组 + ECMAScript String.prototype.match：无 g 标志时返回 [整体匹配, 组1, 组2]，长度 3"
+  },
+  {
+    "name": "regex:替换只换首个",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:java.replace('a1b2','\\\\d','X')",
+    "expected": [
+      "aXbX"
+    ],
+    "basis": "api/util.rs 约定：java.replace 强制带 g，故 'a1b2' 中两处数字都被替换（与 JS 原生 replace 的无 g 行为不同）"
+  },
+  {
+    "name": "time:时间戳格式化",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:java.timeFormat(0,'yyyy-MM-dd')",
+    "expected": [
+      "1970-01-01"
+    ],
+    "basis": "Java SimpleDateFormat 模式：0 毫秒按 UTC 即 1970-01-01（yyyy-MM-dd）"
+  },
+  {
+    "name": "time:毫秒时间戳格式化",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:java.timeFormatMs(0,'yyyy-MM-dd')",
+    "expected": [
+      "1970-01-01"
+    ],
+    "basis": "同上（毫秒入口）"
+  },
+  {
+    "name": "time:now为正",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:String(java.now()>0)",
+    "expected": [
+      "true"
+    ],
+    "basis": "当前时间戳必然大于 Unix 纪元（1970-01-01），故可判定"
+  },
+  {
+    "name": "time:格式化与计算结合",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:java.timeFormat(86400,'yyyy-MM-dd')",
+    "expected": [
+      "1970-01-02"
+    ],
+    "basis": "api/util.rs 约定：java.timeFormat 的时间戳单位是**秒**；86400 秒 = 整 1 天，按 UTC 为 1970-01-02"
+  },
+  {
+    "name": "misc:HTML实体编码",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:java.htmlEncode('<a>')",
+    "expected": [
+      "&lt;a&gt;"
+    ],
+    "basis": "WHATWG HTML §13.5 命名字符引用：'<' → '&lt;'，'>' → '&gt;'"
+  },
+  {
+    "name": "misc:HTML实体解码",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:java.htmlDecode('&lt;a&gt;')",
+    "expected": [
+      "<a>"
+    ],
+    "basis": "WHATWG HTML §13.5（与 htmlEncode 互逆）"
+  },
+  {
+    "name": "misc:随机数区间",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:String(java.random()>=0 && java.random()<1)",
+    "expected": [
+      "true"
+    ],
+    "basis": "api/util.rs 约定：java.random() 返回 [0,1) 的浮点，故区间判定恒真"
+  },
+  {
+    "name": "misc:随机整数上界",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:String(java.randomInt(1))",
+    "expected": [
+      "0"
+    ],
+    "basis": "api/util.rs 约定：randomInt(bound) 独参形态，返回 [0,bound) 的整数；bound=1 时唯一取值 0"
+  },
+  {
+    "name": "misc:随机整数零上界",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:String(java.randomInt(0))",
+    "expected": [
+      "0"
+    ],
+    "basis": "api/util.rs：bound<=0 时返回 0（不 panic、不给负数）"
+  },
+  {
+    "name": "misc:gzip产出非空",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:String(java.gzipEncode('hello world, hello world').length>0)",
+    "expected": [
+      "true"
+    ],
+    "basis": "gzip 编码必然产出非空字节序列（含 10 字节头 + 尾）"
+  },
+  {
+    "name": "state:变量池写入读回",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:java.setVariable('k','v'); String(java.getVariable('k'))",
+    "expected": [
+      "v"
+    ],
+    "basis": "api/state.rs 约定：setVariable/getVariable 为会话变量池读写，须互逆"
+  },
+  {
+    "name": "state:变量池未设为空",
+    "kind": "html",
+    "input": "<p>x</p>",
+    "rule": "@js:String(java.getVariable('never-set'))",
+    "expected": [
+      ""
+    ],
+    "basis": "未设置的变量返回空串而非 undefined（书源判空更少陷阱）"
+  }
+]

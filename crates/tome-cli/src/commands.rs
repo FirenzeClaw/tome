@@ -270,7 +270,19 @@ fn run_verify(corpus: &Path, report: Option<&Path>) -> CommandOutcome {
 
     // JS 运行时：语料里有 `js:` 类用例，不给引擎它们会全部失败——
     // 那样测出的通过率反映的是"没配好环境"而不是引擎能力。
-    let runtime = match tome_rule::js_bridge::JobRuntime::new(tome_js::Limits::default()) {
+    //
+    // ## 为什么必须注入宿主 API（T085 的实测发现）
+    //
+    // 首版这里只建了个**裸**沙箱（无宿主桥、无 `java.*`）。后果是：
+    // FR-005b 能力清单里的 33 项**没有一项可被语料覆盖**——任何
+    // `@js:java.base64Encode(...)` 都报 `hostRuntime` 能力错误。
+    // 覆盖矩阵因此永远显示 25% 且缺口恒定，那不是"引擎不支持"，
+    // 而是"测试台没接线"。这个盲点正是 T085 要暴露的东西。
+    //
+    // 宿主桥用 `bare`（不带网络/存储）：语料用例是**纯函数**性质的
+    // 语法点验证，不该发请求或读盘。网络/存储类用例属真实书源档
+    // （`verify --real-sources`），那里才需要真实能力。
+    let mut runtime = match tome_rule::js_bridge::JobRuntime::new(tome_js::Limits::default()) {
         Ok(runtime) => runtime,
         Err(error) => {
             return CommandOutcome::failure(
@@ -279,20 +291,33 @@ fn run_verify(corpus: &Path, report: Option<&Path>) -> CommandOutcome {
             );
         }
     };
+    if let Err(error) = install_corpus_host_api(&mut runtime) {
+        return CommandOutcome::failure(
+            &ErrorKind::Configuration,
+            &format!("装配语料沙箱的宿主 API 失败：{error}"),
+        );
+    }
 
     let mut outcomes = Vec::new();
+    // 覆盖矩阵要在**全部**用例上算（T085 的 FR-005b 落地），
+    // 故先把各文件的用例收齐，再一起喂给覆盖统计——
+    // 逐文件算会把"某能力只在另一个文件里有用例"误报成缺口。
+    let mut all_cases = Vec::new();
     for (path, cases) in &loaded {
         let mut produced = tome_rule::corpus::run_corpus(cases, Some(&runtime));
         outcomes.append(&mut produced);
+        all_cases.extend(cases.iter().cloned());
         let _ = path;
     }
+
+    let coverage = tome_rule::coverage::compute_full_coverage(&all_cases);
 
     let report_data = tome_rule::corpus::CorpusReport {
         source: corpus_text.to_string(),
         outcomes,
     };
 
-    let rendered = render_verify_report(&report_data);
+    let rendered = render_verify_report(&report_data, &coverage);
     let passed_gate = report_data.meets_threshold();
 
     // `--report <file>` 时把渲染结果写文件（失败即报错，不静默丢弃报告）
@@ -312,13 +337,25 @@ fn run_verify(corpus: &Path, report: Option<&Path>) -> CommandOutcome {
     }
 }
 
-/// 渲染 verify 报告：一致率 + 逐条 diff（JSON，可 diff）。
+/// 渲染 verify 报告：一致率 + 逐条 diff + **覆盖率矩阵**（JSON，可 diff）。
 ///
 /// # 为什么是 JSON
 ///
 /// `contracts/cli.md` 的全局约定是"输出默认 JSON（结构化、可 diff）"。
 /// 差分测试的产物尤其需要可 diff——它是被**比较**的东西。
-fn render_verify_report(report: &tome_rule::corpus::CorpusReport) -> String {
+///
+/// # 为什么一致率之外还要覆盖矩阵
+///
+/// 一致率是**单一数字**：它回答"跑过的用例对不对"，不回答"该测的测到了没有"。
+/// 96% 完全可能来自"只有 CSS 有 284 条、其余能力一条没有"。FR-005b 要求的
+/// 正是补上这一面（详见 `tome_rule::coverage` 的模块文档）。
+///
+/// 故报告里两者并列：`pass_rate` 管质量，`coverage` 管广度，
+/// `coverage.gaps` 逐条列出**有清单无用例**的能力。
+fn render_verify_report(
+    report: &tome_rule::corpus::CorpusReport,
+    coverage: &tome_rule::coverage::CoverageMatrix,
+) -> String {
     let failures: Vec<serde_json::Value> = report
         .failures()
         .map(|outcome| {
@@ -355,6 +392,7 @@ fn render_verify_report(report: &tome_rule::corpus::CorpusReport) -> String {
         "meets_threshold": report.meets_threshold(),
         "by_category": categories,
         "failures": failures,
+        "coverage": render_coverage(coverage),
     });
 
     // `to_string_pretty` 而非紧凑：报告是给人看的（逐条 diff 可查）
@@ -369,6 +407,108 @@ fn render_verify_report(report: &tome_rule::corpus::CorpusReport) -> String {
             format!("{fallback}\n")
         }
     }
+}
+
+/// 渲染覆盖率矩阵（FR-005b / T085）。
+///
+/// # 字段为何这样切
+///
+/// | 字段 | 回答的问题 |
+/// |---|---|
+/// | `total` / `covered` / `rate` | 覆盖面有多广（一个数，可监控） |
+/// | `by_category` | 哪一类能力薄（FR-005 的八类各自如何） |
+/// | `items` | 逐项明细（每项的命中数与用例名留样） |
+/// | `gaps` | **有清单、无用例**的能力——T085 验收项"任一能力无对应用例则报告缺口" |
+///
+/// ## 为什么 `gaps` 是独立数组而不是从 `items` 里过滤
+///
+/// 因为它是**要立刻被看的东西**。让它需要调用方再过滤一遍，
+/// 就会在实际使用中被忽略掉——那正是这个功能要防的事。
+fn render_coverage(coverage: &tome_rule::coverage::CoverageMatrix) -> serde_json::Value {
+    let items: Vec<serde_json::Value> = coverage
+        .entries
+        .iter()
+        .map(|entry| {
+            serde_json::json!({
+                "id": entry.id,
+                "category": entry.category.id(),
+                "category_label": entry.category.label(),
+                "description": entry.description,
+                "covered": entry.covered,
+                "case_names": entry.case_names,
+            })
+        })
+        .collect();
+
+    let by_category: Vec<serde_json::Value> = coverage
+        .by_category()
+        .into_iter()
+        .map(|(category, covered, total)| {
+            serde_json::json!({
+                "category": category.id(),
+                "category_label": category.label(),
+                "covered": covered,
+                "total": total,
+                "rate": if total == 0 { 1.0 } else { covered as f64 / total as f64 },
+            })
+        })
+        .collect();
+
+    let gaps: Vec<serde_json::Value> = coverage
+        .gaps()
+        .map(|entry| {
+            serde_json::json!({
+                "id": entry.id,
+                "category": entry.category.id(),
+                "description": entry.description,
+            })
+        })
+        .collect();
+
+    serde_json::json!({
+        "source": "FR-005b 能力清单",
+        "total": coverage.total(),
+        "covered": coverage.covered_count(),
+        "rate": coverage.coverage_rate(),
+        "by_category": by_category,
+        "items": items,
+        "gaps": gaps,
+    })
+}
+
+/// 为语料沙箱装配宿主 API（T085 的 FR-005b 落地）。
+///
+/// # 为什么用 `bare` 桥
+///
+/// 语料用例验证的是**规则语法与宿主函数的语义**，不是网络/存储集成。
+/// 用 `bare` 有两层收益：
+///
+/// 1. **可复现**——纯函数用例不因网络状态而红绿不定，那是差分语料的
+///    基本前提（否则同一次提交两次跑出两种结果）。
+/// 2. **无副作用**——不会因为跑一次 `verify` 就写盘或发包。
+///
+/// 走 `bare` 时网络/存储类函数仍会被注册，只是缺底层能力。它们要么
+/// 返回能力错误（可被语料如实断言），要么按实现空转——两者都不影响
+/// 纯函数用例。
+///
+/// # 与管线路径的关系
+///
+/// 真实的抓取路径（`search`/`content` 等）由 `root.rs` 装配**带网络与存储**
+/// 的桥。本函数只服务 `verify --corpus`，两者共用同一套注册代码
+/// （[`crate::js_host::register_host_api`]），故不会出现"测试台支持、
+/// 生产路径不支持"的漂移。
+fn install_corpus_host_api(runtime: &mut tome_rule::js_bridge::JobRuntime) -> Result<(), String> {
+    let context = tome_js::JsContext::for_source("<corpus>".to_string());
+    let bridge = tome_js::HostBridge::bare(context);
+
+    runtime
+        .install_bridge(bridge)
+        .map_err(|error| format!("装配宿主桥失败：{error}"))?;
+
+    // 注册 `java.*` 宿主函数（必须在语料求值之前）
+    runtime
+        .with_context(|ctx| crate::js_host::register_host_api(&ctx))
+        .map_err(|error| format!("注册宿主 API 失败：{error}"))
 }
 
 /// `run <source-id> --action <a> [--input <s>]`：通用执行入口。

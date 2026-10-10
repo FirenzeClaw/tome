@@ -1603,6 +1603,7 @@ mod tests {
 
         let usage = fixture.store.usage_bytes().expect("应能算");
         let ratio = usage as f64 / content_total as f64;
+        eprintln!("[SC-005 实测/500章] 占用={usage} 内容={content_total} 比值={ratio:.6}");
         assert!(
             ratio <= 1.01,
             "容量开销 {ratio:.6} 超过 1.01（占用 {usage} / 内容 {content_total}）"

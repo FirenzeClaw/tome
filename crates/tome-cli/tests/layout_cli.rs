@@ -1040,11 +1040,7 @@ fn paragraph_mode_changes_line_breaking() {
         "缩进模式下 11 字应折两行（228 − 38 = 190px 可用宽）"
     );
     // 间距模式：无首行缩进 → 228px 容 12 字身 → 单行
-    assert_eq!(
-        line_count(&gap),
-        1,
-        "间距模式下无首行缩进，11 字应单行"
-    );
+    assert_eq!(line_count(&gap), 1, "间距模式下无首行缩进，11 字应单行");
 
     // 两模式的**断行结果必须不同**——这是"模式真的生效了"的核心判据
     assert_ne!(

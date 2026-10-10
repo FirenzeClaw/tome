@@ -130,6 +130,7 @@ impl LayoutEngine {
         }
 
         let metrics = Metrics::relative(geometry.font_size_px, geometry.line_height);
+
         let mut buffer = Buffer::new(&mut self.font_system, metrics);
         buffer.set_size(Some(geometry.measure_px), None);
         // 约束 1：必须 Wrap::Word（见模块文档）
@@ -154,7 +155,25 @@ impl LayoutEngine {
         };
 
         // 第 3 步：按禁则合并（在克隆体上）
-        let (merged, merge_plan) = merge_for_kinsoku(&shape_line, text);
+        let (mut merged, merge_plan) = merge_for_kinsoku(&shape_line, text);
+
+        // 第 3.5 步：**中西文最小间隙**（FR-009）
+        //
+        // ## 为什么必须在 layout 之前做（实测踩到过）
+        //
+        // 初版把间隙加在**layout 之后**的字形步进上，结果它只能让行变宽、
+        // 永远无法让断行把间隙考虑进去。实测：228px 版心下的一行
+        // `"Shadow of the Wind，作者"` layout 给出 228.00px（刚好填满），
+        // 加上 4.75px 的 Latin→CJK 间隙后变成 232.75px → **SC-003 必破**。
+        //
+        // 改用"先预留一格"也是错的：那会无谓地惩罚纯中文行（少放一个字，
+        // 实测留白 19px = 整字身，US1 场景 1 必破）。
+        //
+        // 正确做法是利用 T013 已验证的机制——**在 shape 层把间隙写进
+        // `ShapeGlyph::x_advance`**（em 单位）。这样 layout 计算宽度时
+        // 天然包含间隙，断行与间隙不再是两件事。
+        // 与标点挤压共用同一个"字身改写"注入点（research R1 方案 A 的第 3 步）。
+        apply_mixed_script_gaps_to_shape(&mut merged, text);
 
         // 第 4 步：layout
         let laid_out = merged.layout(
@@ -192,9 +211,12 @@ impl LayoutEngine {
                 glyphs.push(GlyphBox {
                     char_range: glyph_char_start..glyph_char_end,
                     byte_range,
-                    x_px: glyph.x * geometry.font_size_px,
+                    // `LayoutGlyph::x` 与 `w` **已经是像素单位**（layout.rs
+                    // 的字段文档："X offset of hitbox" / "Width of hitbox"）。
+                    // 初版误写成 `glyph.x * font_size_px`，把 px 又乘了一次字号
+                    // ——实测 x 值达到 1900+ 而版心只有 228。
+                    x_px: glyph.x,
                     advance_px: glyph.w,
-                    // 压缩量由 T014 的挤压模块填充；T013 阶段恒为 0
                     squeeze_px: 0.0,
                 });
             }
@@ -203,13 +225,22 @@ impl LayoutEngine {
                 continue;
             };
 
+            // 第 5.5 步：**标点挤压**（FR-006 / T014）
+            //
+            // 溢出量为正时，把超出版心的部分压给行内可压缩标点。
+            // 这一步必须在**行已确定**之后做——挤压不改变断点（那会把
+            // 断行与字身的依赖变成循环），它只让已经排定的一行"收进版心"。
+            let content_width: f32 = glyphs.iter().map(|glyph| glyph.advance_px).sum();
+            let overflow_px = content_width - geometry.measure_px;
+            let squeeze_px = apply_squeeze(&mut glyphs, text, overflow_px, geometry.font_size_px);
+
             lines.push(LineBox {
                 paragraph_index,
                 char_range: char_start..char_end,
                 glyphs,
                 height_px: geometry.line_height_px(),
                 baseline_px: line.max_ascent,
-                squeeze_px: 0.0,
+                squeeze_px,
                 rule_exception: None,
             });
         }
@@ -450,6 +481,100 @@ fn char_at_start_of_line(line: &LineBox, text: &str) -> Option<char> {
     text.get(glyph.byte_range.clone())?.chars().next()
 }
 
+/// 对一行施加标点挤压（FR-006 / T014）。
+///
+/// ## 为什么在引擎里做而不在规则模块里
+///
+/// 挤压要改写 `GlyphBox::advance_px` 与 `x_px`——那是**行盒的内部状态**。
+/// 规则模块（`rules::squeeze`）只**计算方案**（压哪个、压多少），
+/// 施加由持有行盒的引擎负责。这个分工让规则模块可独立单测
+/// （纯函数、无副作用），而引擎负责状态一致性。
+///
+/// ## 返回
+///
+/// 本行**实际**施加的压缩总量（px）。调用方把它写进
+/// `LineBox::squeeze_px`——它与各字形的 `squeeze_px` 之和必须相等
+/// （有测试断言，那是"明细与汇总一致"的判据）。
+fn apply_squeeze(glyphs: &mut [GlyphBox], text: &str, overflow_px: f32, font_size_px: f32) -> f32 {
+    if overflow_px <= 0.0 || glyphs.is_empty() {
+        return 0.0;
+    }
+
+    let plan = crate::rules::squeeze::plan_squeeze(glyphs, text, overflow_px, font_size_px, true);
+
+    let mut applied_total = 0.0f32;
+    let mut shift = 0.0f32;
+
+    for (glyph, decision) in glyphs.iter_mut().zip(plan.iter()) {
+        if let Some(decision) = decision {
+            let applied = decision.effective_px();
+            glyph.advance_px -= applied;
+            glyph.squeeze_px = applied;
+            applied_total += applied;
+            // 本字形起点也左移（前序累积的压缩量）
+            glyph.x_px -= shift;
+            shift += applied;
+        } else {
+            // 未压缩的字形仍要左移（受前面压缩的影响）
+            glyph.x_px -= shift;
+        }
+    }
+
+    applied_total
+}
+
+/// 把中西文最小间隙写入 shape 层的 `x_advance`（FR-009 / T014）。
+///
+/// ## 为什么在 shape 层（而不是 layout 之后）
+///
+/// 见调用处的说明：layout 之后加间隙只能让行变宽，无法参与断行。
+/// 在 shape 层写入则让 layout 的宽度计算天然包含它——断行与间隙一致。
+///
+/// ## 判据：跨 word 边界检测
+///
+/// 间隙要加在"汉字与拉丁字母**直接相邻**"处。而 cosmic-text 会把它们
+/// 切成**不同的 word**（中文逐字成 word、西文整词成 word），
+/// 故判据是"相邻两个 word 的边界处，左末字与右首字属不同书写系统"。
+///
+/// ## 间隙记在**左侧字形**上
+///
+/// 不插入零宽字形：那会破坏"中文排版里字形数 == 字符数"这条性质，
+/// 进而让字形区间与字符区间的对应变复杂（痕迹渲染依赖后者）。
+fn apply_mixed_script_gaps_to_shape(shape_line: &mut ShapeLine, text: &str) {
+    use crate::rules::mixed::{needs_minimum_gap, MIXED_SCRIPT_MIN_GAP_EM};
+
+    for span in &mut shape_line.spans {
+        if span.words.len() < 2 {
+            continue;
+        }
+
+        // 先收集需要加间隙的 word 下标（避免边读边改的借用冲突）
+        let gap_positions: Vec<usize> = (0..span.words.len() - 1)
+            .filter(|index| {
+                let left = span.words[*index]
+                    .glyphs
+                    .last()
+                    .and_then(|glyph| text.get(glyph.start..glyph.end))
+                    .and_then(|slice| slice.chars().next_back());
+                let right = span.words[index + 1]
+                    .glyphs
+                    .first()
+                    .and_then(|glyph| text.get(glyph.start..glyph.end))
+                    .and_then(|slice| slice.chars().next());
+                matches!((left, right), (Some(left), Some(right)) if needs_minimum_gap(left, right))
+            })
+            .collect();
+
+        for index in gap_positions {
+            // 加到该 word 的**末字形**上（间隙位于它与下一个 word 之间）
+            if let Some(glyph) = span.words[index].glyphs.last_mut() {
+                glyph.x_advance += MIXED_SCRIPT_MIN_GAP_EM;
+            }
+        }
+    }
+}
+
+/// 取一行**开头**的字符。
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -454,7 +454,7 @@ proxy = "http://127.0.0.1:7890"
     }
 
     #[test]
-    fn 非法_TOML_报配置分类错误() {
+    fn 非法_toml_报配置分类错误() {
         let error = Config::from_toml("这不是 TOML {{{", Path::new("t.toml")).expect_err("应报错");
         assert_eq!(
             error.to_error_kind(),

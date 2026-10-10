@@ -27,7 +27,6 @@ use std::io::Read;
 use std::path::Path;
 
 use tome_core::{ErrorKind, NetHost};
-use tome_source::registry::SourceRegistry;
 use tome_source::source::{load_from_channel, LoadOutcome, ParsedSource};
 use tome_source::{search, SourceError};
 
@@ -374,33 +373,89 @@ fn run_import(
 
     match load_from_channel(&channel, host) {
         Ok(outcome) => {
-            // 落盘到注册表：`search <source-id>` 依赖它（`contracts/cli.md`
+            // 落库：`search <source-id>` 依赖它（`contracts/cli.md`
             // 定义的流程是"先 import 再 search <id>"）。
-            let registry_path = registry_path(options);
-            let mut registry = match SourceRegistry::load(&registry_path) {
-                Ok(registry) => registry,
+            //
+            // T056 之后权威存储是 SQLite（经 `SourceStore` 适配），而
+            // `sources.json` 成为它的**投影**——文件仍被写出，因为它同时是
+            // 人工检视入口与"可手工编辑后重导"的合法书源文件。
+            let source_store = match open_source_store(options) {
+                Ok(store) => store,
+                Err(outcome) => return outcome,
+            };
+            let sources: Vec<tome_core::Source> = outcome
+                .sources
+                .iter()
+                .map(|parsed| parsed.source.clone())
+                .collect();
+            let counts = match source_store.merge(&sources) {
+                Ok(counts) => counts,
                 Err(error) => {
                     return CommandOutcome::failure(&error.to_error_kind(), &format!("{error}"));
                 }
             };
-            let update = registry.merge(&outcome);
-            if let Err(error) = registry.save(&registry_path) {
-                return CommandOutcome::failure(&error.to_error_kind(), &format!("{error}"));
-            }
 
-            let report = render_import_report(options.format, &outcome, &update, &registry_path);
+            let report = render_import_report(
+                options.format,
+                &outcome,
+                counts,
+                source_store.export_path(),
+                source_store.len().unwrap_or(0),
+            );
             CommandOutcome::with_stdout(report)
         }
         Err(error) => CommandOutcome::failure(&error.to_error_kind(), &format!("{error}")),
     }
 }
 
-/// 解析注册表路径：`--data-dir` 优先，否则用"可移植模式"的默认位置。
-fn registry_path(options: &GlobalOptions) -> std::path::PathBuf {
-    match &options.data_dir {
-        Some(dir) => dir.join(tome_source::registry::REGISTRY_FILE_NAME),
-        None => tome_source::registry::default_registry_path(),
+/// 打开书源存储（SQLite 库 + 导出文件路径）。
+///
+/// # 数据目录的解析
+///
+/// `--data-dir` 优先；没给时按 FR-042 自动判定（程序同级 `data/` 优先，
+/// 否则系统数据目录）。判定逻辑复用 `tome_store::datadir`，不在这里重写
+/// ——两处各写一份会让"可移植模式"的语义在两个地方漂移。
+fn open_source_store(options: &GlobalOptions) -> Result<tome_store::SourceStore, CommandOutcome> {
+    let resolved = tome_store::DataDir::resolve_for_current_exe(options.data_dir.as_deref());
+    let data_dir = match &resolved {
+        tome_store::datadir::Resolved::Usable { .. } => {
+            tome_store::DataDir::from_resolved(&resolved).ok_or_else(|| {
+                CommandOutcome::failure(&ErrorKind::Storage, "数据目录解析结果不可用（内部不一致）")
+            })?
+        }
+        tome_store::datadir::Resolved::Unusable {
+            reason, guidance, ..
+        } => {
+            // FR-043：不可写/不足时明确报告并给出指引，而非静默失败
+            return Err(CommandOutcome::failure(
+                &ErrorKind::Storage,
+                &format!("{reason}；{guidance}"),
+            ));
+        }
+    };
+    if let Err(error) = data_dir.ensure_layout() {
+        return Err(CommandOutcome::failure(
+            &error.to_error_kind(),
+            &format!("{error}"),
+        ));
     }
+
+    let db = match tome_store::Db::open(&data_dir.database_path()) {
+        Ok(db) => db,
+        Err(error) => {
+            return Err(CommandOutcome::failure(
+                &error.to_error_kind(),
+                &format!("{error}"),
+            ));
+        }
+    };
+    let dao = tome_store::dao::SourceDao::new(db);
+    Ok(tome_store::SourceStore::new(
+        dao,
+        data_dir
+            .root()
+            .join(tome_store::source_store::SOURCE_EXPORT_FILE_NAME),
+    ))
 }
 
 /// `search`：跑一次搜索并输出结构化结果。
@@ -512,11 +567,13 @@ fn load_sources_for_search(
         ));
     };
 
-    let path = registry_path(options);
-    let registry = SourceRegistry::load(&path)
-        .map_err(|error| CommandOutcome::failure(&error.to_error_kind(), &format!("{error}")))?;
-    match registry.get(id) {
-        Some(parsed) => Ok(vec![parsed.clone()]),
+    let source_store = open_source_store(options)?;
+    let path = source_store.export_path().to_path_buf();
+    match source_store
+        .get(id)
+        .map_err(|error| CommandOutcome::failure(&error.to_error_kind(), &format!("{error}")))?
+    {
+        Some(source) => Ok(vec![ParsedSource { source }]),
         None => {
             let hint = format!(
                 "error.rule.source.missing id={id} registry={}",
@@ -525,7 +582,7 @@ fn load_sources_for_search(
             Err(CommandOutcome::failure(
                 &ErrorKind::Rule,
                 &format!(
-                    "{hint}（注册表里没有这个 id；先跑 `tome source import <file>`，                     或用 --source-file 直接指定书源文件）"
+                    "{hint}（库里没有这个 id；先跑 `tome source import <file>`，                     或用 --source-file 直接指定书源文件）"
                 ),
             ))
         }
@@ -543,8 +600,9 @@ fn load_sources_for_search(
 fn render_import_report(
     format: OutputFormat,
     outcome: &LoadOutcome,
-    update: &tome_source::registry::RegistryUpdate,
+    counts: tome_store::source_store::PersistCounts,
     registry_path: &Path,
+    registry_total: usize,
 ) -> String {
     match format {
         OutputFormat::Json => {
@@ -567,9 +625,9 @@ fn render_import_report(
                         error: failure.error.message_id().to_string(),
                     })
                     .collect(),
-                registry_added: update.added,
-                registry_updated: update.updated,
-                registry_total: registry_len_at(registry_path),
+                registry_added: counts.added,
+                registry_updated: counts.updated,
+                registry_total,
             };
             let mut text =
                 serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".to_string());
@@ -580,9 +638,9 @@ fn render_import_report(
         OutputFormat::Human => {
             let mut lines = vec![
                 format!(
-                    "注册表：新增 {}，更新 {}（路径 {}）",
-                    update.added,
-                    update.updated,
+                    "书源库：新增 {}，更新 {}（路径 {}）",
+                    counts.added,
+                    counts.updated,
                     registry_path.display()
                 ),
                 format!(
@@ -606,13 +664,6 @@ fn render_import_report(
             lines.join("\n") + "\n"
         }
     }
-}
-
-/// 读注册表的当前总条数（失败时返回 0——它是诊断信息，不该让导入失败）。
-fn registry_len_at(path: &Path) -> usize {
-    SourceRegistry::load(path)
-        .map(|registry| registry.len())
-        .unwrap_or(0)
 }
 
 /// 渲染搜索成功结果。

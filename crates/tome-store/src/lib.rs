@@ -53,11 +53,13 @@ pub mod host;
 pub mod image_cache;
 pub mod pack;
 pub mod schema;
+pub mod source_store;
 
 pub use datadir::DataDir;
 pub use db::Db;
 pub use error::StoreError;
 pub use host::SqliteStoreHost;
+pub use source_store::SourceStore;
 
 /// 当前 Unix 时间戳（秒）。
 ///

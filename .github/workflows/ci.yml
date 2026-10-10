@@ -131,7 +131,7 @@ jobs:
           forbidden="winit|wgpu|glutin|glfw|sdl2|^gtk|gtk-sys|cocoa|^objc|tao|egui|iced|slint|fltk|minifb|pixels|softbuffer|raw-window-handle"
 
           failed=0
-          for crate in tome-core tome-rule tome-js tome-net tome-store tome-source tome-local tome-cli; do
+          for crate in tome-core tome-rule tome-js tome-net tome-store tome-source tome-local; do
             echo "--- $crate 的传递依赖 ---"
             # `--edges normal` 排除 dev/build 依赖：它们不参与生产构建
             tree=$(cargo tree -p "$crate" --edges normal --prefix none --no-dedupe 2>/dev/null               | sed 's/ (\*)$//' | awk '{print $1}' | sort -u)
@@ -144,6 +144,20 @@ jobs:
               echo "无图形栈"
             fi
           done
+
+          # tome-cli 是组合根：render feature **默认开启**时装配 tome-reader（含 wgpu），
+          # 这是 T032 裁决的合法形态；其无头保证由 headless 形态（--no-default-features）
+          # 承载（FR-036 的语义是「引擎与 CLI 可无图形环境完整运行」，对应 feature-off
+          # 构建），故对 tome-cli 检查其 headless 形态的传递闭包。
+          echo "--- tome-cli（--no-default-features，headless 形态）的传递依赖 ---"
+          tree=$(cargo tree -p tome-cli --no-default-features --edges normal --prefix none --no-dedupe 2>/dev/null             | sed 's/ (\*)$//' | awk '{print $1}' | sort -u)
+          hits=$(echo "$tree" | grep -E "$forbidden" || true)
+          if [ -n "$hits" ]; then
+            echo "::error::tome-cli headless 形态的传递依赖里出现图形栈：$hits"
+            failed=1
+          else
+            echo "无图形栈"
+          fi
 
           if [ "$failed" -ne 0 ]; then
             echo "::error::引擎依赖图包含图形栈（FR-036 / SC-011）"

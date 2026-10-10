@@ -20,10 +20,9 @@ tome-local = { workspace = true }
 # `render` feature 经 `reader-render` 透传（见文件尾的 `[features]`）：
 # 关掉它时 `tome-reader` 的渲染面在**编译期**消失，于是 `render` 子命令
 # 以能力错误 + 退出码 3 回应（contracts/cli.md §2.3、tasks.md 002 T032）。
-# 注意：不写 `default-features = false`——workspace 依赖项未声明
-# default-features，cargo 会忽略该覆盖（实测警告："default-features is ignored"）。
-# headless 构建走 `--no-default-features`（它同时关掉本 crate 的 reader-render），
-# 效果相同且无歧义。
+# 关键形态：tome-reader 的 `default-features = false` 声明在**根 Cargo.toml 的
+# [workspace.dependencies] 表**——写在成员使用点会被 cargo 忽略（2026-10-11
+# CI 依赖图断言实测抓出：headless 构建闭包仍含 wgpu）。
 tome-reader = { workspace = true }
 
 # CLI 输出是 JSON（contracts/cli.md：默认 `--format json`），

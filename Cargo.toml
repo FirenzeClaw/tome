@@ -30,7 +30,7 @@ tome-js = { path = "crates/tome-js" }
 tome-rule = { path = "crates/tome-rule" }
 tome-source = { path = "crates/tome-source" }
 tome-local = { path = "crates/tome-local" }
-tome-reader = { path = "crates/tome-reader" }
+tome-reader = { path = "crates/tome-reader", default-features = false }
 tome-cli = { path = "crates/tome-cli" }
 
 [profile.release]

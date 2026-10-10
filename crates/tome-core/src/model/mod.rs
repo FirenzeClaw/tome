@@ -25,12 +25,14 @@
 //! | [`trace`] | `ReadProgress` / `Bookmark` / `Highlight` / `Memo` / `ReadRecord` |
 //! | [`asset`] | `Cookie` / `ImageCacheRef` |
 //! | [`auxiliary`] | `ChapterCacheEntry` / `HttpLogEntry` / `SearchKeyword` |
+//! | [`theme`] | `Theme`（设计 token 纯值类型，零图形依赖；OQ#11→D） |
 
 mod asset;
 mod auxiliary;
 mod book;
 mod rule;
 mod source;
+pub mod theme;
 mod trace;
 
 pub use asset::{Cookie, ImageCacheRef};
@@ -38,4 +40,9 @@ pub use auxiliary::{ChapterCacheEntry, HttpLogEntry, SearchKeyword};
 pub use book::{Book, BookOrigin, Chapter, LibraryRoot};
 pub use rule::{DictRule, HighlightRule, ReplaceRule, RuleScope, RuleTier, TxtTocRule};
 pub use source::{Source, SourceGroup, SourceKind};
+pub use theme::{
+    Color, DayTheme, FontRole, FontStack, Fonts, Motion, NightTheme, Palette, Radii,
+    ReadingMetrics, ReadingToolbar, Rgba, Shadow, Shadows, ShellDims, SpacingScale, Swatches,
+    Texture, Theme, TypeScale, TypeStep, Weight,
+};
 pub use trace::{Bookmark, Highlight, Memo, ReadProgress, ReadRecord};

@@ -395,4 +395,33 @@ mod independent_checks {
         let values = evaluate(&doc, "//b | //a | //a").expect("应求值成功");
         assert_eq!(values, vec!["1", "2"], "去重 + 文档序（a 在 b 前）");
     }
+
+    /// 病态嵌套输入不得让引擎崩溃（AGENTS.md 生产级护栏）。
+    ///
+    /// # 为什么这个测试在**公开入口**而不在解析器里
+    ///
+    /// 解析器里已有一条 200 层的测试（`深层嵌套超过上界时报深度错误`），
+    /// 但那测的是"解析器会报错"。真正的风险在**生产路径的端到端行为**：
+    /// 书源规则是第三方输入，一条深层嵌套的畸形规则若能让引擎栈溢出，
+    /// 整个进程直接死（Rust 里栈溢出不可捕获）。
+    ///
+    /// 故这里从 `evaluate` 走，且深度取到 10 万——远超任何合理规则，
+    /// 足以把"递归深度由输入决定"这一风险实际触发出来。
+    #[test]
+    fn 病态深嵌套不崩溃且报结构化错误() {
+        let doc = crate::dom::Document::parse_html("<a>x</a>");
+        for depth in [100usize, 1_000, 10_000, 100_000] {
+            // `[a[a[a[...]]]]`：每层都进一次谓词递归
+            let expression = format!("{}x{}", "/a[".repeat(depth), "]".repeat(depth));
+            let error =
+                evaluate(&doc, &expression).expect_err(&format!("{depth} 层应超上界而非成功"));
+            let rendered = format!("{error}");
+            assert!(
+                rendered.contains("深度") || rendered.contains("上界"),
+                "{depth} 层应给出深度上界错误，实际：{rendered}"
+            );
+        }
+        // 上界之内的正常表达式仍要能跑（护栏不该误伤）
+        assert_eq!(evaluate(&doc, "//a").expect("应求值成功"), vec!["x"]);
+    }
 }

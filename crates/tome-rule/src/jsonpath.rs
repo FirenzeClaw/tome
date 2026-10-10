@@ -436,4 +436,44 @@ mod tests {
         got.sort();
         assert_eq!(got, vec!["1", "2"]);
     }
+
+    /// 病态输入不得让引擎崩溃（AGENTS.md 生产级护栏）。
+    ///
+    /// # 这个测试防的是什么
+    ///
+    /// 书源规则与接口响应都是**不可信输入**。两类病态形态：
+    ///
+    /// | 形态 | 风险 | 本实现的落点 |
+    /// |---|---|---|
+    /// | 极深嵌套的 JSON | 解析器递归爆栈 | `serde_json` 自带的递归上界 |
+    /// | 极长的路径表达式 | 解析器或求值器爆栈/超时 | shim 是**迭代**扫描（无递归） |
+    ///
+    /// 断言"不 panic 且给出结构化结果"——Rust 里栈溢出不可捕获，所以
+    /// 一旦爆栈整个进程直接死，这是必须守住的一条线。
+    #[test]
+    fn 病态输入不崩溃() {
+        // 极深 JSON：应报错而不是爆栈
+        for depth in [1_000usize, 10_000] {
+            let json = format!("{}{}", "[".repeat(depth), "]".repeat(depth));
+            let outcome = evaluate(&json, "$");
+            assert!(
+                outcome.is_err(),
+                "{depth} 层嵌套的 JSON 应报错（serde_json 的递归上界）而不是静默成功"
+            );
+        }
+
+        // 极长路径：shim 与引擎都应能处理（不递归）
+        for length in [1_000usize, 20_000] {
+            let expression = format!("${}", ".a".repeat(length));
+            // 对 `{"a":1}` 求值应给出空结果（路径太深匹配不到），而不是崩溃
+            let outcome = evaluate(r#"{"a":1}"#, &expression);
+            assert!(outcome.is_ok(), "{length} 段的路径不该崩：{outcome:?}");
+        }
+
+        // 浅层照常工作（护栏不该误伤）
+        assert_eq!(
+            evaluate(r#"{"a":"b"}"#, "$.a").expect("应求值成功"),
+            vec!["b"]
+        );
+    }
 }

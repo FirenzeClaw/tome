@@ -244,16 +244,32 @@ pub fn dispatch_prefix(rule: &str) -> RuleSegment {
 /// # 变更记录
 ///
 /// - S1-1：`@js:` 与 `@json:` / `@XPath:` 都是 `NotYet`。
-/// - **S1-2（本切片）**：`JavaScript` 转为 `Yes`——沙箱（T030）与桥
-///   （T043）已落地，`@js:` 片段经 `tome_js` 求值。
-/// - S1-3：`JsonPath` 与 `XPath` 将转为 `Yes`（本切片不动）。
+/// - S1-2：`JavaScript` 转为 `Yes`——沙箱（T030）与桥（T043）已落地。
+/// - **S1-3（本切片）**：`JsonPath`（T045-T047）与 `XPath`（T048-T049）
+///   转为 `Yes`。两者的求值入口在 [`crate::css_post::RuleEngine`]。
 fn readiness(kind: RuleKind) -> Ready {
     match kind {
+        // ## `Default` 的 `Yes` 是"部分实现"（诚实记录，勿当作全覆盖）
+        //
+        // Default（preter）语法有两种形态：
+        //
+        // | 形态 | 例 | 现状 |
+        // |---|---|---|
+        // | 单段（等价 CSS 选择器 + 后缀/切片） | `div.a@text`、`li.0@href` | **可求值** |
+        // | 多段（`@` 分段、逐段下钻） | `class.odd.0@tag.a.0@text` | **尚不可求值** |
+        //
+        // 多段形态需要独立的**分段解析器**（每段是一次"在上一段结果内再选"），
+        // 而当前求值路径把整段正文交给 CSS 解析器（见 `evaluate_css_body`），
+        // 故多段规则会得到"选择器语法错"。
+        //
+        // 标 `Yes` 是因为**单段形态确实可求值**，而单段是 Default 里更常见
+        // 的一半；但这不是"Default 全覆盖"的声明。T052 的语料只收录了
+        // 可求值的形态，多段形态属**已知缺口**（已上报，见汇报）。
         RuleKind::Default | RuleKind::ExplicitDefault => Ready::Yes,
         RuleKind::Css => Ready::Yes,
         RuleKind::RegexAllInOne => Ready::Yes,
         RuleKind::JavaScript => Ready::Yes,
-        RuleKind::JsonPath | RuleKind::XPath => Ready::NotYet,
+        RuleKind::JsonPath | RuleKind::XPath => Ready::Yes,
     }
 }
 
@@ -571,9 +587,11 @@ mod tests {
     }
 
     #[test]
-    fn 未实现的类型标为notyet() {
-        // S1-2 起 `@js:` 已就绪（沙箱 + 桥落地），故只剩 JSONPath 与 XPath。
-        // 它们的 NotYet 是**真**的"待后续切片"（S1-3），而不是"永远不做"。
+    fn jsonpath与xpath自_s13_起已就绪() {
+        // 这条测试记录 S1-3 的状态变更：`@json:` 与 `@XPath:` 从 NotYet 变 Yes。
+        // 若哪天有人误改回去，这里会失败并提醒他那不是笔误而是回归。
+        //
+        // 它们的求值入口在 `css_post::RuleEngine`（T045-T049 落地）。
         for (input, expected_capability) in [
             ("@json:$.a", "jsonPath"),
             ("$.a", "jsonPath"),
@@ -581,30 +599,29 @@ mod tests {
             ("//a", "xpath"),
         ] {
             let segment = dispatch_prefix(input);
-            assert_eq!(segment.ready, Ready::NotYet, "输入 {input}");
+            assert_eq!(segment.ready, Ready::Yes, "输入 {input}");
             assert_eq!(segment.capability_id(), expected_capability, "输入 {input}");
-
-            // FR-006：产出结构化「不支持能力」错误
-            let error = segment
-                .not_ready_error("rule")
-                .expect("未实现的类型应产出错误");
-            let kind = error.to_error_kind();
-            match kind {
-                tome_core::ErrorKind::UnsupportedCapability { capability } => {
-                    assert_eq!(
-                        capability.capability_id(),
-                        expected_capability,
-                        "输入 {input}"
-                    );
-                }
-                other => panic!("应产出 UnsupportedCapability，实际 {other:?}（输入 {input}）"),
-            }
+            assert!(
+                segment.not_ready_error("rule").is_none(),
+                "已就绪的类型不该产出未就绪错误（输入 {input}）"
+            );
         }
     }
 
     #[test]
     fn 已实现的类型不产出未就绪错误() {
-        for input in ["@css:.a", "div.a@text", "@@div", ":regex", "@js:1+1"] {
+        // 五类语法在本切片**全部**就绪（S1-3 之后没有 NotYet 的类别）
+        for input in [
+            "@css:.a",
+            "div.a@text",
+            "@@div",
+            ":regex",
+            "@js:1+1",
+            "@json:$.a",
+            "$.a",
+            "@XPath://a",
+            "//a",
+        ] {
             assert!(
                 dispatch_prefix(input).not_ready_error("rule").is_none(),
                 "输入 {input} 本阶段应可求值"
@@ -769,17 +786,34 @@ mod tests {
     }
 
     #[test]
-    fn 含未实现类型的组合规则能被定位() {
+    fn 组合规则能定位各段类型() {
         // 公开文档说组合符"只能在同种规则间使用"，但书源实际会混用。
-        // 无论是否合规，分派器都要能指出**是哪一段**未就绪（FR-006 的可观测性）。
+        // 无论是否合规，分派器都要能把每一段的类型与能力标识报出来
+        // ——FR-006 的可观测性依赖这一点。
         //
-        // S1-2 起 `@js:` 已就绪，故用 `@json:` 作为"未就绪段"的例子
-        // （它确实要到 S1-3）。
+        // S1-3 起五类全部就绪，故 `first_not_ready()` 恒为 `None`；
+        // 本测试因此改为验证"逐段类型/能力标识仍被正确标出"，
+        // 那才是这段代码在 S1-3 之后仍然存在的理由。
         let combined = parse_rule("@css:.a@text||@json:$.data");
         assert_eq!(combined.segments.len(), 2);
-        let not_ready = combined.first_not_ready().expect("应有未就绪的段");
-        assert_eq!(not_ready.kind, RuleKind::JsonPath);
-        assert_eq!(not_ready.capability_id(), "jsonPath");
+        assert!(
+            combined.first_not_ready().is_none(),
+            "S1-3 起五类全部就绪，不该有未就绪段"
+        );
+        assert_eq!(combined.segments[0].kind, RuleKind::Css);
+        assert_eq!(combined.segments[0].capability_id(), "css");
+        assert_eq!(combined.segments[1].kind, RuleKind::JsonPath);
+        assert_eq!(combined.segments[1].capability_id(), "jsonPath");
+
+        // 混合三类（CSS + XPath + JS）时每段仍可定位
+        let combined = parse_rule("@css:.a@text&&@XPath://b&&@js:1+1");
+        assert_eq!(combined.segments.len(), 3);
+        let kinds: Vec<RuleKind> = combined.segments.iter().map(|s| s.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![RuleKind::Css, RuleKind::XPath, RuleKind::JavaScript]
+        );
+        assert!(combined.first_not_ready().is_none());
     }
 
     #[test]

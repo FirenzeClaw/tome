@@ -224,40 +224,68 @@ fn 组合符在真实页面上生效() {
 }
 
 #[test]
-fn 分派器对含未实现类型的真实规则给出结构化错误() {
-    // 公开文档"书源三"大量使用 JSONPath；S1-1 阶段这类规则必须**明确报告**
-    // 未就绪而不是产出空结果（FR-006）。
-    let combined = parse_rule("@json:$.data.list[*]");
-    let not_ready = combined.first_not_ready().expect("JSONPath 应标为未就绪");
-    let error = not_ready
-        .not_ready_error("search")
-        .expect("应产出结构化错误");
+fn 分派器对五类规则都已就绪() {
+    // 这条测试记录 S1-3 的状态变更。S1-1 时它断言的是"JSONPath/XPath
+    // 必须明确报告未就绪"——那时它们的引擎还不存在。现在五类全部落地，
+    // 断言随之改为"不再有未就绪的类别"。
+    //
+    // 保留这条测试（而不是删掉）的理由：它是"五类规则都已可求值"这一
+    // 结论的唯一断言点。若哪天有人把某类改回 NotYet，这里会失败。
+    for rule in [
+        "@json:$.data.list[*]",
+        "@XPath://div/a",
+        "@js:1+1",
+        "@css:.a@text",
+        "div.a@text",
+    ] {
+        let combined = parse_rule(rule);
+        assert!(
+            combined.first_not_ready().is_none(),
+            "规则 {rule} 在 S1-3 之后应已就绪"
+        );
+    }
+}
+
+#[test]
+fn 未注入_js_引擎时_js_规则报结构化能力错误() {
+    // FR-006：`@js:` 的"能力缺失"必须是**结构化**错误，而不是空结果或
+    // "把 1+1 当 CSS 选择器解析"后报的无关语法错。书源的 try/catch
+    // 降级逻辑完全依赖这个标识。
+    //
+    // 注意这里用 `RuleEngine`（不带 JS）而不是旧的 `evaluate_rule`：
+    // 后者只支持 CSS/Default 两类，对任何其它类型都报能力错误——
+    // 那在 S1-3 之后不再代表真实行为（`@json:`/`@XPath:` 已能求值）。
+    let document = Document::parse_html("<p>x</p>");
+    let engine = tome_rule::css_post::RuleEngine::new(&document);
+    assert!(!engine.has_js());
+
+    let error = engine
+        .evaluate("@js:java.ajax('x')")
+        .expect_err("无 JS 引擎时应报错");
     match error.to_error_kind() {
         ErrorKind::UnsupportedCapability { capability } => {
-            assert_eq!(capability.capability_id(), "jsonPath");
+            assert_eq!(capability.capability_id(), "js");
         }
         other => panic!("应产出 UnsupportedCapability，实际 {other:?}"),
     }
+}
 
-    // 同一规则走 evaluate_rule 也应报同一种错误，而不是"把 $.data 当 CSS 解析"
-    // 后报一个无关的语法错
+#[test]
+fn 旧入口对非_css_类型仍报能力错误() {
+    // `css_post::evaluate_rule` 的文档明确说它**只接受 CSS 与 Default 两类**，
+    // 其余类型报结构化能力错误（FR-006）——而不是把 `$.a` 当 CSS 选择器
+    // 去解析后报一个无关的语法错。
+    //
+    // 需要五类全支持的调用方用 `RuleEngine`。这条测试钉住那个分工。
     let document = Document::parse_html("<p>x</p>");
-    let error = evaluate_rule(&document, "@json:$.data.list[*]").expect_err("应报错");
-    assert!(matches!(
-        error.to_error_kind(),
-        ErrorKind::UnsupportedCapability { .. }
-    ));
-
-    // XPath 与 JS 同理
-    for rule in ["@XPath://div/a", "@js:java.ajax('x')"] {
-        let document = Document::parse_html("<p>x</p>");
+    for rule in ["@json:$.data", "@XPath://div/a", "@js:1+1"] {
         let error = evaluate_rule(&document, rule).expect_err("应报错");
         assert!(
             matches!(
                 error.to_error_kind(),
                 ErrorKind::UnsupportedCapability { .. }
             ),
-            "规则 {rule} 应产出 UnsupportedCapability"
+            "规则 {rule} 在 CSS 专用入口应产出 UnsupportedCapability"
         );
     }
 }

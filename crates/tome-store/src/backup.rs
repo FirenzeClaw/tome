@@ -987,9 +987,10 @@ impl BackupStore {
         }
 
         // --- 库根（先落：本地书的 library_root_id 指向它们）---
+        // added_at 保留备份值（对称往返，FR-033；重新生成会跨秒不等）
         let mut root_ids: Vec<i64> = Vec::new();
         for root in &backup.library_roots {
-            root_ids.push(book_dao.add_library_root(&root.path)?);
+            root_ids.push(book_dao.add_library_root_at(&root.path, root.added_at)?);
             stats.library_roots += 1;
         }
         let library_root_id = root_ids.first().copied();

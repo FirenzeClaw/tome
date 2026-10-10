@@ -446,14 +446,21 @@ impl BookDao {
     /// 路径已存在时返回**已有**的主键——同一目录添加两次是用户误操作，
     /// 不该产生两条记录（否则扫描会做两遍、书目会重复）。
     pub fn add_library_root(&self, path: &str) -> Result<i64, StoreError> {
+        self.add_library_root_at(path, self.now)
+    }
+
+    /// 备份导入用：保留备份里的 `added_at` 而非重新打时间戳。
+    ///
+    /// FR-033 的对称往返要求「导出→清空→导入→再导出」逐字段一致——若导入时
+    /// 重新生成 added_at，跨秒边界会让两次导出不一致（CI 慢机上实测变红）。
+    pub fn add_library_root_at(&self, path: &str, added_at: i64) -> Result<i64, StoreError> {
         let path = path.to_string();
-        let now = self.now;
         self.db.write(move |connection| {
             connection
                 .execute(
                     "INSERT INTO library_root(path, added_at) VALUES (?1, ?2)
                      ON CONFLICT(path) DO NOTHING",
-                    rusqlite::params![path, now],
+                    rusqlite::params![path, added_at],
                 )
                 .map_err(sql)?;
             connection
@@ -795,6 +802,25 @@ mod tests {
             .expect("应能重复添加");
         assert_eq!(first, second, "同一目录添加两次应是同一条记录");
         assert_eq!(fixture.dao.library_roots().expect("应能查").len(), 1);
+    }
+
+    /// FR-033 对称往返的回归测试（CI 红于 2026-10-10，windows-gnu runner）：
+    /// 备份导入必须保留备份里的 added_at。fixture 的 now 钉在 1700000000，
+    /// 而此处显式传入另一个值——若导入路径改回「重新打时间戳」，本测试立刻红，
+    /// 不依赖「恰好跨秒」的运气。
+    #[test]
+    fn 库根导入保留备份时间戳() {
+        let fixture = fixture("roots-at");
+        fixture
+            .dao
+            .add_library_root_at("/books", 1_500_000_000)
+            .expect("应能按指定时间戳添加");
+        let roots = fixture.dao.library_roots().expect("应能查");
+        assert_eq!(roots.len(), 1);
+        assert_eq!(
+            roots[0].added_at, 1_500_000_000,
+            "added_at 应为传入值而非 now（1700000000）"
+        );
     }
 
     #[test]

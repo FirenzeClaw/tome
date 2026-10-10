@@ -51,7 +51,7 @@ pub struct CommandOutcome {
 
 impl CommandOutcome {
     /// 成功且带标准输出。
-    fn with_stdout(stdout: String) -> Self {
+    pub fn with_stdout(stdout: String) -> Self {
         Self {
             exit_code: 0,
             stdout,
@@ -60,7 +60,7 @@ impl CommandOutcome {
     }
 
     /// 失败：按错误分类决定退出码。
-    fn failure(kind: &ErrorKind, message: &str) -> Self {
+    pub fn failure(kind: &ErrorKind, message: &str) -> Self {
         Self {
             exit_code: exit_code_for(kind),
             stdout: String::new(),
@@ -181,6 +181,33 @@ pub fn run_with_js(
             action,
             input,
         } => run_action(options, source_id, action, input.as_deref(), host, hosts),
+        Command::Info {
+            source_id,
+            book_url,
+        } => crate::pipeline_commands::run_info(options, source_id, book_url, host, hosts),
+        Command::Toc {
+            source_id,
+            book_url,
+        } => crate::pipeline_commands::run_toc(options, source_id, book_url, host, hosts),
+        Command::Content {
+            source_id,
+            chapter_url,
+            no_purify,
+        } => crate::pipeline_commands::run_content(
+            options,
+            source_id,
+            chapter_url,
+            *no_purify,
+            host,
+            hosts,
+        ),
+        Command::SourceList {
+            group,
+            enabled_only,
+        } => crate::pipeline_commands::run_source_list(options, group.as_deref(), *enabled_only),
+        Command::SourceCheck { source_id, all } => {
+            crate::pipeline_commands::run_source_check(options, source_id.as_deref(), *all, host)
+        }
         Command::Verify { corpus, report } => run_verify(corpus, report.as_deref()),
     }
 }
@@ -471,7 +498,9 @@ fn run_import(
 /// `--data-dir` 优先；没给时按 FR-042 自动判定（程序同级 `data/` 优先，
 /// 否则系统数据目录）。判定逻辑复用 `tome_store::datadir`，不在这里重写
 /// ——两处各写一份会让"可移植模式"的语义在两个地方漂移。
-fn open_source_store(options: &GlobalOptions) -> Result<tome_store::SourceStore, CommandOutcome> {
+pub(crate) fn open_source_store(
+    options: &GlobalOptions,
+) -> Result<tome_store::SourceStore, CommandOutcome> {
     let resolved = tome_store::DataDir::resolve_for_current_exe(options.data_dir.as_deref());
     let data_dir = match &resolved {
         tome_store::datadir::Resolved::Usable { .. } => {

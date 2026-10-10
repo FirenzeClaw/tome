@@ -112,6 +112,43 @@ pub enum Command {
         /// 动作的输入（`search` 时是关键词）
         input: Option<String>,
     },
+    /// `info <source-id> <book-url>`（`contracts/cli.md` 的详情动作）
+    Info {
+        /// 书源 id
+        source_id: String,
+        /// 书籍详情页地址
+        book_url: String,
+    },
+    /// `toc <source-id> <book-url>`（`contracts/cli.md` 的目录动作）
+    Toc {
+        /// 书源 id
+        source_id: String,
+        /// 书籍详情页地址（目录地址从详情页取）
+        book_url: String,
+    },
+    /// `content <source-id> <chapter-url>`（`contracts/cli.md` 的正文动作）
+    Content {
+        /// 书源 id
+        source_id: String,
+        /// 章节地址
+        chapter_url: String,
+        /// 是否跳过净化（`--no-purify`）
+        no_purify: bool,
+    },
+    /// `source list [--group <g>] [--enabled]`
+    SourceList {
+        /// 限定分组名
+        group: Option<String>,
+        /// 只列启用的
+        enabled_only: bool,
+    },
+    /// `source check <id|--all>`
+    SourceCheck {
+        /// 单个源 id；`None` 且 `all` 为真时检查全部
+        source_id: Option<String>,
+        /// 是否检查全部启用的源
+        all: bool,
+    },
     /// `verify --corpus <dir> [--report <file>]`（`contracts/cli.md`）
     ///
     /// 跑合成语料差分：逐条比对引擎输出与期望，输出一致率与逐条 diff。
@@ -168,6 +205,10 @@ pub fn parse(args: &[String]) -> ParseOutcome {
     let mut input: Option<String> = None;
     let mut corpus: Option<PathBuf> = None;
     let mut report: Option<PathBuf> = None;
+    let mut group: Option<String> = None;
+    let mut enabled_only = false;
+    let mut check_all = false;
+    let mut no_purify = false;
 
     // ## 迭代协议：每个分支返回"消费了几个参数"，循环统一推进
     //
@@ -233,6 +274,32 @@ pub fn parse(args: &[String]) -> ParseOutcome {
             }
             "--stdin" => {
                 stdin = true;
+                1
+            }
+            // `source list --group <名>`：按**分组名**过滤（不是 id）
+            //
+            // 用名而非 id：用户看到的是分组名，而 id 是数据库分配的、
+            // 用户看不到。让人从界面上抄一个 id 来过滤是别扭的。
+            "--group" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => return ParseOutcome::Usage("--group 需要一个分组名".to_string()),
+                };
+                group = Some(value.clone());
+                2
+            }
+            "--enabled" => {
+                enabled_only = true;
+                1
+            }
+            // `source check --all`：检查全部启用的源
+            "--all" => {
+                check_all = true;
+                1
+            }
+            // `content --no-purify`：看原始正文（调试净化规则用）
+            "--no-purify" => {
+                no_purify = true;
                 1
             }
             "--action" => {
@@ -311,7 +378,10 @@ pub fn parse(args: &[String]) -> ParseOutcome {
 
     // 命令
     let Some(subcommand) = positionals.first().map(String::as_str) else {
-        return ParseOutcome::Usage("缺少子命令（可用：source import / search）".to_string());
+        return ParseOutcome::Usage(
+            "缺少子命令（可用：source import|list|check / search / info / toc / content / run / verify）"
+                .to_string(),
+        );
     };
 
     let rest = &positionals[1..];
@@ -326,8 +396,20 @@ pub fn parse(args: &[String]) -> ParseOutcome {
                     url,
                     stdin,
                 },
+                // `source list [--group <g>] [--enabled]`
+                "list" => Command::SourceList {
+                    group: group.clone(),
+                    enabled_only,
+                },
+                // `source check <id|--all>`
+                "check" => Command::SourceCheck {
+                    source_id: rest.get(1).cloned(),
+                    all: check_all,
+                },
                 other => {
-                    return ParseOutcome::Usage(format!("未知的 source 动作 `{other}`"));
+                    return ParseOutcome::Usage(format!(
+                        "未知的 source 动作 `{other}`（可用：import / list / check）"
+                    ));
                 }
             }
         }
@@ -391,6 +473,37 @@ pub fn parse(args: &[String]) -> ParseOutcome {
                 input,
             }
         }
+        // `info <source-id> <book-url>`
+        "info" => {
+            let (Some(source_id), Some(book_url)) = (rest.first(), rest.get(1)) else {
+                return ParseOutcome::Usage("info 需要 <source-id> <book-url>".to_string());
+            };
+            Command::Info {
+                source_id: source_id.clone(),
+                book_url: book_url.clone(),
+            }
+        }
+        // `toc <source-id> <book-url>`
+        "toc" => {
+            let (Some(source_id), Some(book_url)) = (rest.first(), rest.get(1)) else {
+                return ParseOutcome::Usage("toc 需要 <source-id> <book-url>".to_string());
+            };
+            Command::Toc {
+                source_id: source_id.clone(),
+                book_url: book_url.clone(),
+            }
+        }
+        // `content <source-id> <chapter-url> [--no-purify]`
+        "content" => {
+            let (Some(source_id), Some(chapter_url)) = (rest.first(), rest.get(1)) else {
+                return ParseOutcome::Usage("content 需要 <source-id> <chapter-url>".to_string());
+            };
+            Command::Content {
+                source_id: source_id.clone(),
+                chapter_url: chapter_url.clone(),
+                no_purify,
+            }
+        }
         "verify" => {
             // `verify` 需要 `--corpus <dir>`（`contracts/cli.md` 的唯一形态；
             // `--real-sources`/`--golden` 形态属 S1-6 的真实基线，本阶段不做）
@@ -403,7 +516,7 @@ pub fn parse(args: &[String]) -> ParseOutcome {
         }
         other => {
             return ParseOutcome::Usage(format!(
-                "未知子命令 `{other}`（已实现 source import / search / run / verify）"
+                "未知子命令 `{other}`（已实现 source import|list|check / search / info / toc / content / run / verify）"
             ));
         }
     };
@@ -447,8 +560,13 @@ pub fn help_text() -> String {
         "",
         "用法：",
         "  tome source import <file> [--url <u>] [--stdin]   导入书源（三渠道）",
+        "  tome source list [--group <g>] [--enabled]        列出书源（可按分组/启用过滤）",
+        "  tome source check <id|--all>                       源可用性检查",
         "  tome search <source-id> <keyword>                  按书源搜索",
         "  tome search --source-file <f> <keyword>            用临时书源文件搜索",
+        "  tome info <source-id> <book-url>                   书籍详情",
+        "  tome toc <source-id> <book-url>                    目录",
+        "  tome content <source-id> <chapter-url>             章节正文（净化后）",
         "  tome run <source-id> --action <a> [--input <s>]     通用执行（--action search）",
         "  tome verify --corpus <dir> [--report <file>]       跑合成语料差分（SC-002a）",
         "",
@@ -564,8 +682,121 @@ mod tests {
 
     #[test]
     fn 未知_source_动作报用法错() {
-        let text = parse_usage(&["source", "list"]);
-        assert!(text.contains("list"), "{text}");
+        // 用一个**确实不存在**的动作（`list`/`check` 在 T063-T075 已实现）
+        let text = parse_usage(&["source", "不存在的动作"]);
+        assert!(text.contains("不存在的动作"), "{text}");
+        assert!(text.contains("import"), "应列出可用动作：{text}");
+    }
+
+    // ---------- 完整管线的命令（T065-T072 接线） ----------
+
+    #[test]
+    fn info_需要两个位置参数() {
+        let (_, command) = parse_ok(&["info", "https://a.com", "https://a.com/b/1"]);
+        match command {
+            Command::Info {
+                source_id,
+                book_url,
+            } => {
+                assert_eq!(source_id, "https://a.com");
+                assert_eq!(book_url, "https://a.com/b/1");
+            }
+            other => panic!("应是 Info：{other:?}"),
+        }
+    }
+
+    #[test]
+    fn info_缺参数报用法错() {
+        let text = parse_usage(&["info", "https://a.com"]);
+        assert!(text.contains("book-url"), "{text}");
+    }
+
+    #[test]
+    fn toc_需要两个位置参数() {
+        let (_, command) = parse_ok(&["toc", "https://a.com", "https://a.com/b/1"]);
+        assert!(matches!(command, Command::Toc { .. }));
+        let text = parse_usage(&["toc", "https://a.com"]);
+        assert!(text.contains("book-url"), "{text}");
+    }
+
+    #[test]
+    fn content_支持_no_purify() {
+        let (_, command) = parse_ok(&["content", "https://a.com", "https://a.com/c/1"]);
+        match command {
+            Command::Content { no_purify, .. } => assert!(!no_purify, "默认应净化"),
+            other => panic!("应是 Content：{other:?}"),
+        }
+
+        let (_, command) = parse_ok(&[
+            "content",
+            "https://a.com",
+            "https://a.com/c/1",
+            "--no-purify",
+        ]);
+        match command {
+            Command::Content { no_purify, .. } => assert!(no_purify),
+            other => panic!("应是 Content：{other:?}"),
+        }
+    }
+
+    #[test]
+    fn content_缺参数报用法错() {
+        let text = parse_usage(&["content", "https://a.com"]);
+        assert!(text.contains("chapter-url"), "{text}");
+    }
+
+    #[test]
+    fn source_list_支持分组与仅启用() {
+        let (_, command) = parse_ok(&["source", "list"]);
+        match command {
+            Command::SourceList {
+                group,
+                enabled_only,
+            } => {
+                assert_eq!(group, None);
+                assert!(!enabled_only);
+            }
+            other => panic!("应是 SourceList：{other:?}"),
+        }
+
+        let (_, command) = parse_ok(&["source", "list", "--group", "玄幻", "--enabled"]);
+        match command {
+            Command::SourceList {
+                group,
+                enabled_only,
+            } => {
+                assert_eq!(group.as_deref(), Some("玄幻"));
+                assert!(enabled_only);
+            }
+            other => panic!("应是 SourceList：{other:?}"),
+        }
+    }
+
+    #[test]
+    fn source_list_的_group_需要值() {
+        let text = parse_usage(&["source", "list", "--group"]);
+        assert!(text.contains("--group"), "{text}");
+    }
+
+    #[test]
+    fn source_check_支持单源与_all() {
+        let (_, command) = parse_ok(&["source", "check", "https://a.com"]);
+        match command {
+            Command::SourceCheck { source_id, all } => {
+                assert_eq!(source_id.as_deref(), Some("https://a.com"));
+                assert!(!all);
+            }
+            other => panic!("应是 SourceCheck：{other:?}"),
+        }
+
+        let (_, command) = parse_ok(&["source", "check", "--all"]);
+        match command {
+            Command::SourceCheck { source_id, all } => {
+                assert_eq!(source_id, None);
+                assert!(all);
+            }
+            other => panic!("应是 SourceCheck：{other:?}"),
+        }
     }
 
     #[test]

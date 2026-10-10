@@ -37,6 +37,7 @@
 pub mod commands;
 pub mod flags;
 pub mod js_host;
+pub mod pipeline_commands;
 pub mod root;
 
 pub use commands::{build_executor, run, CommandOutcome};

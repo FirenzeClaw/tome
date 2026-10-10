@@ -1,4 +1,4 @@
-//! [DONE] 组合根装配（tasks.md T063 / 架构决策 A1、A3）
+//! \[DONE] 组合根装配（tasks.md T063 / 架构决策 A1、A3）
 //!
 //! # 本模块做的事，以及为什么只能在这里做
 //!
@@ -437,7 +437,7 @@ fn peek_config_data_dir(config_override: Option<&Path>) -> Result<Option<PathBuf
 
 /// 便捷：解析网络模式为执行器的重放参数（转发给 `flags`）。
 ///
-/// 存在只是为了给 [`build_executor_from`] 一个可读的调用点，
+/// 存在只是为了给 `build_executor_from` 一个可读的调用点，
 /// 避免它在 `builder` 上堆三行 `if let`。
 pub fn executor_network_mode(mode: &NetworkMode) -> Option<(PathBuf, tome_net::ReplayMode)> {
     mode.to_executor_mode()

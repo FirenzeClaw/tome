@@ -1,4 +1,4 @@
-//! [DONE] XPath 1.0 内建函数与书源生态扩展函数（tasks.md T049）
+//! \[DONE] XPath 1.0 内建函数与书源生态扩展函数（tasks.md T049）
 //!
 //! # 依据来源
 //!
@@ -12,7 +12,7 @@
 //!
 //! # 自变量类型与元数
 //!
-//! 每个函数在 [`lookup`] 里声明**元数**并在此处逐条校验。规范对
+//! 每个函数在 `lookup` 里声明**元数**并在此处逐条校验。规范对
 //! 元数不符的处理是 "error"，本项目把它映射成
 //! [`XPathError::type_mismatch`]（`err:FORG0006` 一类的"wrong argument type"），
 //! 而不是让书源的 `try/catch` 看到一条笼统的语法错。
@@ -95,7 +95,7 @@ fn lookup(name: &str) -> Option<Arity> {
 
 /// 求值一次函数调用。
 ///
-/// [DONE] 函数调用的唯一入口。`evaluate` 是上层求值器的入口指针——
+/// \[DONE] 函数调用的唯一入口。`evaluate` 是上层求值器的入口指针——
 /// 传进来而不直接调 `eval::evaluate_expression`，是为了避免两个模块
 /// 互相 `use` 形成循环依赖。
 pub(super) fn call(

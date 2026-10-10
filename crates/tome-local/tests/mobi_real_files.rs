@@ -1,4 +1,4 @@
-//! [DONE] MOBI 真实文件验证（tasks.md T078-T081 / Phase 7 检查点）
+//! \[DONE] MOBI 真实文件验证（tasks.md T078-T081 / Phase 7 检查点）
 //!
 //! # 为什么这些断言必须跑在真实文件上
 //!

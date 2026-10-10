@@ -1,4 +1,4 @@
-//! [DONE] HUFF/CDIC 解压（tasks.md T079 / research R4 阶段二）
+//! \[DONE] HUFF/CDIC 解压（tasks.md T079 / research R4 阶段二）
 //!
 //! # 依据的公开规范（干净室）
 //!

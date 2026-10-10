@@ -1,4 +1,4 @@
-//! [DONE] 目录管线（tasks.md T066 / FR-002 第四类动作，SC-003）
+//! \[DONE] 目录管线（tasks.md T066 / FR-002 第四类动作，SC-003）
 //!
 //! # 动作的形状
 //!
@@ -155,7 +155,7 @@ pub fn parse_toc_with_js(
 
 /// 目录动作的完整执行（求值 → 抓取 → 解析）。
 ///
-/// [DONE] T066 的对外入口。
+/// \[DONE] T066 的对外入口。
 ///
 /// `book.toc_url` 为 `None` 时回落到 `book.origin_id` 里记录的详情页地址
 /// ——`origin_id` 的格式是 `书源id|详情页地址`（`data-model.md`）。

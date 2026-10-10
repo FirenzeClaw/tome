@@ -1,4 +1,4 @@
-//! [DONE] XPath 子集的错误类型
+//! \[DONE] XPath 子集的错误类型
 //!
 //! # 为什么在 [`crate::error::RuleError`] 之外再造一层
 //!

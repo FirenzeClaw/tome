@@ -1,4 +1,4 @@
-//! [DONE] CLI 命令实现（tasks.md T028/T029 / `contracts/cli.md`）
+//! \[DONE] CLI 命令实现（tasks.md T028/T029 / `contracts/cli.md`）
 //!
 //! # 组合根
 //!
@@ -71,7 +71,7 @@ impl CommandOutcome {
 
 /// 执行一条命令，产出（退出码, stdout, stderr）。
 ///
-/// [DONE] CLI 的对外入口。`stdin_reader` 为 `source import --stdin` 提供输入。
+/// \[DONE] CLI 的对外入口。`stdin_reader` 为 `source import --stdin` 提供输入。
 pub fn run(
     options: &GlobalOptions,
     command: &Command,
@@ -144,7 +144,7 @@ impl HostCapabilities {
 ///
 /// 含 JS 的书源需要把网络与存储交给 JS 引擎，而两者在 JS 侧都以
 /// `Arc<dyn Trait>` 持有。`&dyn NetHost` 借不出一个 `Arc`，故由组合根
-/// （`main.rs` 的 [`AppRoot`]）把能力以 `Arc` 形式传进来。
+/// （`main.rs` 的 `AppRoot`）把能力以 `Arc` 形式传进来。
 ///
 /// 不传时含 JS 的源会得到**结构化能力错误**（FR-006）——而不是
 /// "静默跑不起来"。那让"忘了传"这件事在第一次运行时就暴露。
@@ -1140,7 +1140,7 @@ pub fn failure_for(error: &SourceError) -> CommandOutcome {
 
 /// 从 [`NetworkMode`] 构造执行器（T029 的接线点）。
 ///
-/// [DONE] `--record`/`--replay`/`--offline` 落到执行器的唯一处。
+/// \[DONE] `--record`/`--replay`/`--offline` 落到执行器的唯一处。
 ///
 /// ## 为什么 `NetworkMode::Live` 也要显式走这里
 ///

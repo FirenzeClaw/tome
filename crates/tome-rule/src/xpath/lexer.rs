@@ -1,4 +1,4 @@
-//! [DONE] XPath 1.0 词法层：把表达式串切成 token 序列（tasks.md T048）
+//! \[DONE] XPath 1.0 词法层：把表达式串切成 token 序列（tasks.md T048）
 //!
 //! # 为什么要单独一层词法
 //!
@@ -143,7 +143,7 @@ pub struct SpannedToken {
 
 /// 把表达式切成记号序列。
 ///
-/// [DONE] 词法层的唯一入口。
+/// \[DONE] 词法层的唯一入口。
 ///
 /// 串首用 [`LexMode::StepStart`]：§3.7 的消歧规则说的是"**若存在前一个
 /// 记号**且它不是 `@`/`::`/`(`/`[`/`,`/运算符"。串首没有前一个记号，
@@ -418,7 +418,7 @@ fn is_xpath_whitespace(character: char) -> bool {
 
 /// 名字字符集（宽松多语言版本）。
 ///
-/// [UNCERTAIN] 依据来源与取舍：W3C XPath 1.0 §3.7 把名字定义为
+/// \[UNCERTAIN] 依据来源与取舍：W3C XPath 1.0 §3.7 把名字定义为
 /// `QName`（`Prefix ':' LocalPart` 或 `LocalPart`），故 `:` **属于**名字——
 /// 若把它排除在外，`svg:rect` 会被拆成 `svg`、`:`、`rect` 三个记号而无法
 /// 解析。真实的 `::`（轴分隔符）由词法层的双字符优先规则先吃掉，

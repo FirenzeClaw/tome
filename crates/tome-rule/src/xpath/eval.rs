@@ -1,4 +1,4 @@
-//! [DONE] XPath 1.0 子集求值器（tasks.md T049）
+//! \[DONE] XPath 1.0 子集求值器（tasks.md T049）
 //!
 //! # 求值的三条主线
 //!
@@ -43,7 +43,7 @@ const MAX_PREDICATE_STEPS: u64 = 5_000_000;
 ///
 /// - **变量绑定不支持**（书源规则没有给 XPath 传变量的机制，见 `parse.rs`）
 /// - **命名空间声明不支持**（HTML DOM 无前缀→URI 的声明表；
-///   [UNCERTAIN] 带前缀的名字测试按本地名匹配，见 [`matches_name_test`]）
+///   \[UNCERTAIN] 带前缀的名字测试按本地名匹配，见 [`matches_name_test`]）
 pub(super) struct Context<'a> {
     /// 上下文节点
     pub(super) node: NodeRef,
@@ -80,10 +80,10 @@ impl<'a> Context<'a> {
 
 /// 在文档上求值一条**已编译**的表达式。
 ///
-/// [DONE] 求值层的唯一入口。上下文节点是文档根（与 XPath 的"初始上下文"
+/// \[DONE] 求值层的唯一入口。上下文节点是文档根（与 XPath 的"初始上下文"
 /// 一致：绝对路径 `/` 在任何上下文里都指向根，而相对路径从根起走）。
 ///
-/// [UNCERTAIN] 规范没有规定 XPath 求值的**初始上下文节点**是什么——
+/// \[UNCERTAIN] 规范没有规定 XPath 求值的**初始上下文节点**是什么——
 /// 那是宿主语言的职责。本项目的选择是"根节点"，因为书源规则的 XPath
 /// 一律写成绝对路径（`//div[@class='x']`），从根起走是唯一有意义的解释。
 /// 若将来出现以相对路径书写的规则，这个选择需要复核。
@@ -98,7 +98,7 @@ pub fn evaluate_compiled(
 
 /// 在**子树**内求值一条已编译的表达式。
 ///
-/// [DONE] 与 [`crate::css_post::evaluate_rule_in`] 同款语义：求值起点从
+/// \[DONE] 与 [`crate::css_post::evaluate_rule_in`] 同款语义：求值起点从
 /// `root` 起，供搜索管线按 `bookList` 切出每本书的子树后逐字段求值。
 ///
 /// 绝对路径（`//x`）**仍从文档根**起走——这是 §2.5 的定义（`/` 指向根），
@@ -324,7 +324,7 @@ fn evaluate_step(
 ///
 /// 谓词仍然可用（`/div[1]/allText()` 的谓词在前一相解析，不在这里），
 /// 而形如 `/div/allText()[1]` 的谓词作用在**值序列**上——按位置筛选值。
-/// [UNCERTAIN] 值序列上的谓词是生态语法里没有明确定义的形态，
+/// \[UNCERTAIN] 值序列上的谓词是生态语法里没有明确定义的形态，
 /// 这里按"与节点序列同一套位置语义"处理，是最一致的选择。
 fn evaluate_extension_step(
     step: &super::ast::Step,
@@ -381,7 +381,7 @@ fn outer_html(node: &NodeRef) -> String {
 
 /// 从文本里抽出**第一个数字**（扩展节点测试 `num()`）。
 ///
-/// [UNCERTAIN] 依据来源与取舍：书源规则的公开语法约定把 `num` 列在"获取内容"
+/// \[UNCERTAIN] 依据来源与取舍：书源规则的公开语法约定把 `num` 列在"获取内容"
 /// 清单里，其用途是"从形如 `评分 8.9 分` 的文本里取 `8.9`"。规范原文没有
 /// 给出精确的抽取规则，故本实现取最窄的可行解释：扫描文本，取第一个
 /// 由"可选符号 + 数字/小数点"构成的最长连续片段。抽不到数字时返回 `NaN`
@@ -458,7 +458,7 @@ fn apply_predicate_to_values(
 /// 节点——这是 XPath 1.0 下最接近的解释（属性节点的"父"就是宿主元素）。
 /// 故 `@*[last()]` 能正确得到最后一个属性。
 ///
-/// [UNCERTAIN] 谓词里若写 `self::node()`，得到的是宿主元素而非属性节点。
+/// \[UNCERTAIN] 谓词里若写 `self::node()`，得到的是宿主元素而非属性节点。
 /// 这是"属性不是独立节点"这一取舍无法避免的后果，已在
 /// `mod.rs` 的「已知边界」里记录。
 fn evaluate_attribute_step(
@@ -586,7 +586,7 @@ fn filter_attributes_by_predicates(
 /// 因为这个原因，一相步的产出必须能携带"这是哪个属性"的信息，
 /// 见 [`NodeSet::attribute`]。
 ///
-/// [UNCERTAIN] 代价是无法表达"属性节点本身的节点同一性"，
+/// \[UNCERTAIN] 代价是无法表达"属性节点本身的节点同一性"，
 /// 即 `//a/@href | //a` 无法区分两类结果——见 `mod.rs` 的「已知边界」。
 fn axis_nodes(
     axis: Axis,
@@ -920,7 +920,7 @@ fn evaluate_binary(
 
 /// XPath 1.0 的比较结果。
 ///
-/// [UNCERTAIN] XPath 1.0 的比较是**三态**的（真/假/不可比，见 §3.4 的
+/// \[UNCERTAIN] XPath 1.0 的比较是**三态**的（真/假/不可比，见 §3.4 的
 /// "if both objects to be compared are ..."整段），而这里的 `bool` 把
 /// "不可比"与"假"合并了。对书源规则的实际影响：`@x > 3` 在 `x` 非数字时
 /// 得到 `false`（规范也是 `false`——规范说不可比时"the result is false"，

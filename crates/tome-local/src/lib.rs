@@ -24,7 +24,7 @@
 //! | [`split`] | 无目录时的按大小切分 | T076 / FR-020 |
 //! | [`txt`] | TXT 导入统领（编码 → 目录 → 切分） | T076 / FR-020 |
 //! | [`hash`] | 归一化内容哈希（`origin_id`） | T082 / FR-025 |
-//! | [`format`] | 格式识别（含 KFX/Topaz 显式拒绝） | T077-T081 |
+//! | `format` | 格式识别（含 KFX/Topaz 显式拒绝） | T077-T081 |
 //! | [`epub`] | EPUB 解析（zip + OPF/NCX） | T077 / FR-021 |
 //! | [`mobi`] | MOBI/AZW3 解析（分阶段） | T078-T081 / FR-022 |
 //! | [`library`] | 库根扫描与 `--copy` 导入 | T082 / FR-023~025 |
@@ -32,7 +32,7 @@
 //!
 //! ## 完成度
 //!
-//! [DONE] [`encoding`] [`toc_rule`] [`split`] [`txt`] [`hash`] [`format`]
+//! \[DONE] [`encoding`] [`toc_rule`] [`split`] [`txt`] [`hash`] `format`
 //! ——T076 与 T082 的身份层已落地。
 
 #![forbid(unsafe_code)]

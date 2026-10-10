@@ -1,4 +1,4 @@
-//! [DONE] 宿主函数桥：Rust ↔ JS 的调用约定（tasks.md T034）
+//! \[DONE] 宿主函数桥：Rust ↔ JS 的调用约定（tasks.md T034）
 //!
 //! # 这个模块解决三个具体问题
 //!
@@ -33,8 +33,8 @@
 //! - **不得在异步执行器线程上 block_on**：`tome-net` 已对此返回结构化错误
 //!   （`NetError::BlockingContext`），本模块只要把错误如实转成 JS 异常即可。
 //! - **不得重入**：宿主函数不得回头去 eval 新脚本（那会再借一次）。
-//!   需要执行外部脚本时（`java.import` 之类）走 [`HostBridge::eval_nested`]，
-//!   它用一个**独立的 runtime**，不重入当前引擎。
+//!   需要执行外部脚本时（`java.import` 之类）走 [`HostBridge::with_nested_runtime`]
+//!   提供的沙箱工厂，它起一个**独立的 runtime**，不重入当前引擎。
 //!
 //! ## 3. 宿主错误必须沿 JS 异常栈展开
 //!

@@ -1,4 +1,4 @@
-//! [DONE] 搜索管线：规则求值 → `RequestSpec` → `NetHost` 执行 → 结构化结果
+//! \[DONE] 搜索管线：规则求值 → `RequestSpec` → `NetHost` 执行 → 结构化结果
 //! （tasks.md T027 / FR-002）
 //!
 //! # A2 纯化：规则求值全程不发请求
@@ -47,7 +47,7 @@ pub struct SearchRequestPlan {
 
 /// 解析搜索 URL 模板中的占位符（`{{key}}` / `{{page}}`）。
 ///
-/// [DONE] A2 纯化的第一半：**不发请求**，可离线调用与断言。
+/// \[DONE] A2 纯化的第一半：**不发请求**，可离线调用与断言。
 ///
 /// # 编码规则
 ///
@@ -143,7 +143,7 @@ fn encode_query_component(value: &str) -> String {
 
 /// 构造搜索请求（**不发请求**，A2 纯化）。
 ///
-/// [DONE] 本模块的核心纯函数：书源 + 关键词 + 页码 → [`RequestSpec`]。
+/// \[DONE] 本模块的核心纯函数：书源 + 关键词 + 页码 → [`RequestSpec`]。
 ///
 /// ## 为什么它必须是纯函数（T027 验收项）
 ///
@@ -281,7 +281,7 @@ fn js_string_literal(value: &str) -> String {
 
 /// 搜索的单请求超时。
 ///
-/// [WORKAROUND] 取 15 秒而非 `RequestSpec::get` 的默认 30 秒：SC-001 要求
+/// \[WORKAROUND] 取 15 秒而非 `RequestSpec::get` 的默认 30 秒：SC-001 要求
 /// "正常网络下从触发到首个来源结果 ≤30s"，而多源搜索里超时是**串行阻塞**
 /// 的最坏来源。15 秒让"最坏情况下仍能给出首结果"有 15 秒的余量。
 /// 若实测发现某些站点普遍需要更久，应改为可配置项而非继续调整此常量。
@@ -460,7 +460,7 @@ impl SearchHit {
 
 /// 从响应 HTML 解析搜索结果（**不发请求**，A2 纯化）。
 ///
-/// [DONE] 本模块的第二个纯函数：HTML + 规则 → 结构化结果。
+/// \[DONE] 本模块的第二个纯函数：HTML + 规则 → 结构化结果。
 ///
 /// # 解析流程
 ///
@@ -618,7 +618,7 @@ fn non_empty(value: Option<String>) -> Option<String> {
 
 /// 单源搜索：解析 spec → 执行 → 解析结果。
 ///
-/// [DONE] 单源搜索的完整入口。多源并发由 [`SearchEngine::search`] 组织。
+/// \[DONE] 单源搜索的完整入口。多源并发由 [`SearchEngine::search`] 组织。
 ///
 /// 返回值是 `Result` 而非流内条目：本函数只管**一个**源，把"单源失败
 /// 不终止整个流"的职责交给调用它的流实现（A6）。
@@ -749,7 +749,7 @@ impl<'a> SearchEngine<'a> {
 
     /// 多源搜索，返回**流**（A6：增量呈现、单源失败不终止、可取消）。
     ///
-    /// [DONE] T027 的对外入口。`source_ids` 为空表示搜索全部源。
+    /// \[DONE] T027 的对外入口。`source_ids` 为空表示搜索全部源。
     pub fn search(&self, keyword: &str, source_ids: &[String]) -> Box<dyn SearchStream + 'a> {
         let selected: Vec<&ParsedSource> = self
             .sources
@@ -778,7 +778,7 @@ impl<'a> SearchEngine<'a> {
 ///
 /// 故本阶段选串行：确定性与限速纪律优先于并行度。这条取舍在
 /// SC-001 的口径说明里写明（首结果时间 = 首个完成的源，串行时即第一个源）。
-/// 标 `[UNCERTAIN]`：若 S1-6 的真实书源基线显示串行不满足 SC-001，
+/// 标 `\[UNCERTAIN]`：若 S1-6 的真实书源基线显示串行不满足 SC-001，
 /// 应改成并发并让录制按指纹排序（那会让重放仍确定）。
 struct SourceSearchStream<'a> {
     pending: Vec<&'a ParsedSource>,

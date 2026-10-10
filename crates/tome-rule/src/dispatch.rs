@@ -398,7 +398,7 @@ pub fn split_combinators(rule: &str) -> (Vec<String>, Vec<Combinator>) {
 
 /// 解析一条完整规则：先按组合符切分，再对每段做前缀分派。
 ///
-/// [DONE] 规则分派的唯一入口。
+/// \[DONE] 规则分派的唯一入口。
 pub fn parse_rule(rule: &str) -> CombinedRule {
     let (segments, combinators) = split_combinators(rule);
     CombinedRule {

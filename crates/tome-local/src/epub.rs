@@ -1,4 +1,4 @@
-//! [DONE] EPUB 导入：元数据 / 目录 / 正文 / 内嵌资源（tasks.md T077 / FR-021）
+//! \[DONE] EPUB 导入：元数据 / 目录 / 正文 / 内嵌资源（tasks.md T077 / FR-021）
 //!
 //! # 规格原文
 //!
@@ -140,7 +140,7 @@ struct ManifestItem {
     properties: String,
 }
 
-/// [DONE] FR-021 的主入口：EPUB 字节 → 书 + 目录 + 资源。
+/// \[DONE] FR-021 的主入口：EPUB 字节 → 书 + 目录 + 资源。
 pub fn import_bytes(bytes: &[u8]) -> LocalResult<ParsedEpub> {
     let mut warnings = Vec::new();
     let mut archive = open_archive(bytes)?;
@@ -240,7 +240,7 @@ pub fn import_path(path: &std::path::Path) -> LocalResult<ParsedEpub> {
 /// 而 EPUB 的 XHTML 由电子书工具生成，标签集极其有限（`p`/`div`/`h1`-`h6`/
 /// `br`/`img`/`a`/`span`），本模块的轻量扫描足够且**不引入依赖**。
 ///
-/// > [UNCERTAIN] 若日后发现某些 EPUB 的正文提取质量不达标（如表格丢失、
+/// > \[UNCERTAIN] 若日后发现某些 EPUB 的正文提取质量不达标（如表格丢失、
 /// > 脚注乱序），应改为复用 `tome-rule` 的 DOM——那时它就不是杀鸡用牛刀，
 /// > 而是正确性所需。
 pub fn extract_text(xhtml: &str) -> String {

@@ -1,4 +1,4 @@
-//! [DONE] JSONPath 引擎（tasks.md T045 / research.md R3）
+//! \[DONE] JSONPath 引擎（tasks.md T045 / research.md R3）
 //!
 //! # 为什么是 serde_json_path
 //!
@@ -251,7 +251,7 @@ fn evaluate_terminal_function(
 
 /// 便捷入口：把 JSON **文本**按 JSONPath 求值，产出规则引擎消费的字符串列表。
 ///
-/// [DONE] T045 的对外入口（`css_post` 的 `@json:` 分支与搜索管线的 JSON 源走它）。
+/// \[DONE] T045 的对外入口（`css_post` 的 `@json:` 分支与搜索管线的 JSON 源走它）。
 ///
 /// # 文本而非 `Value`
 ///

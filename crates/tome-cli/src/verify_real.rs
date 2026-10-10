@@ -1,4 +1,4 @@
-//! [DONE] `verify --real-sources`：真实书源端到端对照与回归基线（T086 / SC-002b）
+//! \[DONE] `verify --real-sources`：真实书源端到端对照与回归基线（T086 / SC-002b）
 //!
 //! # 它和 `verify --corpus` 的分工
 //!

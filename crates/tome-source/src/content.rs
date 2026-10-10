@@ -1,4 +1,4 @@
-//! [DONE] 正文管线（tasks.md T067 / FR-002 第五类动作，FR-030）
+//! \[DONE] 正文管线（tasks.md T067 / FR-002 第五类动作，FR-030）
 //!
 //! # 顺序就是全部意义
 //!
@@ -193,7 +193,7 @@ pub fn parse_chapter_content_with_js(
 
 /// 正文动作的完整执行。
 ///
-/// [DONE] T067 的对外入口。
+/// \[DONE] T067 的对外入口。
 ///
 /// `cache` 为 `None` 时不做缓存（纯在线取用）。
 pub fn chapter_content(

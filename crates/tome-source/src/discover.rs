@@ -1,4 +1,4 @@
-//! [DONE] 发现导航与分页（tasks.md T072 / FR-013）
+//! \[DONE] 发现导航与分页（tasks.md T072 / FR-013）
 //!
 //! # 发现与搜索的区别
 //!
@@ -241,7 +241,7 @@ pub fn parse_explore_page_with_js(
 
 /// 发现动作的完整执行（求值 → 抓取 → 解析）。
 ///
-/// [DONE] T072 的对外入口。
+/// \[DONE] T072 的对外入口。
 ///
 /// `next_page` 由调用方给出（`page + 1`）或 `None` 表示"这是最后一页"。
 /// 本模块**不从 HTML 推断"有没有下一页"**——那需要每个源写一条规则，
@@ -333,7 +333,7 @@ pub fn has_next_page(page: &ExplorePage) -> bool {
 ///
 /// 取 500：按每页 20 本算是 1 万本书，远超任何真实分类的规模。
 ///
-/// [WORKAROUND] 硬编码：若某源真有超过 500 页的分类，应改成可配置项。
+/// \[WORKAROUND] 硬编码：若某源真有超过 500 页的分类，应改成可配置项。
 pub const MAX_EXPLORE_PAGES: u32 = 500;
 
 #[cfg(test)]

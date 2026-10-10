@@ -1,4 +1,4 @@
-//! [DONE] Android 备份的**书源**导入（tasks.md T088 / FR-034）
+//! \[DONE] Android 备份的**书源**导入（tasks.md T088 / FR-034）
 //!
 //! # FR-034 与它在验收里的落点
 //!

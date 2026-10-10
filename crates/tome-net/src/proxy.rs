@@ -1,4 +1,4 @@
-//! [DONE] 代理策略：跟随系统代理 + 按源覆盖（tasks.md T017 / FR-008）
+//! \[DONE] 代理策略：跟随系统代理 + 按源覆盖（tasks.md T017 / FR-008）
 //!
 //! FR-008 要求"跟随系统代理，以及**按源单独指定**代理"。这两件事在实现上分成两层：
 //!
@@ -78,7 +78,7 @@ impl ProxyRoute {
     ///
     /// # 已知局限：系统代理走注册表时归因不到
     ///
-    /// [WORKAROUND] Windows 用户多数只配系统设置（注册表 `Internet Settings`）
+    /// \[WORKAROUND] Windows 用户多数只配系统设置（注册表 `Internet Settings`）
     /// 而不设环境变量。此时本函数返回 `None`，于是"[`Self::System`] 路线下代理
     /// 不可达"会被归成 [`crate::NetError::Connect`]（目标站故障）而非
     /// [`crate::NetError::Proxy`]——FR-008 的"两者可区分"在这种配置下**只在
@@ -219,7 +219,7 @@ fn normalize_proxy_endpoint(address: &str) -> Result<String, NetError> {
 /// 这正是返回值用 `Option` 而非 `bool` 的原因：调用方必须显式处理"不知道"，
 /// 而不是把一个假的"没有代理"当真。见 [`ProxyRoute::proxy_certainty`]。
 ///
-/// [WORKAROUND] 完整的系统代理探测需要 hyper-util 的 matcher（传递依赖，
+/// \[WORKAROUND] 完整的系统代理探测需要 hyper-util 的 matcher（传递依赖，
 /// 不可直接 use）。若日后 ErrorKind 增加 Proxy 类目或本 crate 获准直接依赖
 /// hyper-util，此函数应替换为对探测结果的读取。
 pub fn system_proxy_endpoint_hint() -> Option<String> {

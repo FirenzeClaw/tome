@@ -1,4 +1,4 @@
-//! [WIP] QuickJS runtime 包装：三道护栏（tasks.md T030 / FR-007 / SC-013）
+//! \[WIP] QuickJS runtime 包装：三道护栏（tasks.md T030 / FR-007 / SC-013）
 //!
 //! # 这个模块为什么存在
 //!
@@ -40,7 +40,7 @@
 //!   内建路径（源码里它们的注释都写着 `must check for timeout to avoid infinite loop`）。
 //! - 正则引擎的 `lre_check_timeout`。
 //!
-//! ## `[UNCERTAIN]` GC 期间的中断
+//! ## `\[UNCERTAIN]` GC 期间的中断
 //!
 //! **`JS_RunGC` 内部没有任何 `js_poll_interrupts` 检查点**——这是源码事实
 //! （实测：`quickjs.c` 的 `gc_decref` / `gc_scan` / `gc_free_cycles` 三个函数
@@ -97,7 +97,7 @@ pub struct Limits {
     ///
     /// 它同时决定了**单次 GC 的工作量上界**：GC 只在分配累计到该阈值时触发，
     /// 阈值越小则每次 GC 处理的存活对象越少、不可中断窗口越短（见模块文档的
-    /// `[UNCERTAIN] GC 期间的中断`）。
+    /// `\[UNCERTAIN] GC 期间的中断`）。
     pub gc_threshold_bytes: usize,
     /// 单次脚本执行的墙钟上限。`None` 表示不限时——
     /// 但上层应当只在"已知脚本必然很快"的场合这么做。
@@ -472,7 +472,7 @@ impl Sandbox {
     /// （注 prelude → 注桥 → 跑脚本）会被自己的守卫挡下——
     /// 而那个顺序正是**推荐**的顺序（prelude 要在书源脚本之前注入）。
     ///
-    /// 故 [`Self::eval`] 设 [`Self::source_evaluated`]，而 prelude 与
+    /// 故 [`Self::eval`] 设 `Self::source_evaluated`，而 prelude 与
     /// [`Self::with_context`] 只设 `evaluated`（"装配已开始"）。
     /// 两者用途不同：前者守"桥的注入时机"，后者守"装配期方法的调用时机"。
     ///
@@ -512,7 +512,7 @@ impl Sandbox {
     /// "要不要注入"成为组合根的显式决定——某些场景（如跑一段纯计算脚本）
     /// 不需要补丁层，少注入一次就少一份可能与脚本自身定义冲突的表面。
     ///
-    /// `[UNCERTAIN]`：目前没有发现"prelude 与书源脚本冲突"的真实案例，
+    /// `\[UNCERTAIN]`：目前没有发现"prelude 与书源脚本冲突"的真实案例，
     /// 若始终不出现，这个开关可以收敛掉（直接内置进 `new`）。
     pub fn install_prelude(&self) -> Result<(), SandboxError> {
         // ## 为什么不用 `self.eval(...)`

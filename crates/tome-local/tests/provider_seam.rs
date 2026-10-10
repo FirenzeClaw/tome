@@ -1,4 +1,4 @@
-//! [DONE] ContentProvider 双 adapter 就位（tasks.md T083 / Phase 7 检查点）
+//! \[DONE] ContentProvider 双 adapter 就位（tasks.md T083 / Phase 7 检查点）
 //!
 //! # 检查点原文
 //!

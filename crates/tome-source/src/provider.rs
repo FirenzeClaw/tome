@@ -1,4 +1,4 @@
-//! [DONE] `ContentProvider` 的网络书 adapter（tasks.md T074 / A4 / SC-008）
+//! \[DONE] `ContentProvider` 的网络书 adapter（tasks.md T074 / A4 / SC-008）
 //!
 //! # 这个 adapter 存在的意义
 //!
@@ -58,7 +58,7 @@ pub struct NetworkContentProvider {
     /// 用 `Mutex<HashMap>` 而不是每次重抓：命中缓存时零成本，未命中时
     /// 回落去抓（见 [`NetworkContentProvider::chapter_text`]）。
     ///
-    /// `[UNCERTAIN]` 这个暂存没有上限。真实使用下它最多持有"一本书的
+    /// `\[UNCERTAIN]` 这个暂存没有上限。真实使用下它最多持有"一本书的
     /// 邻域几章"（几 MB），而进程生命周期内读过的书也不多。若日后发现
     /// 内存增长不可控，应换成 LRU 而非继续放大。
     /// 暂存内容 = **原始正文 + 图片锚点**。

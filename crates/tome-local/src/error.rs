@@ -1,4 +1,4 @@
-//! [DONE] 本 crate 的错误类型与 `ErrorKind` 映射
+//! \[DONE] 本 crate 的错误类型与 `ErrorKind` 映射
 //!
 //! AGENTS.md 规定「每个 crate 拥有自己的错误类型（thiserror）；在接缝处映射为
 //! tome-core 的小型 `ErrorKind` 分类枚举」。本模块即 tome-local 的这一层。
@@ -94,7 +94,7 @@ impl fmt::Display for LocalError {
     /// 输出形如 `error.content.local_damaged: 记录表越界`。
     ///
     /// 标识在前、细节在后：日志按标识检索，细节供人阅读（与 core 的
-    /// [`tome_core::ClassifiedError`] 同构）。
+    /// [`ClassifiedError`](tome_core::error::ClassifiedError) 同构）。
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io { path, reason } => {

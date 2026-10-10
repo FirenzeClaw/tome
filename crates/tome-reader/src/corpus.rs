@@ -1,4 +1,4 @@
-//! [DONE] 排版合成语料（tasks.md T004）
+//! \[DONE] 排版合成语料（tasks.md T004）
 //!
 //! 与 001 的 `tome_rule::corpus`（`tests/corpus/`）同构：一组 JSON 用例，
 //! 每条 = 输入 + 参数 + 期望 + **强制依据**。它是 S2-1 起各切片验收的载体，

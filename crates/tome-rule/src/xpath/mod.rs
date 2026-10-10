@@ -1,4 +1,4 @@
-//! [DONE] 自研 XPath 1.0 子集引擎（tasks.md T048 解析 / T049 求值）
+//! \[DONE] 自研 XPath 1.0 子集引擎（tasks.md T048 解析 / T049 求值）
 //!
 //! # 为什么自研而不是引第三方 XPath 库
 //!
@@ -59,7 +59,7 @@ use value::XPathValue;
 
 /// 在文档上求值一条 XPath 表达式，返回规则引擎消费的字符串列表。
 ///
-/// [DONE] 规则层的值入口。语义与 [`crate::css_post::evaluate_rule`] 对齐：
+/// \[DONE] 规则层的值入口。语义与 [`crate::css_post::evaluate_rule`] 对齐：
 /// 节点集逐个转字符串，标量转成一个元素。
 ///
 /// ## 结果怎么转字符串
@@ -72,7 +72,7 @@ use value::XPathValue;
 ///
 /// 属性轴与元素节点共用同一个 [`NodeRef`]，故 `evaluate_expression` 的
 /// 调用方需要知道"这一相步是不是属性轴"。这个信息在 AST 里，
-/// 故本函数先解析再按 AST 上的属性轴标记取值——见 [`evaluate_compiled`]。
+/// 故本函数先解析再按 AST 上的属性轴标记取值——见 `evaluate_compiled`。
 pub fn evaluate(document: &Document, expression: &str) -> Result<Vec<String>, RuleError> {
     let compiled = parse::compile(expression).map_err(map_parse_error)?;
     let value = eval::evaluate_compiled(document, &compiled).map_err(map_eval_error)?;

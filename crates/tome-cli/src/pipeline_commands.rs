@@ -1,4 +1,4 @@
-//! [DONE] 完整管线的 CLI 命令（tasks.md T065-T072 的接线）
+//! \[DONE] 完整管线的 CLI 命令（tasks.md T065-T072 的接线）
 //!
 //! # 本模块覆盖 `contracts/cli.md` 的哪些命令
 //!

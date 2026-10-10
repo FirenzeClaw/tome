@@ -1,4 +1,4 @@
-//! [DONE] 宿主 API · 宿主状态类（tasks.md T041 / FR-005）
+//! \[DONE] 宿主 API · 宿主状态类（tasks.md T041 / FR-005）
 //!
 //! # FR-005 的本类清单
 //!
@@ -53,7 +53,7 @@ use crate::sandbox_error::JsError;
 /// 同名键（如 `"token"`），没有前缀时后写的会覆盖先写的，而表现是
 /// "登录态莫名失效"。
 ///
-/// `[UNCERTAIN]` 更干净的做法是让 `StoreHost` 提供独立的 Cookie 通道。
+/// `\[UNCERTAIN]` 更干净的做法是让 `StoreHost` 提供独立的 Cookie 通道。
 /// 那需要改 `tome-core` 的接缝 trait，属跨切片决策，故本模块先用前缀
 /// 方案而不擅自改接缝。
 const COOKIE_KEY_PREFIX: &str = "tome://cookie/";

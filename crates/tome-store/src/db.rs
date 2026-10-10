@@ -1,4 +1,4 @@
-//! [DONE] SQLite actor 线程 + 迁移器（tasks.md T053）
+//! \[DONE] SQLite actor 线程 + 迁移器（tasks.md T053）
 //!
 //! # 为什么是 actor 而不是连接池
 //!
@@ -79,7 +79,7 @@ type Job = Box<dyn FnOnce(&mut Connection) + Send + 'static>;
 /// 这一段留在这里是提醒：**遇到 `database is locked` 先分辨"等得久"与
 /// "不会等到"**——前者加大超时有效，后者加大超时只是把失败推迟。
 ///
-/// [WORKAROUND] 硬编码常量：若日后 `config.toml` 需要暴露它（某些慢磁盘
+/// \[WORKAROUND] 硬编码常量：若日后 `config.toml` 需要暴露它（某些慢磁盘
 /// 环境可能要更长），应改为随存储子集注入而非继续调大。
 /// 这个值同时用于写连接与读连接（**两处必须一致**，不一致会让读侧的
 /// 等待比写侧短，问题依旧）。

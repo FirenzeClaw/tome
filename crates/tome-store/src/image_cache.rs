@@ -1,4 +1,4 @@
-//! [DONE] 图片缓存（tasks.md T061 / FR-019、SC-017）
+//! \[DONE] 图片缓存（tasks.md T061 / FR-019、SC-017）
 //!
 //! 文件系统 + 索引表：文件在 `cache/images/<xx>/<hash>`，索引在 `image_cache`
 //! 表（`url` 主键）。

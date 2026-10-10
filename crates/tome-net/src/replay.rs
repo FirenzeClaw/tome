@@ -1,4 +1,4 @@
-//! [DONE] 回放 adapter：录制请求→响应并在完全离线状态下重放（tasks.md T019）
+//! \[DONE] 回放 adapter：录制请求→响应并在完全离线状态下重放（tasks.md T019）
 //!
 //! 这是**差分测试确定性的来源**（宪法 III 的一致性验证 / `contracts/seams.md`
 //! 「契约与差分测试的关系」）：把一次真实抓取的 `RequestSpec → Response` 映射
@@ -153,7 +153,7 @@ const FINGERPRINT_HEADERS: [&str; 12] = [
 ///    理由：URL 是规则引擎算出来的精确值，任何归一化都可能让两个语义不同的
 ///    请求碰撞。要求调用方保证同一逻辑请求产出同一 URL 串。
 /// 3. body：十六进制（`None` 与空字节序列视为同一件事，都编码为空串）。
-/// 4. 关键头：按名小写、**只取 [`FINGERPRINT_HEADERS`] 清单内的**、按名排序后
+/// 4. 关键头：按名小写、**只取 `FINGERPRINT_HEADERS` 清单内的**、按名排序后
 ///    逐个拼接 `名=值`（重名头按出现顺序全部参与，以 `\n` 分隔）。
 ///
 /// 各段之间用 `\n` 分隔，段内字段用 `\x1f`（ASCII unit separator）分隔——

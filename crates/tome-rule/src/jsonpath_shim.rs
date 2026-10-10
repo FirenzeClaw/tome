@@ -1,4 +1,4 @@
-//! [DONE] Jayway JSONPath → RFC 9535 词法感知重写 shim（tasks.md T046 / research R3）
+//! \[DONE] Jayway JSONPath → RFC 9535 词法感知重写 shim（tasks.md T046 / research R3）
 //!
 //! # 为什么需要这一层
 //!
@@ -43,7 +43,7 @@
 
 /// 重写 Jayway 专有语法为 RFC 9535。
 ///
-/// [DONE] T046 的对外入口。无 `[...]`/`?`/`(` 等特征时**原样返回**
+/// \[DONE] T046 的对外入口。无 `[...]`/`?`/`(` 等特征时**原样返回**
 /// （避免给绝大多数普通路径做无谓的字符串分配）。
 #[must_use]
 pub fn rewrite(expression: &str) -> String {
@@ -585,7 +585,7 @@ fn take_collection(chars: &[char]) -> Option<(String, usize)> {
 /// 此时两者等价。用 `match()` 能避免"书源写了锚点、我们再做一次
 /// 部分匹配"的双重宽容——那会让 `^\\d+$` 意外匹配 `a123b`。
 ///
-/// `[UNCERTAIN]` 若 S1-6 的真实书源基线显示存在**不带锚点**的 `=~`，
+/// `\[UNCERTAIN]` 若 S1-6 的真实书源基线显示存在**不带锚点**的 `=~`，
 /// 应改判为 `search()`。这个取舍记录在此，不靠实现者直觉。
 fn rewrite_regex_match(body: &str) -> String {
     let Some(position) = find_outside_strings(body, "=~") else {
@@ -842,12 +842,12 @@ pub struct TerminalFunction {
     pub subject: String,
 }
 
-/// 终端函数名清单（与 [`match_terminal_method`] 的映射保持一致）。
+/// 终端函数名清单（与 `match_terminal_method` 的映射保持一致）。
 ///
 /// # 为什么独立成常量
 ///
 /// [`parse_terminal_function`] 用它来判定"改写后的整条表达式是不是一个
-/// 终端函数调用"，而 [`match_terminal_method`] 用它来判定"这个方法名要不要
+/// 终端函数调用"，而 `match_terminal_method` 用它来判定"这个方法名要不要
 /// 改写"。两处必须同步——用一个常量是唯一能保证这一点的做法。
 pub const TERMINAL_FUNCTIONS: [&str; 7] = ["length", "min", "max", "avg", "stddev", "sum", "keys"];
 

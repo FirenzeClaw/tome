@@ -1,4 +1,4 @@
-//! [DONE] `ContentProvider` 的**本地书 adapter**（tasks.md T083 / 架构审查 A4）
+//! \[DONE] `ContentProvider` 的**本地书 adapter**（tasks.md T083 / 架构审查 A4）
 //!
 //! # 规格与契约
 //!
@@ -102,7 +102,7 @@ pub struct LocalSource {
     /// 且避免了平台差异（Windows 的 mmap 语义与 POSIX 不同）。
     /// 权衡后选"整本缓存"：简单、跨平台、对连续阅读最快。
     ///
-    /// > [UNCERTAIN] 若用户真的读 300MB 的 TXT 且内存吃紧，应改为分段窗口
+    /// > \[UNCERTAIN] 若用户真的读 300MB 的 TXT 且内存吃紧，应改为分段窗口
     /// > （只缓存当前章前后各 1MB）。当前实现的 300MB 上限（SC-004 的参考
     /// > 规模）在 8GB 内存机器上不构成问题。
     cached: Mutex<Option<Arc<Vec<u8>>>>,
@@ -309,7 +309,7 @@ fn chapter_encoding_hint(_toc: &[Chapter]) -> Option<String> {
 /// 的故障**，而看到本章全部内容只是"多了一点"——两者对阅读体验的破坏
 /// 程度差数量级。
 ///
-/// > [WIP] 精确的 fragment 定位需要在 `extract_text` 里保留元素 id 与文本
+/// > \[WIP] 精确的 fragment 定位需要在 `extract_text` 里保留元素 id 与文本
 /// > 偏移的映射。属后续切片（当前 fragment 只影响"同一文件内的多节"这一
 /// > 少数场景，而绝大多数 EPUB 一节就是一个文件）。
 fn slice_fragment(text: &str, _xhtml: &str, _fragment: &str) -> String {

@@ -1,4 +1,4 @@
-//! [DONE] 无目录时的按大小切分（tasks.md T076 / FR-020）
+//! \[DONE] 无目录时的按大小切分（tasks.md T076 / FR-020）
 //!
 //! # 为什么需要它
 //!
@@ -28,7 +28,7 @@ use crate::txt::TocPoint;
 /// 取 3000：中文阅读场景下约等于 6 KB 文本，是一个自然的分页粒度
 /// （约 10~15 分钟的阅读量，与常见网文单章量级相当）。
 ///
-/// [WORKAROUND] 硬编码常量：改为随配置注入（`config.toml` 的阅读子集）。
+/// \[WORKAROUND] 硬编码常量：改为随配置注入（`config.toml` 的阅读子集）。
 /// 当前阶段保持无配置依赖——SC-004 的性能测试要能在无配置环境下跑。
 pub const DEFAULT_SEGMENT_CHARS: usize = 3000;
 
@@ -39,7 +39,7 @@ pub const DEFAULT_SEGMENT_CHARS: usize = 3000;
 /// "等分"的意义了）。
 const BOUNDARY_SEARCH_CHARS: usize = 200;
 
-/// [DONE] 按大小把文本等分为若干片段，返回与 [`TocPoint`] 同构的切点。
+/// \[DONE] 按大小把文本等分为若干片段，返回与 [`TocPoint`] 同构的切点。
 ///
 /// 切点总数 = `ceil(字符数 / DEFAULT_SEGMENT_CHARS)`，**至少 1 个**
 /// （空文件与短文件都得到单章，避免上层面对零章节）。

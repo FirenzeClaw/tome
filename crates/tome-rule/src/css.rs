@@ -762,7 +762,7 @@ fn quote_for_pseudo(text: &str) -> String {
 /// 任意文本（可能含 `)`、引号、换行）。若不按 CSS 字符串规则编码，
 /// 拼接出的选择器会解析失败或**改变语义**。
 ///
-/// 故本函数是 [`quote_for_pseudo`] 的公开形态——**同一份编码逻辑**，
+/// 故本函数是 `quote_for_pseudo` 的公开形态——**同一份编码逻辑**，
 /// 不另写一份（两处各写一份必然在转义细节上漂移）。
 pub fn quote_for_pseudo_argument(text: &str) -> String {
     quote_for_pseudo(text)

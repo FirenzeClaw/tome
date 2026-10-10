@@ -1,4 +1,4 @@
-//! [DONE] HTTP 客户端与阻塞外观（tasks.md T013）
+//! \[DONE] HTTP 客户端与阻塞外观（tasks.md T013）
 //!
 //! 本模块是 tome-net 里**唯一**构造 `reqwest::Client` 的地方。上层（执行器）
 //! 只通过 [`HttpClient`] / [`BlockingClient`] 的窄接口使用网络能力。
@@ -171,7 +171,7 @@ impl HttpClient {
         })
     }
 
-    /// [DONE] 发送一次请求——本 crate 唯一的真实请求出口（执行器与阻塞外观都经它）。
+    /// \[DONE] 发送一次请求——本 crate 唯一的真实请求出口（执行器与阻塞外观都经它）。
     ///
     /// 不做重试、不做限速、不管 Cookie——那些是执行器的职责。
     ///
@@ -456,7 +456,7 @@ impl BlockingClient {
         Ok(self.runtime.block_on(future))
     }
 
-    /// [DONE] 同步发送：供 JS 同步语义使用（R1），委托给异步路径。
+    /// \[DONE] 同步发送：供 JS 同步语义使用（R1），委托给异步路径。
     ///
     /// 不重试、不限速，同 [`HttpClient::send`]。
     pub fn send_blocking(

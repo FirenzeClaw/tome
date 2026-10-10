@@ -1,4 +1,4 @@
-//! [DONE] Cookie jar：按源隔离、可持久化序列化（tasks.md T016 / FR-008）
+//! \[DONE] Cookie jar：按源隔离、可持久化序列化（tasks.md T016 / FR-008）
 //!
 //! FR-008 把 Cookie 列为书源可声明的请求定制项；spec 的修订项进一步要求
 //! **按源持久化落盘，重启后保留登录态**（FR-026 修订）。本模块实现两件事：
@@ -13,7 +13,7 @@
 //!
 //! # 按源隔离的键为什么是 `rate_limit_key`
 //!
-//! [UNCERTAIN] 理想情况下 Cookie 应按 **origin**（scheme + host + port）隔离，
+//! \[UNCERTAIN] 理想情况下 Cookie 应按 **origin**（scheme + host + port）隔离，
 //! 因为 RFC 6265 的域匹配本身就是围绕 host 定义的。但本层拿到的只有
 //! `RequestSpec`，而它**只有 `rate_limit_key` 这一个每源稳定的键**
 //! （`RequestSpec` 没有 book source id 字段）。
@@ -161,7 +161,7 @@ struct ParsedSetCookie {
 }
 
 impl CookieJar {
-    /// [DONE] 空 jar。
+    /// \[DONE] 空 jar。
     pub fn new() -> Self {
         Self::default()
     }
@@ -290,7 +290,7 @@ impl CookieJar {
         keys
     }
 
-    /// 序列化为确定性文本（[WORKAROUND] 格式自定，见模块文档）。
+    /// 序列化为确定性文本（\[WORKAROUND] 格式自定，见模块文档）。
     ///
     /// 一次性持锁完成全部读取：若分多次取锁（每次 `cookies_for` 取一次），
     /// 并发的写入可能让同一份输出里混进不同时刻的快照，破坏确定性。

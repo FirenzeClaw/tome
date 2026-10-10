@@ -1,4 +1,4 @@
-//! [DONE] XPath 1.0 子集解析器：记号序列 → 抽象语法树（tasks.md T048）
+//! \[DONE] XPath 1.0 子集解析器：记号序列 → 抽象语法树（tasks.md T048）
 //!
 //! # 覆盖范围（与 `specs/001-pc-engine-core/tasks.md` T048 对齐）
 //!
@@ -30,7 +30,7 @@
 //! 但**同层混用**时 `a div b * c` 的两种结合给出不同结果。规范的 XPath 1.0
 //! 语法注解注明实际按优先级分层（即 `*` 先于 `div`/`mod`；同优先级左结合）。
 //! 本实现按左结合解析（`((a div b) * c)` 形态），这是规范原文产生式的直接读法；
-//! [UNCERTAIN] 若有语料显示别的读法更常见，此处需复核。
+//! \[UNCERTAIN] 若有语料显示别的读法更常见，此处需复核。
 
 use super::ast::{
     BinaryOperator, CompiledExpression, Expr, LocationPath, NodeTest, ParseContext, Predicate,
@@ -47,7 +47,7 @@ const MAX_EXPRESSION_DEPTH: usize = 64;
 
 /// 解析一条 XPath 表达式。
 ///
-/// [DONE] 解析层的唯一入口。产出 [`CompiledExpression`]，其 `mode` 按
+/// \[DONE] 解析层的唯一入口。产出 [`CompiledExpression`]，其 `mode` 按
 /// §3.3 的 Disambiguation 规则给出（决定"选择节点"与"取值"两个入口的行为）。
 pub fn compile(source: &str) -> Result<CompiledExpression, XPathError> {
     let tokens = tokenize(source)?;
@@ -745,7 +745,7 @@ fn extension_node_test(name: &str) -> Option<NodeTest> {
 ///
 /// 这是 `parse_path_expression` 区分"位置路径"与"过滤表达式"的判据：
 /// `/div/allText()` 的末段是节点测试，而 `count(...)` 是函数调用。
-/// [UNCERTAIN] `text()` / `node()` 同时是"节点类型测试"与"扩展函数名"——
+/// \[UNCERTAIN] `text()` / `node()` 同时是"节点类型测试"与"扩展函数名"——
 /// 本实现**一律**按节点测试解析（在 XPath 1.0 里 `text()` 本就只有
 /// 节点测试一种含义，见 §2.3）。
 fn is_node_test_function(name: &str) -> bool {

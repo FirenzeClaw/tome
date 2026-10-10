@@ -1,4 +1,4 @@
-//! [DONE] `StoreHost` 的真实实现（tasks.md T054 / `seams.md` §4）
+//! \[DONE] `StoreHost` 的真实实现（tasks.md T054 / `seams.md` §4）
 //!
 //! JS 沙箱的四个宿主状态类 API（`java.cachePut`/`cacheGet`/`readFile`/`writeFile`）
 //! 与 Cookie 读写（`java.getCookie`/`setCookie`）经本模块落到真实存储。

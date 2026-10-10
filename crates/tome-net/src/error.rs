@@ -1,4 +1,4 @@
-//! [DONE] tome-net 的错误类型与接缝映射（tasks.md T013 基础件）
+//! \[DONE] tome-net 的错误类型与接缝映射（tasks.md T013 基础件）
 //!
 //! # 为什么本 crate 自带错误类型
 //!
@@ -72,7 +72,7 @@ pub enum NetError {
 
     /// TLS 握手或证书校验失败。
     ///
-    /// [UNCERTAIN] reqwest/rustls 未暴露结构化的 TLS 错误分类，本变体靠遍历
+    /// \[UNCERTAIN] reqwest/rustls 未暴露结构化的 TLS 错误分类，本变体靠遍历
     /// `source()` 链后匹配证书/握手关键字判定（见 [`Self::from_reqwest`]）。
     /// 误判的代价有限：`Tls` 与 `Connect` 都映射到 [`ErrorKind::Network`]，
     /// 上层分支不变，只是日志细节不同。
@@ -108,12 +108,12 @@ pub enum NetError {
     ///
     /// ## 触发范围（R3 后收窄）
     ///
-    /// **接缝（[`NetHost::fetch`]）不再触发本变体**——它把"事务完成但状态非
+    /// **接缝（`NetHost::fetch`）不再触发本变体**——它把"事务完成但状态非
     /// 2xx"作为 `Ok(Response)` 返回，因为接缝的调用方（书源脚本）需要读错误页
     /// 正文，且"状态码算不算失败"是调用方的判断（R3，PM 仲裁 2026-10-10）。
     ///
-    /// 本变体保留给**异步 API 的严格模式**：[`ExecutionPolicy::fail_on_status`]
-    /// 为 `true`（默认）时，[`RequestExecutor::execute`] 这条取内容路径仍按
+    /// 本变体保留给**异步 API 的严格模式**：`ExecutionPolicy::fail_on_status`
+    /// 为 `true`（默认）时，[`crate::executor::RequestExecutor::execute`] 这条取内容路径仍按
     /// "拿不到内容就是失败"处理，并借本变体携带 `retry_after` 供重试循环降速。
     ///
     /// `retry_after` 承载服务端在 `Retry-After` 头里声明的等待时长——

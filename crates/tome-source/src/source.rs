@@ -1,4 +1,4 @@
-//! [DONE] 书源模型加载与三渠道导入（tasks.md T026 / FR-001）
+//! \[DONE] 书源模型加载与三渠道导入（tasks.md T026 / FR-001）
 //!
 //! # 三渠道（FR-001 的硬要求）
 //!
@@ -19,7 +19,7 @@
 //! ## `searchUrl` / `exploreUrl` 的归属（R4 的结论）
 //!
 //! 本模块初版把 `searchUrl` 从规则 JSON 里提出来放在
-//! [`ParsedSource::search_url`]，理由是 data-model.md 的 `source` 表没有该列。
+//! `ParsedSource::search_url`，理由是 data-model.md 的 `source` 表没有该列。
 //! PM 仲裁（R4）判定：`searchUrl` 与 `exploreUrl` 是公开书源格式的**顶层键**，
 //! 与 `ruleSearch` 并列，因此**下沉为 `Source` 的字段**才是正确归属。
 //! 该结论已由 PM 补录进 data-model.md。
@@ -28,7 +28,7 @@
 //! 仍然提取出来（信息只存一处），但**不再切掉**——保留在规则 JSON 里是为了
 //! 让"作者把 searchUrl 写在规则里"这条路径在落库后仍可追溯。
 //!
-//! [DONE] 关键入口：[`parse_sources`]（文本 → 书源列表）、[`load_from_channel`]。
+//! \[DONE] 关键入口：[`parse_sources`]（文本 → 书源列表）、[`load_from_channel`]。
 
 use std::collections::BTreeMap;
 
@@ -47,7 +47,7 @@ use crate::error::SourceError;
 /// 保留这一层是因为它在 Cargo.lock 上已与 `tome-cli` / `tome-source` 的公共
 /// 签名绑定，且将来可能承载"解析期中间产物"（如 `group_name` → `group_id`
 /// 的待决映射）。**若后续确实没有新增字段，应在某个切片里把它降为
-/// `type ParsedSource = Source;` 或直接删除。** 标 `[UNCERTAIN]`：
+/// `type ParsedSource = Source;` 或直接删除。** 标 `\[UNCERTAIN]`：
 /// 现在删会让本期改动面扩大（CLI、注册表、搜索管线三处签名），
 /// 而它并不造成行为差异。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -204,7 +204,7 @@ struct SourceJson {
 
 /// 解析一份书源 JSON（可以是单个对象，也可以是对象数组）。
 ///
-/// [DONE] FR-001 的解析入口：三种渠道的文本都最终落到这里。
+/// \[DONE] FR-001 的解析入口：三种渠道的文本都最终落到这里。
 ///
 /// # 容错策略（逐条对应一种真实存在的输入）
 ///
@@ -494,7 +494,7 @@ fn json_kind(value: &serde_json::Value) -> &'static str {
 /// 同一理由的弱化版：真实的"不要间隔"声明几乎不会写成 `0`（写 `0` 的多半是
 /// 占位或误填），而"显式关掉限速"在本产品的场景里没有正当用途（AGENTS.md
 /// 安全红线要求遵守书源声明的请求间隔，逆向即"不声明就不关"）。
-/// [UNCERTAIN] 若 S1-6 的真实书源基线里出现确实声明 `0` 的源，应改为
+/// \[UNCERTAIN] 若 S1-6 的真实书源基线里出现确实声明 `0` 的源，应改为
 /// `Some(0)` 并在此注明依据。
 ///
 /// ## 为什么整条源不因它而失败
@@ -550,7 +550,7 @@ pub(crate) fn now_unix_seconds() -> i64 {
 
 /// 从导入渠道装入书源（FR-001 的三渠道）。
 ///
-/// [DONE] 三渠道的统一入口——URL 渠道的拉取经 [`NetHost`]（A2 唯一发请求处）。
+/// \[DONE] 三渠道的统一入口——URL 渠道的拉取经 [`NetHost`]（A2 唯一发请求处）。
 ///
 /// # 为什么 URL 渠道要经 `NetHost` 而不是 `reqwest`
 ///
@@ -627,7 +627,7 @@ pub fn report_for_persistence(outcome: &LoadOutcome) -> ImportReport {
 /// 把书源的自定义请求头解析成 [`HeaderMap`]（FR-008）。
 ///
 /// 书源里的 `header` 字段是 JSON 对象文本（值可能是字符串或数字）。
-/// [DONE] 供 T027 构造 `RequestSpec` 时使用。
+/// \[DONE] 供 T027 构造 `RequestSpec` 时使用。
 ///
 /// 非法 JSON 返回 `Err`：请求头写错会让整个抓取异常，静默忽略会掩盖真实原因。
 pub fn parse_headers(header: Option<&str>) -> Result<HeaderMap, SourceError> {

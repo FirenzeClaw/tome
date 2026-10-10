@@ -1,4 +1,4 @@
-//! [DONE] mainJs 纯脚本源执行（tasks.md T044）
+//! \[DONE] mainJs 纯脚本源执行（tasks.md T044）
 //!
 //! # 什么是"纯脚本源"
 //!
@@ -331,7 +331,7 @@ impl ScriptOutcome {
 /// `JSON.stringify` 产出的字符串字面量是 JS 兼容的（JSON 是 JS 字面量
 /// 的子集），且它替我们处理全部转义。
 ///
-/// ## `[UNCERTAIN]` U+2028/U+2029 的边界
+/// ## `\[UNCERTAIN]` U+2028/U+2029 的边界
 ///
 /// 严格说 `JSON.stringify` 不转义这两个字符（JSON 允许它们裸写），
 /// 而它们在 JS 里是行终止符。实践中用户关键词含这两个字符的概率极低，

@@ -1,4 +1,4 @@
-//! [DONE] DAO·规则四类 / 关键词 / 请求日志 / Cookie（tasks.md T059）
+//! \[DONE] DAO·规则四类 / 关键词 / 请求日志 / Cookie（tasks.md T059）
 //!
 //! 对应 FR-014（净化）、FR-015（自动高亮）、FR-016（词典）、FR-020（目录识别）、
 //! FR-018（关键词管理）、FR-017（请求日志滚动清理）、FR-026（Cookie 持久化）。
@@ -8,7 +8,7 @@
 //! `replace` / `highlight` / `dict` / `txt_toc` 都是"用户可配置的规则行"，
 //! 共同点是 `id`（0 表示新增）+ `enabled` + `sort_order`。差异在各自动作字段。
 //! 本模块为每类给出"读全部 / 存一条 / 删一条"三个入口——不是四份复制粘贴，
-//! 而是共用 [`MiscDao::save_rule_row`] 的 upsert 骨架，各传自己的列清单。
+//! 而是共用 `MiscDao::save_rule_row` 的 upsert 骨架，各传自己的列清单。
 //!
 //! ## 为什么"`id` 为 0 表示新增"
 //!
@@ -43,7 +43,7 @@ use crate::error::StoreError;
 /// 取 5000：一条日志约 1–2 KB（含截断后的响应体），5000 条约 5–10 MB——
 /// 那是用户可接受的空间占用，也足够覆盖"最近几次抓取出了什么问题"的排查需要。
 ///
-/// [WORKAROUND] 硬编码常量：`config.toml` 的存储子集（T062）里已有 `http_log_keep`
+/// \[WORKAROUND] 硬编码常量：`config.toml` 的存储子集（T062）里已有 `http_log_keep`
 /// 字段，组合根会把它传进来；此处只提供无配置时的默认值。
 pub const DEFAULT_HTTP_LOG_KEEP: usize = 5_000;
 
@@ -52,7 +52,7 @@ pub const DEFAULT_HTTP_LOG_KEEP: usize = 5_000;
 /// 截断的理由是空间，不是为了脱敏——脱敏由调用方在写入前完成
 /// （见 [`HttpLogEntry::request_headers_redacted`] 的字段文档）。
 ///
-/// [WORKAROUND] 与 [`DEFAULT_HTTP_LOG_KEEP`] 同属可配置项，当前取默认值。
+/// \[WORKAROUND] 与 [`DEFAULT_HTTP_LOG_KEEP`] 同属可配置项，当前取默认值。
 pub const DEFAULT_RESPONSE_BODY_LIMIT: usize = 8_192;
 
 /// 规则 / 关键词 / 日志 / Cookie DAO。
@@ -785,7 +785,7 @@ pub type HttpLogRow = HttpLogEntry;
 /// 日志是**诊断设施**：它写不进去不该让用户的抓取失败。故 `record` 返回
 /// `()`，失败只静默丢弃（上层不会因为日志表满了而读不了书）。
 ///
-/// `[UNCERTAIN]` 完全静默会掩盖"日志一直没写进去"这种配置问题。
+/// `\[UNCERTAIN]` 完全静默会掩盖"日志一直没写进去"这种配置问题。
 /// 后续若需要可观测性，应加一个内部计数器而不是改签名（改签名会让
 /// 每个调用点都要处理一个它无法处置的错误）。
 pub struct HttpLogSinkAdapter {

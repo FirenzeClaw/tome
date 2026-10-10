@@ -1,4 +1,4 @@
-//! [WIP] 渲染管线入口（`render` feature 门控；实体随 S2-4 落地）
+//! \[WIP] 渲染管线入口（`render` feature 门控；实体随 S2-4 落地）
 //!
 //! 本模块是排版层与渲染层的**物理分界**：它在 `render` feature 下才存在，
 //! 故 `--no-default-features` 的构建连"能否绘制"这个问题都不必回答——

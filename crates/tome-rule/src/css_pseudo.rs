@@ -1,4 +1,4 @@
-//! [DONE] Jsoup 专有伪类清单与非标准语法（tasks.md T050 / research.md R2）
+//! \[DONE] Jsoup 专有伪类清单与非标准语法（tasks.md T050 / research.md R2）
 //!
 //! # 本模块的职责：把"对齐目标"变成可核对的事实
 //!
@@ -73,7 +73,7 @@ pub const JSOUP_ALIGNMENT_TARGET: &str = "1.2x";
 ///
 /// # 为什么做成数据结构而不是文档里的一张表
 ///
-/// 文档里的表无法被测试。做成常量后，[`tests::清单与实现一致`] 能断言
+/// 文档里的表无法被测试。做成常量后，`tests::清单与实现一致` 能断言
 /// 每一条 `implemented: true` 的语法**真的能编译并匹配**——清单因此
 /// 是"事实"而不是"承诺"。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

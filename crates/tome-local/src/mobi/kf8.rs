@@ -1,4 +1,4 @@
-//! [DONE] KF8 的 FDST primary flow（tasks.md T081 / research R4 阶段三）
+//! \[DONE] KF8 的 FDST primary flow（tasks.md T081 / research R4 阶段三）
 //!
 //! # research R4 划定的范围
 //!

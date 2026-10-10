@@ -1,4 +1,4 @@
-//! [DONE] PalmDOC 解压与 **trailing data 剥离**（tasks.md T078 / research R4）
+//! \[DONE] PalmDOC 解压与 **trailing data 剥离**（tasks.md T078 / research R4）
 //!
 //! # research R4 点名的最大风险
 //!

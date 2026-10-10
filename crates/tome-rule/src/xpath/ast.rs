@@ -1,4 +1,4 @@
-//! [DONE] XPath 1.0 子集的抽象语法树（tasks.md T048）
+//! \[DONE] XPath 1.0 子集的抽象语法树（tasks.md T048）
 //!
 //! # 结构依据
 //!
@@ -122,7 +122,7 @@ pub enum NodeTest {
     ///
     /// `prefix` 是明写的命名空间前缀；HTML 文档上无前缀声明可查，
     /// 故求值期对带前缀的名字测试做**本地名匹配**并把前缀记入诊断
-    /// （[UNCERTAIN] 见 `eval.rs` 的同名说明）。
+    /// （\[UNCERTAIN] 见 `eval.rs` 的同名说明）。
     Name {
         /// 明写的前缀（`ns:div` 的 `ns`）。无前缀为 `None`。
         prefix: Option<String>,
@@ -169,7 +169,7 @@ pub enum NodeTest {
     /// 扩展：`num()` —— 从节点内容中抽出**第一个数字**，产出一个值节点。
     ///
     /// 依据来源同 [`NodeTest::AllText`]。抽取判据见 `eval.rs`
-    /// （[UNCERTAIN] 精确抽取范围）。
+    /// （\[UNCERTAIN] 精确抽取范围）。
     Number,
 }
 

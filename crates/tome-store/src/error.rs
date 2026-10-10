@@ -1,4 +1,4 @@
-//! [DONE] tome-store 的错误类型（AGENTS.md：每个 crate 拥有自己的错误类型）
+//! \[DONE] tome-store 的错误类型（AGENTS.md：每个 crate 拥有自己的错误类型）
 //!
 //! 与 `tome-net`/`tome-rule`/`tome-source` 同构：**细节留在本 crate，分类留给
 //! 上层**。接缝处经 [`StoreError::to_error_kind`] 映射为 [`tome_core::ErrorKind`]，

@@ -1,4 +1,4 @@
-//! [DONE] EXTH 元数据块（tasks.md T078 / research R4）
+//! \[DONE] EXTH 元数据块（tasks.md T078 / research R4）
 //!
 //! # 依据的公开规范
 //!

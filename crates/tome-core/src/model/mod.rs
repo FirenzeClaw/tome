@@ -19,12 +19,12 @@
 //!
 //! | 模块 | 实体 |
 //! |---|---|
-//! | [`book`] | `Book` / `BookOrigin` / `Chapter` / `LibraryRoot` |
-//! | [`source`] | `Source` / `SourceKind` / `SourceGroup` |
-//! | [`rule`] | `ReplaceRule` / `HighlightRule` / `DictRule` / `TxtTocRule` / `RuleScope` / `RuleTier` |
-//! | [`trace`] | `ReadProgress` / `Bookmark` / `Highlight` / `Memo` / `ReadRecord` |
-//! | [`asset`] | `Cookie` / `ImageCacheRef` |
-//! | [`auxiliary`] | `ChapterCacheEntry` / `HttpLogEntry` / `SearchKeyword` |
+//! | `book` | `Book` / `BookOrigin` / `Chapter` / `LibraryRoot` |
+//! | `source` | `Source` / `SourceKind` / `SourceGroup` |
+//! | `rule` | `ReplaceRule` / `HighlightRule` / `DictRule` / `TxtTocRule` / `RuleScope` / `RuleTier` |
+//! | `trace` | `ReadProgress` / `Bookmark` / `Highlight` / `Memo` / `ReadRecord` |
+//! | `asset` | `Cookie` / `ImageCacheRef` |
+//! | `auxiliary` | `ChapterCacheEntry` / `HttpLogEntry` / `SearchKeyword` |
 //! | [`theme`] | `Theme`（设计 token 纯值类型，零图形依赖；OQ#11→D） |
 
 mod asset;

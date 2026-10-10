@@ -1,4 +1,4 @@
-//! [DONE] tome-source 的错误类型（AGENTS.md：每个 crate 拥有自己的错误类型）
+//! \[DONE] tome-source 的错误类型（AGENTS.md：每个 crate 拥有自己的错误类型）
 //!
 //! 在接缝处映射为 [`ErrorKind`]（见 [`SourceError::to_error_kind`]）。
 //! 与 `tome-net`/`tome-rule` 同构：细节留在本 crate，分类留给上层。

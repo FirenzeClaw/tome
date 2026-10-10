@@ -1,4 +1,4 @@
-//! [DONE] 全部阅读数据的导出与导入（tasks.md T087 / FR-033）
+//! \[DONE] 全部阅读数据的导出与导入（tasks.md T087 / FR-033）
 //!
 //! # FR-033 的原文与它带来的三个设计约束
 //!
@@ -232,7 +232,7 @@ fn parse_kind(text: &str) -> SourceKind {
     }
 }
 
-/// 书源分组（镜像 [`SourceGroup`]）。
+/// 书源分组（镜像 [`SourceGroup`](tome_core::SourceGroup)）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceGroupRow {
     /// 分组名（**不含 id**：id 是本机分配的，导入时重建）
@@ -591,7 +591,7 @@ pub struct MemoRow {
     pub created_at: i64,
 }
 
-/// 库根目录（镜像 [`LibraryRoot`]）。
+/// 库根目录（镜像 [`LibraryRoot`](tome_core::LibraryRoot)）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LibraryRootRow {
     /// 绝对路径

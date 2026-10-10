@@ -1,4 +1,4 @@
-//! [DONE] 宿主函数侧的 JS 异常类型（FR-006）
+//! \[DONE] 宿主函数侧的 JS 异常类型（FR-006）
 //!
 //! # 为什么它与 [`crate::runtime::SandboxError`] 是两个类型
 //!

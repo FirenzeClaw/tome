@@ -1,4 +1,4 @@
-//! [DONE] CLI 参数解析（tasks.md T028/T029 / `contracts/cli.md`）
+//! \[DONE] CLI 参数解析（tasks.md T028/T029 / `contracts/cli.md`）
 //!
 //! # 为什么手写解析而不引第三方库
 //!
@@ -328,7 +328,7 @@ pub enum ParseOutcome {
 
 /// 解析命令行参数（**不含**程序名）。
 ///
-/// [DONE] T028/T029 的入口。参数解析的全部规则集中在这里，
+/// \[DONE] T028/T029 的入口。参数解析的全部规则集中在这里，
 /// 便于让"用法错误 → 退出码 2"这条契约只需在一处保证。
 pub fn parse(args: &[String]) -> ParseOutcome {
     let mut options = GlobalOptions::default();
@@ -967,7 +967,7 @@ pub fn parse(args: &[String]) -> ParseOutcome {
 
 /// 退出码映射（`contracts/cli.md` 的全局约定）。
 ///
-/// [DONE] 错误分类 → 退出码的**唯一**落点。
+/// \[DONE] 错误分类 → 退出码的**唯一**落点。
 ///
 /// ## 为什么"不支持能力"单独一个码（3）
 ///

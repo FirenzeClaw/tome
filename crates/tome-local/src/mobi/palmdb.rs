@@ -1,4 +1,4 @@
-//! [DONE] PalmDB 容器解析（tasks.md T078 / research R4）
+//! \[DONE] PalmDB 容器解析（tasks.md T078 / research R4）
 //!
 //! # 依据的公开规范
 //!

@@ -49,6 +49,7 @@
 pub mod corpus;
 pub mod error;
 pub mod layout;
+pub mod paginate;
 pub mod rules;
 pub mod text;
 

@@ -86,6 +86,14 @@ pub struct NetworkConfig {
     pub http_log_enabled: bool,
     /// 请求日志保留条数（滚动清理上限，FR-017）。
     pub http_log_keep: usize,
+    /// 请求日志里**响应体**最多记多少个字符；`None`（默认）= 不记。
+    ///
+    /// # 为什么默认不记
+    ///
+    /// 脱敏对"结构已知"的两类有效（HTTP 头、表单式字段），而响应体正文
+    /// 里可能以任何形态出现凭据。默认不记是**保守策略**：宁可少记，
+    /// 不可泄漏。打开时也只记前若干字符（凭据常在首部）。
+    pub http_log_response_chars: Option<usize>,
 }
 
 impl Default for NetworkConfig {
@@ -96,6 +104,7 @@ impl Default for NetworkConfig {
             timeout_ms: None,
             http_log_enabled: true,
             http_log_keep: crate::dao::misc::DEFAULT_HTTP_LOG_KEEP,
+            http_log_response_chars: None,
         }
     }
 }
@@ -381,6 +390,10 @@ pub fn known_keys() -> BTreeMap<&'static str, &'static str> {
         ("network.timeout_ms", "默认请求超时毫秒"),
         ("network.http_log_enabled", "是否记录请求日志"),
         ("network.http_log_keep", "请求日志保留条数（滚动清理）"),
+        (
+            "network.http_log_response_chars",
+            "请求日志记录响应体的字符上限（默认不记）",
+        ),
         ("storage.chapter_pack_bytes", "章节缓存容器容量（字节）"),
         ("storage.image_cache_bytes", "图片缓存容量上限（字节）"),
         ("storage.data_dir", "数据目录（留空则自动判定）"),
@@ -682,6 +695,7 @@ http_log_keep = 42
             "network.timeout_ms",
             "network.http_log_enabled",
             "network.http_log_keep",
+            "network.http_log_response_chars",
             "storage.chapter_pack_bytes",
             "storage.image_cache_bytes",
             "storage.data_dir",

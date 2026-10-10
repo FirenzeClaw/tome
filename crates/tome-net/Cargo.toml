@@ -39,5 +39,9 @@ chardetng = "1.0.0"
 # 网络层自身错误类型（AGENTS.md：每个 crate 拥有自己的错误类型，接缝处映射为 ErrorKind）
 thiserror = "2.0.21"
 
+# HTTP 日志的请求头序列化（T064）：用 JSON 而非 `name: value` 拼接拼接，
+# 因为头值可能含换行/冒号，拼出的文本无法被可靠解析回结构。
+serde_json = "1"
+
 [lints]
 workspace = true

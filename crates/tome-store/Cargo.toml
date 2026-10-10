@@ -8,6 +8,10 @@ license.workspace = true
 
 [dependencies]
 libc = "0.2"
+# T064：`http_log` 的落点实现要满足 `tome_net::HttpLogSink`。
+# 依赖方向仍是单向的（tome-store → tome-net 的 **trait**，而
+# `HttpLogSink` 定义在 tome-net；tome-net 不依赖 tome-store）。
+tome-net = { workspace = true }
 tome-core = { workspace = true }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

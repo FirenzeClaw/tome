@@ -49,6 +49,7 @@ pub mod cookie;
 pub mod error;
 pub mod executor;
 pub mod host;
+pub mod log;
 pub mod proxy;
 pub mod ratelimit;
 pub mod replay;
@@ -59,6 +60,9 @@ pub use cookie::{Cookie, CookieJar};
 pub use error::NetError;
 pub use executor::{ExecutionPolicy, RequestExecutor, RequestExecutorBuilder};
 pub use host::{HostRequest, SCRIPT_REQUEST_TIMEOUT_MS};
+pub use log::{
+    HttpLogSink, LoggingNetHost, NullLogSink, RedactionPolicy, REDACTED, SENSITIVE_HEADERS,
+};
 pub use proxy::{DefaultProxyPolicy, ProxyRoute};
 pub use ratelimit::RateLimiter;
 pub use replay::{ReplayMode, ReplayRecord, ReplayStore};

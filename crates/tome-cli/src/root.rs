@@ -264,6 +264,26 @@ impl AppRoot {
         let executor = build_executor_from(options, &network_settings)?;
         let net = customize_executor(executor)?;
 
+        // ④' HTTP 日志管线（T064）：把执行器包一层，落点指向 http_log 表。
+        //
+        // 包装顺序是 **日志在外、代理在内**：日志要记的是"最终发出去的
+        // 请求"（含配置兜底后的代理），故它必须在代理包装之外。
+        let log_settings = config.http_log();
+        let logging_sink: Arc<dyn tome_net::HttpLogSink> = if log_settings.enabled {
+            Arc::new(tome_store::dao::misc::HttpLogSinkAdapter::new(
+                tome_store::dao::MiscDao::new(db.clone()),
+                log_settings.keep,
+            ))
+        } else {
+            // 关闭时用空实现：路径更直（不必每次多一个 `if let`），
+            // 且 profile 里能看到它的开销确实是零
+            Arc::new(tome_net::NullLogSink)
+        };
+        let net: Arc<dyn NetHost> = Arc::new(
+            tome_net::LoggingNetHost::wrap(net, logging_sink, log_settings.enabled)
+                .with_policy(redaction_policy_from(&config)),
+        );
+
         // ⑤ 书源存储（SQLite + sources.json 投影）
         let source_store = SourceStore::new(
             tome_store::dao::SourceDao::new(db.clone()),
@@ -384,6 +404,20 @@ fn build_executor_from(
     }
 
     builder.build().map_err(|error| error.to_error_kind())
+}
+
+/// 从配置推导脱敏策略（T064）。
+///
+/// # 为什么默认不记响应体
+///
+/// 响应体是唯一"内容不可预知"的部分——脱敏对**结构已知**的两类
+/// （头、表单字段）有效，而正文里可能以任何形态出现凭据。默认不记是
+/// 保守策略：宁可少记，不可泄漏。想看正文的用户在配置里显式打开。
+fn redaction_policy_from(config: &Config) -> tome_net::RedactionPolicy {
+    match config.network.http_log_response_chars {
+        Some(limit) => tome_net::RedactionPolicy::with_response_body(limit),
+        None => tome_net::RedactionPolicy::default(),
+    }
 }
 
 /// 从配置文件里**只读** `storage.data_dir` 一项（用于数据目录的兜底）。
@@ -783,6 +817,108 @@ mod tests {
         // 第二次装配（模拟第二次启动）
         let root = assemble_with_fake(&dir.path, None);
         assert_eq!(root.sources().len().expect("应能数"), 1, "数据应还在");
+    }
+
+    #[test]
+    fn http_日志管线接到真实存储() {
+        // T064 的端到端接线：装配出的跟 → 发一个请求 → http_log 表里应有记录
+        let dir = TempDir::new("http-log");
+        let root = assemble_with_fake(&dir.path, None);
+        assert!(
+            root.http_log_settings().enabled,
+            "默认应开启日志（配置里 http_log_enabled 默认 true）"
+        );
+
+        // 经根的网络能力发一个请求（假宿主返回 200）
+        use tome_core::RequestSpec;
+        let spec = RequestSpec::get("https://example.com/x", "https://source-a.com");
+        root.net_ref().fetch(spec).expect("假宿主应成功");
+
+        // 查 http_log 表
+        let logs = tome_store::dao::MiscDao::new(root.db().clone())
+            .recent_logs(10)
+            .expect("应能查日志");
+        assert_eq!(logs.len(), 1, "应记下这一条请求");
+        assert_eq!(logs[0].url, "https://example.com/x");
+        assert_eq!(logs[0].source_id.as_deref(), Some("https://source-a.com"));
+        assert_eq!(logs[0].response_code, Some(200));
+    }
+
+    #[test]
+    fn 日志关闭时不写库() {
+        let dir = TempDir::new("http-log-off");
+        std::fs::create_dir_all(&dir.path).expect("应能建");
+        std::fs::write(
+            dir.path.join("config.toml"),
+            "[network]
+http_log_enabled = false
+",
+        )
+        .expect("应能写");
+
+        let root = assemble_with_fake(&dir.path, None);
+        assert!(!root.http_log_settings().enabled);
+        use tome_core::RequestSpec;
+        root.net_ref()
+            .fetch(RequestSpec::get("https://example.com/x", "s"))
+            .expect("应成功");
+
+        let logs = tome_store::dao::MiscDao::new(root.db().clone())
+            .recent_logs(10)
+            .expect("应能查");
+        assert!(logs.is_empty(), "关闭时不该写库（FR-017 的可开关）");
+    }
+
+    #[test]
+    fn 日志里_cookie_被脱敏() {
+        // 宪章 V：Cookie/认证头在日志中脱敏
+        let dir = TempDir::new("http-log-redact");
+        let root = assemble_with_fake(&dir.path, None);
+
+        use tome_core::RequestSpec;
+        let mut spec = RequestSpec::get("https://example.com/x", "s");
+        spec.headers.set("Cookie", "session=TOP-SECRET");
+        spec.headers.set("Authorization", "Bearer ALSO-SECRET");
+        root.net_ref().fetch(spec).expect("应成功");
+
+        let logs = tome_store::dao::MiscDao::new(root.db().clone())
+            .recent_logs(1)
+            .expect("应能查");
+        let headers = logs[0].request_headers_redacted.as_deref().expect("应记头");
+        assert!(!headers.contains("TOP-SECRET"), "Cookie 值泄漏：{headers}");
+        assert!(
+            !headers.contains("ALSO-SECRET"),
+            "Authorization 泄漏：{headers}"
+        );
+        assert!(headers.contains("[REDACTED]"), "应有脱敏标记：{headers}");
+    }
+
+    #[test]
+    fn 日志滚动清理不无限增长() {
+        // FR-017：日志须"可清理且不无限增长"
+        let dir = TempDir::new("http-log-roll");
+        std::fs::create_dir_all(&dir.path).expect("应能建");
+        std::fs::write(
+            dir.path.join("config.toml"),
+            "[network]
+http_log_keep = 5
+",
+        )
+        .expect("应能写");
+
+        let root = assemble_with_fake(&dir.path, None);
+        use tome_core::RequestSpec;
+        for index in 0..20 {
+            root.net_ref()
+                .fetch(RequestSpec::get(
+                    format!("https://example.com/{index}"),
+                    "s",
+                ))
+                .expect("应成功");
+        }
+
+        let dao = tome_store::dao::MiscDao::new(root.db().clone());
+        assert_eq!(dao.log_count().expect("应能数"), 5, "应只保留配置里的 5 条");
     }
 
     #[test]

@@ -770,6 +770,44 @@ fn read_cookie(row: &Row<'_>) -> rusqlite::Result<Cookie> {
     })
 }
 
+/// 日志行的类型别名（`tome-store` 侧引用 `tome-core` 的 DTO）。
+pub type HttpLogRow = HttpLogEntry;
+
+/// `http_log` 表的落点实现（T064 的 tome-store 侧）。
+///
+/// # 为什么实现放在 DAO 这边而不在 tome-store 根部
+///
+/// 它需要 `MiscDao` 的 `log_request_keeping`（含滚动清理），而那是本模块
+/// 的职责。放在根部会让根部还得再转发一次。
+///
+/// # 为什么错误被吞掉
+///
+/// 日志是**诊断设施**：它写不进去不该让用户的抓取失败。故 `record` 返回
+/// `()`，失败只静默丢弃（上层不会因为日志表满了而读不了书）。
+///
+/// `[UNCERTAIN]` 完全静默会掩盖"日志一直没写进去"这种配置问题。
+/// 后续若需要可观测性，应加一个内部计数器而不是改签名（改签名会让
+/// 每个调用点都要处理一个它无法处置的错误）。
+pub struct HttpLogSinkAdapter {
+    dao: MiscDao,
+    /// 保留条数（0 = 不清理）
+    keep: usize,
+}
+
+impl HttpLogSinkAdapter {
+    /// 构造。
+    pub fn new(dao: MiscDao, keep: usize) -> Self {
+        Self { dao, keep }
+    }
+}
+
+impl tome_net::HttpLogSink for HttpLogSinkAdapter {
+    fn record(&self, entry: &crate::dao::misc::HttpLogRow) {
+        // 失败静默：日志写不进去不该让用户的抓取失败（见类型文档）
+        let _ = self.dao.log_request_keeping(entry, self.keep);
+    }
+}
+
 /// 从一行读出一条日志。
 fn read_log(row: &Row<'_>) -> rusqlite::Result<HttpLogEntry> {
     Ok(HttpLogEntry {

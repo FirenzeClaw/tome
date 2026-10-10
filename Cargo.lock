@@ -2370,6 +2370,7 @@ dependencies = [
  "chardetng",
  "encoding_rs",
  "reqwest",
+ "serde_json",
  "thiserror",
  "tokio",
  "tome-core",
@@ -2420,6 +2421,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tome-core",
+ "tome-net",
  "toml",
 ]
 

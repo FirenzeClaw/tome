@@ -51,6 +51,7 @@ pub mod dao;
 pub mod datadir;
 pub mod db;
 pub mod error;
+pub mod fts;
 pub mod host;
 pub mod image_cache;
 pub mod pack;

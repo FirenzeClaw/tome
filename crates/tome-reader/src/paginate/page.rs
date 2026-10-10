@@ -437,13 +437,7 @@ impl Paginator {
         }
 
         // --- 2. 贪心装页 ---
-        let mut pages = pack_pages(
-            &chapter_lines,
-            content,
-            line_height_px,
-            available_height,
-            resolution,
-        );
+        let mut pages = pack_pages(&chapter_lines, line_height_px, available_height);
 
         // --- 3. 内容页区间的收尾：让每页认领到"下一页首个字符"为止 ---
         //
@@ -496,13 +490,7 @@ impl Paginator {
 /// - 丢行：该行被跳过，SC-006 的逐字符比对失败
 ///
 /// 溢出留待渲染层处置（那属 S2-4 的视口裁剪），本层只保证没有任何行丢失。
-fn pack_pages(
-    chapter_lines: &[PageLine],
-    _content: &str,
-    line_height_px: f32,
-    available_height: f32,
-    _columns: Columns,
-) -> Vec<Page> {
+fn pack_pages(chapter_lines: &[PageLine], line_height_px: f32, available_height: f32) -> Vec<Page> {
     let mut pages: Vec<Page> = Vec::new();
 
     for page_line in chapter_lines {
@@ -569,6 +557,14 @@ fn pack_pages(
 /// 延伸到**正文末尾**（字符数）。这样"被段落切分丢弃的尾部空白段"
 /// （如正文末尾的连续换行）也有归属——它们通常产出空段而被丢弃，
 /// 但字符仍在原文里。
+///
+/// ## 不需要第三步（曾经有过，已删）
+///
+/// 初版还有一步"修正首尾"（空页取点区间、起点钳到前页终点）。它**不可达**：
+/// [`pack_pages`] 只在"即将放入一行"时才新建页，故本函数见到的每一页都至少
+/// 有一个行盒——第 1 步必然给出非空区间，第 2 步的起点钳制也已覆盖
+/// "起点越过终点"的情形。空章的那一页在**本函数之后**才补（见调用处），
+/// 故不在此列。删掉后全套测试（332 项）逐项不变。
 fn fill_page_ranges(pages: &mut [Page], content: &str) {
     let char_len = content.chars().count();
 
@@ -590,26 +586,11 @@ fn fill_page_ranges(pages: &mut [Page], content: &str) {
             Some(start) => start,
             None => char_len,
         };
-        // 起点不得越过终点（空页的起点可以等于终点）
+        // 起点不得越过终点（页区间是半开的，相邻页共享边界点）
         if pages[index].char_range.start > end {
             pages[index].char_range.start = end;
         }
         pages[index].char_range.end = end;
-    }
-
-    // 第 3 步：修正首尾（首行起点应为该页最小行起点，若为空页则跟随前页终点）
-    let mut cursor = 0usize;
-    for page in pages.iter_mut() {
-        if page.lines.is_empty() {
-            // 空页（留白页或空章首页）：区间取一个点，让拼接不受影响
-            page.char_range = cursor..cursor;
-        } else {
-            page.char_range.start = cursor.max(page.char_range.start.min(page.char_range.end));
-            if page.char_range.end < page.char_range.start {
-                page.char_range.end = page.char_range.start;
-            }
-        }
-        cursor = page.char_range.end;
     }
 }
 

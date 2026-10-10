@@ -381,9 +381,7 @@ mod tests {
     #[test]
     fn 打开后_schema_版本为_v1() {
         let (dir, db) = temp_db("version");
-        let version = db
-            .read(schema_version)
-            .expect("应能读版本");
+        let version = db.read(schema_version).expect("应能读版本");
         assert_eq!(version, SCHEMA_VERSION);
         let _ = std::fs::remove_dir_all(dir);
     }

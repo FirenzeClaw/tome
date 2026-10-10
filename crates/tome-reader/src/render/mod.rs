@@ -13,6 +13,7 @@
 //! | [`glyph_cache`] | 字形缓存键 + swash 栅格化 + 聚合上传 | FR-043 / FR-047 | [DONE] T033 |
 //! | [`batch`] | 绘制指令序列（顺序固定 + 确定性） | FR-048 / SC-012 | [DONE] T034 |
 //! | [`offscreen`] | 离屏渲染 + 256 对齐读回（能力错误诚实报告） | FR-053 | [DONE] T035 |
+//! | [`pixel_diff`] | pixelmatch-YIQ 双闸门（快照比对算法） | SC-011 | [DONE] T036 |
 //!
 //! 后续落点（见 `specs/002-typesetting-renderer/plan.md` Project Structure）：
 //! `animate.rs`（T038）· `image.rs`（T039）· `fonts.rs`（T037）。
@@ -22,6 +23,7 @@ pub mod batch;
 pub mod glyph_cache;
 pub mod offscreen;
 pub mod pipeline;
+pub mod pixel_diff;
 
 /// 当前构建可用的图形后端名。
 ///

@@ -1,0 +1,79 @@
+[package]
+name = "tome-reader"
+description = "tome 排版渲染层：cosmic-text 整形 + 自研中文排版规则 + 分页/滚动 + wgpu 自绘渲染"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+# 排版层只经 tome-core 的接缝取内容/仓库/Theme/ErrorKind（宪法 IV 单向依赖）。
+# 本 crate **不依赖** tome-source/tome-store/tome-net——排版不感知缓存与抓取
+# （FR-004：正文唯一来源是 ContentProvider，由组合根注入）。
+tome-core = { workspace = true }
+
+# --- 排版栈（headless：无窗口系统、无图形 API，FR-052 的依赖面保证）---
+#
+# cosmic-text 承担整形与断行（research R1）：其断行有硬依赖无 feature 开关，
+# 故本层采用「ShapeLine 克隆 + ShapeWord 合并 + x_advance 改写」后处理路径。
+# 0.19 起整形后端换为 harfrust（纯 Rust，无 C 依赖）。
+#
+# **不可写 `default-features = false`**：cosmic-text 的 `std` feature 是
+# `skrifa/std` 的传播链（其 Cargo.toml: `std = ["skrifa/std", ...]`），
+# 而 skrifa 内部有 `compile_error!("Either feature \"std\" or \"libm\" ...")`
+# 的硬检查。关掉 default 会让 skrifa 既不 std 也不 libm，**整个栈编译不过**
+# （实测报 8 处 `no method named round/sin/... found for f32`）。
+# 这是 0.19.0 的打包形态，不是本层的选择——只排除 swash 与 fontconfig 两项。
+# 注：swash 仍会**经本 crate 自己的 `render` feature 单独引入**（R2），
+# 故这里排除的是 cosmic-text 自己那份可选的 swash 依赖。
+cosmic-text = { version = "0.19.0", default-features = false, features = ["std"] }
+
+# 字形簇边界判定（FR-003：对外位置一律字符下标，簇内不得断开）。
+# 注：cosmic-text 自身也依赖 unicode-segmentation，此处是**显式**声明——
+# 本层直接在 T010 的文本模型里用它做簇切分，不经转发依赖（Rust 不允许）。
+unicode-segmentation = "1.12"
+
+# 本 crate 自身错误类型（AGENTS.md：每个 crate 拥有自己的错误类型）。
+thiserror = "2.0.21"
+
+# --- 渲染栈（feature 门控）---
+#
+# 为什么门控：排版计算必须能在**无图形环境**下完整运行（宪法 IV / FR-052）。
+# 让 wgpu/swash/etagere 只在 `render` feature 下进依赖图，即可用
+# `--no-default-features` 产出一个**依赖树里根本没有图形包**的构建——这不是
+# "运行时不用"，而是"编译期不存在"，CI 的 headless job 据此断言（T032 验收）。
+#
+# 为什么默认**开启**：开发/发布构建都需要渲染栈；门控的目的是给 headless
+# 构建一个开关，不是让默认构建残缺。headless CI job 显式
+# `--no-default-features`；此时 `render` 子命令须以
+# `UnsupportedCapability{capability:"offscreenRendering"}` + 退出码 3 回应。
+#
+# **必须保留 `std`**：wgpu 的 `noop`/`web` 路径都依赖 `std`；关掉 default
+# 而不带 std 会让 wgpu-core 的 `cfg(feature = "std")` 分支缺失，得到一堆
+# 更晦涩的错误。这里排除的是不需要的 **web/webgpu 后端与 dxc**，
+# 保留本项目的四个原生后端（dx12/metal/vulkan/gles）。
+wgpu = { version = "30.0", optional = true, default-features = false, features = [
+    "std",
+    "wgsl",
+    "dx12",
+    "metal",
+    "vulkan",
+    "gles",
+] }
+# 栅格化经 cosmic-text 的 SwashCache 复用同版本 swash（research R2：零新增字体解析栈）
+swash = { version = "0.2", optional = true }
+# atlas 打包（glyphon 同款 BucketedAtlasAllocator）
+etagere = { version = "0.3", optional = true }
+
+[dev-dependencies]
+# 语料加载与快照测试需要文件系统与 JSON 解析（仅测试目标，不进生产依赖图）
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+default = ["render"]
+# 渲染管线门控（见上方依赖注释）。关闭后依赖树零图形包。
+render = ["dep:wgpu", "dep:swash", "dep:etagere"]
+
+[lints]
+workspace = true

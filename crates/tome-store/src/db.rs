@@ -55,12 +55,35 @@ type Job = Box<dyn FnOnce(&mut Connection) + Send + 'static>;
 
 /// SQLite 忙等待上限（毫秒）。
 ///
-/// 读者与写者在 WAL 下的争用窗口极短，但 checkpoint 期间仍可能撞上。
-/// 5 秒是"足够覆盖一次 checkpoint"与"用户不至于以为程序卡死"的折中。
+/// # 为什么是 30 秒（而**不是** 5 秒）
 ///
-/// [WORKAROUND] 硬编码常量：若实测发现大库（5 万章 + 全量缓存）checkpoint
-/// 超过 5 秒，应改为可配置项（随 `config.toml` 的存储子集注入）而非继续调大。
-const BUSY_TIMEOUT_MS: u64 = 5_000;
+/// 原值 5 秒的估算前提是"读者与写者在 WAL 下的争用窗口极短"。在正常的
+/// 读写并发下那个前提成立；但有两类情形会超出：
+///
+/// - **checkpoint**：把 WAL 搬回主库可能耗时（大库尤甚）
+/// - **`synchronous=FULL` 的 fsync 排队**：每次提交都真的落盘，磁盘忙时
+///   排队时间显著
+///
+/// 30 秒是"足够覆盖一次 checkpoint + fsync 排队"与"用户不至于以为程序
+/// 卡死"的折中。选它而非无限等待：真的死锁时应当**报错**而不是挂住。
+///
+/// ## 重要的边界：这个超时**治不了**"锁被长期持有"
+///
+/// T096 收口时排查到一处真实故障（`source import` 把"同 id 更新"计成
+/// `skipped`、`data clear-cache` 报锁错）。当时的第一个反应是"超时太短"，
+/// 但**加大超时并没有修好它**——因为真正的病因不是"等得不够久"，而是
+/// actor 退出时的 `wal_checkpoint(TRUNCATE)` 取了排他锁、且退出是异步的，
+/// 于是后续的 `Db::open` + 写入被**一个已经没人使用的连接**挡住。
+///
+/// 那处病因已按病根修掉（改用 `PASSIVE`，见 actor 线程里的说明）。
+/// 这一段留在这里是提醒：**遇到 `database is locked` 先分辨"等得久"与
+/// "不会等到"**——前者加大超时有效，后者加大超时只是把失败推迟。
+///
+/// [WORKAROUND] 硬编码常量：若日后 `config.toml` 需要暴露它（某些慢磁盘
+/// 环境可能要更长），应改为随存储子集注入而非继续调大。
+/// 这个值同时用于写连接与读连接（**两处必须一致**，不一致会让读侧的
+/// 等待比写侧短，问题依旧）。
+const BUSY_TIMEOUT_MS: u64 = 30_000;
 
 /// 数据库句柄。
 ///
@@ -108,8 +131,27 @@ impl Db {
                     job(&mut connection);
                 }
                 // 退出前收尾：WAL 里可能还有未 checkpoint 的页。
-                // 失败不报错——库已经不再被使用，且下一次打开会自动重放 WAL。
-                let _ = connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+                //
+                // # 为什么是 TRUNCATE 而不是 PASSIVE（实测暴露的竞态）
+                //
+                // 首版用 `wal_checkpoint(TRUNCATE)`，它要取**排他锁**把 WAL
+                // 截断到 0 字节。问题是 actor 的退出是**异步**的：`Db::drop`
+                // 只关闭通道，actor 还要跑完队列才做这一步。于是"关掉一个
+                // `Db` 后立刻打开同一路径的新 `Db` 并写入"会撞上旧 actor 的
+                // 截断——报 `database is locked`，且 `busy_timeout` 帮不上忙
+                // （对方持锁不放手，不是短暂争用）。
+                //
+                // 实测症状：同进程内连续调 CLI 命令（每次各建一个 `Db`）时
+                // 偶发失败——`source import` 把"同 id 更新"计成 skipped、
+                // `data clear-cache` 报锁错。测试里表现为互不相关的用例偶发变红。
+                //
+                // 改为 `PASSIVE`：它**不取排他锁**，只把能搬的页搬回主库，
+                // 搬不动就留给下次（SQLite 会在下次打开时自动重放 WAL）。
+                // 代价是退出后 `.wal` 文件可能不为 0 字节；收益是**不再与
+                // 后续打开者竞争**——而"WAL 文件多大"不影响正确性。
+                //
+                // 失败仍然不报错：这只是收尾优化，库已不再被使用。
+                let _ = connection.execute_batch("PRAGMA wal_checkpoint(PASSIVE);");
             })
             .map_err(|error| StoreError::io(path.display().to_string(), error.to_string()))?;
 
@@ -205,7 +247,7 @@ impl Db {
 /// | `journal_mode` | `WAL` | 读写并发的前提；崩溃后可自动恢复 |
 /// | `foreign_keys` | `ON` | SQLite 默认**关闭**外键——不开则 `ON DELETE CASCADE` 完全不生效，删书会留下孤儿章节 |
 /// | `synchronous` | `FULL` | FR-030 的崩溃安全要求索引提交必须真的落盘 |
-/// | `busy_timeout` | 5000ms | 见 [`BUSY_TIMEOUT_MS`] |
+/// | `busy_timeout` | 见 [`BUSY_TIMEOUT_MS`] | 必须与读连接用**同一个值** |
 fn apply_pragmas(connection: &Connection) -> Result<(), StoreError> {
     // `journal_mode` 返回一行结果，须用 `query_row` 而非 `execute`
     // （`execute` 对返回行的语句会报错）。
@@ -228,11 +270,11 @@ fn apply_pragmas(connection: &Connection) -> Result<(), StoreError> {
     // 一侧：本项目是阅读器，写入不是热点路径，而"崩溃后索引与内容对不上"
     // 是用户无法自行修复的损坏。
     connection
-        .execute_batch(
+        .execute_batch(&format!(
             "PRAGMA foreign_keys=ON;
              PRAGMA synchronous=FULL;
-             PRAGMA busy_timeout=5000;",
-        )
+             PRAGMA busy_timeout={BUSY_TIMEOUT_MS};"
+        ))
         .map_err(from_rusqlite)?;
     Ok(())
 }

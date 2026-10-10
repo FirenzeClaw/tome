@@ -405,15 +405,47 @@ fn resolve_system(system_data_dir: Option<&Path>, note: Option<&str>) -> Resolve
 /// 唯一可靠的判据是真的写一次。这是 `data-model.md`「启动期检测」的意图——
 /// 检测的目的是**提前发现**，而不是预测。
 ///
-/// 文件名带进程号：并发启动的两个实例不会互相干扰。
+/// # 探测文件名的唯一性（并发下的正确性）
+///
+/// 文件名带**进程号 + 线程号**，而不是只带进程号。
+///
+/// ## 为什么只带进程号不够（实测踩到的坑）
+///
+/// 首版只用 `std::process::id()`。那在"一个进程里多个线程各自解析数据目录"
+/// 时会出问题：两个线程探测**同一个目录**时用的是**同一个文件名**，
+/// 于是 A 的"先删一次"会把 B 刚写下的探测文件删掉，B 随后的
+/// `remove_file` 报 not-found → `probe` 失败 → 数据目录被判为不可用。
+///
+/// 后果不是"测试挂了"这么轻：它会**悄悄退化到默认数据目录**，于是本该
+/// 隔离在临时目录里的写入落到了共享位置——表现为互不相关的测试互相污染
+/// （实测症状：`source import` 的同 id 更新计数偶发为 0、清缓存偶发
+/// "database is locked"）。
+///
+/// 加上线程号后，每个调用者有自己的文件，互不干扰。
+///
+/// ## 为什么不干脆用一个随机数
+///
+/// `thread::current().id()` 是**廉价且必定可用**的（不需要随机源，也不
+/// 依赖时钟）。随机数要引 rand 或手搓，而这里只需要"同一时刻不同调用者
+/// 不撞名"——线程号恰好就是这个语义，且与"并发"这件事一一对应。
 fn probe(dir: &Path) -> Result<(), StoreError> {
     std::fs::create_dir_all(dir).map_err(|error| from_io(dir, error))?;
 
-    let marker = dir.join(format!(".tome-write-probe-{}", std::process::id()));
-    // 先删一次：上一次异常退出可能留下探测文件（用户看到会疑惑）
-    let _ = std::fs::remove_file(&marker);
-    std::fs::write(&marker, b"probe").map_err(|error| from_io(dir, error))?;
-    std::fs::remove_file(&marker).map_err(|error| from_io(dir, error))?;
+    let marker = dir.join(format!(
+        ".tome-write-probe-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    // 先删一次：上一次异常退出可能留下探测文件（用户看到会疑惑）。
+    // 容忍 not-found——那说明本来就没有，不是错误。
+    match std::fs::remove_file(&marker) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(from_io(&marker, error)),
+    }
+
+    std::fs::write(&marker, b"probe").map_err(|error| from_io(&marker, error))?;
+    std::fs::remove_file(&marker).map_err(|error| from_io(&marker, error))?;
 
     // 目录项清点：目录存在且可写，但**读**不了（如只给了写权限）时，
     // 后续的目录扫描会失败。这里一并挡住。

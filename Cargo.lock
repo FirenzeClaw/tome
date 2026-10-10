@@ -3060,6 +3060,7 @@ dependencies = [
  "serde",
  "serde_json",
  "swash",
+ "tempfile",
  "thiserror",
  "tome-core",
  "unicode-segmentation",

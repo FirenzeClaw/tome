@@ -65,10 +65,16 @@ swash = { version = "0.2", optional = true }
 # atlas 打包（glyphon 同款 BucketedAtlasAllocator）
 etagere = { version = "0.3", optional = true }
 
-[dev-dependencies]
-# 语料加载与快照测试需要文件系统与 JSON 解析（仅测试目标，不进生产依赖图）
+# 语料装载（`src/corpus.rs`，T004）。与 001 的 `tome_rule::corpus` 同构——
+# 装载与校验逻辑放在**库**里而非测试里，理由是：S2-1 起各切片的验收测试
+# （`tests/*.rs`）都要用它，而集成测试无法共享彼此的私有代码；放进库里
+# 才是单一来源。CLI 的 `verify-layout`（T048）同样消费它。
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[dev-dependencies]
+# 测试要写临时目录（不污染仓库）
+tempfile = "3"
 
 [features]
 default = ["render"]

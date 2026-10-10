@@ -42,6 +42,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod corpus;
 pub mod error;
 
 #[cfg(feature = "render")]

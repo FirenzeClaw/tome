@@ -53,6 +53,7 @@ pub mod error;
 pub mod layout;
 pub mod paginate;
 pub mod precalc;
+pub mod record;
 pub mod rules;
 pub mod scroll;
 pub mod text;

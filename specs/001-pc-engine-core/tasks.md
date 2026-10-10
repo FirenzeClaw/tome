@@ -377,12 +377,12 @@
 
 ### 差分测试 harness（宪章 I/III 的度量落地）
 
-- [ ] T084 [US2] tome-cli + tools：上游参考运行器接线（**干净室硬性约束**：仅命令行/API 调用上游可执行产物，不打开上游 `.kt` 源码；对照输出落盘到 gitignore 的 `testdata/captures/`；指定核对人确认未读源码）于 `tools/ref-runner/`（plan.md 干净室执行边界任务）
-  - [ ] 上游黑盒运行产生对照数据；产物不入仓库；核对人签字确认无源码接触
-- [ ] T085 [US2] tome-cli：`verify --corpus`（合成语料差分 + 逐条 diff + 一致率）+ 覆盖率矩阵（FR-005b 能力清单逐项覆盖）于 `crates/tome-cli/src/verify.rs`（FR-038 一致性验证能力 / SC-002a）
-  - [ ] 输出一致率 + 覆盖矩阵；任一能力无对应用例则报告缺口
-- [ ] T086 [US2] tome-cli：`verify --real-sources`（真实书源端到端对照 + 首轮基线记录 + 回归不得回退）于 `crates/tome-cli/src/verify_real.rs`（SC-002b）
-  - [ ] 首轮基线落盘；后续迭代比对基线
+- [x] T084 [US2] tome-cli + tools：上游参考运行器接线（**干净室硬性约束**：仅命令行/API 调用上游可执行产物，不打开上游 `.kt` 源码；对照输出落盘到 gitignore 的 `testdata/captures/`；指定核对人确认未读源码）于 `tools/ref-runner/`（plan.md 干净室执行边界任务）
+  - [x] 上游黑盒运行产生对照数据；产物不入仓库；核对人签字确认无源码接触
+- [x] T085 [US2] tome-cli：`verify --corpus`（合成语料差分 + 逐条 diff + 一致率）+ 覆盖率矩阵（FR-005b 能力清单逐项覆盖）于 `crates/tome-cli/src/verify.rs`（FR-038 一致性验证能力 / SC-002a）
+  - [x] 输出一致率 + 覆盖矩阵；任一能力无对应用例则报告缺口
+- [x] T086 [US2] tome-cli：`verify --real-sources`（真实书源端到端对照 + 首轮基线记录 + 回归不得回退）于 `crates/tome-cli/src/verify_real.rs`（SC-002b）
+  - [x] 首轮基线落盘；后续迭代比对基线
 
 ### 数据导入导出 + 阅读记录 + 书内搜索
 

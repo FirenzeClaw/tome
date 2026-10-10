@@ -50,6 +50,7 @@ pub mod config;
 pub mod dao;
 pub mod datadir;
 pub mod db;
+pub mod delete;
 pub mod error;
 pub mod fts;
 pub mod host;

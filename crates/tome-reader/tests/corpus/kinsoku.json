@@ -1,0 +1,166 @@
+[
+  {
+    "name": "kinsoku:闭标点不得置于行首",
+    "input": {
+      "kind": "text",
+      "paragraphs": [
+        "他的手指在书页边缘停了很久。那一行字写的是「山有木兮木有枝」，后面跟着一个逗号，逗号之后是半句话，半句话没有说完，句子就断了。他没有再往下翻，只是坐在那里，看着那个断裂的地方，像是在等一个永远也不会来的下文。"
+      ]
+    },
+    "geometry": {
+      "measure_px": 342.0,
+      "font_size_px": 19.0,
+      "line_height": 1.85,
+      "paragraph_indent_em": 2.0
+    },
+    "expect": {
+      "kind": "kinsoku",
+      "forbidden_at_line_start": ["，", "。", "、", "；", "：", "？", "！", "」", "』", "）", "》", "〉", "”", "’", "…", "—"],
+      "forbidden_at_line_end": ["「", "『", "（", "《", "〈", "“", "‘"]
+    },
+    "basis": "UAX#14 LineBreak.txt 18.0.0 的 CL（Close Punctuation）与 EX（Exclamation/Question）类不得置于行首；OP（Open Punctuation）类不得置于行末。CLreq（W3C 中文排版需求）§3.1.1「行首行尾禁则」以同口径规定。"
+  },
+  {
+    "name": "kinsoku:开标点不得置于行末",
+    "input": {
+      "kind": "text",
+      "paragraphs": [
+        "她在信里写道（那是很多年前的事了），当时并不明白那句话的意思。后来她读过很多书，走过很多地方，才渐渐懂得：有些话是说给未来的自己听的，而写下它的人，其实并不知道未来会是什么样子。"
+      ]
+    },
+    "geometry": {
+      "measure_px": 361.0,
+      "font_size_px": 19.0,
+      "line_height": 1.85,
+      "paragraph_indent_em": 2.0
+    },
+    "expect": {
+      "kind": "kinsoku",
+      "forbidden_at_line_start": ["）", "」", "。", "，"],
+      "forbidden_at_line_end": ["（", "「"]
+    },
+    "basis": "UAX#14 的 OP 类（开括号、前引号）不得置于行末；CL 类（闭括号、后引号）不得置于行首。CLreq §3.1.1 同口径。本条的版心宽刻意取 361px = 19 字身，使断点正好落在「（」附近，用于验证规则真的生效而非恰好没触发。"
+  },
+  {
+    "name": "kinsoku:破折号对与省略号的补丁条目",
+    "input": {
+      "kind": "text",
+      "paragraphs": [
+        "他说——那是很久以前的事了——人这一生总要留下点什么。可是留下的东西……究竟算不算数呢？风从窗缝里挤进来，吹动了桌上的纸页。"
+      ]
+    },
+    "geometry": {
+      "measure_px": 247.0,
+      "font_size_px": 19.0,
+      "line_height": 1.85,
+      "paragraph_indent_em": 2.0
+    },
+    "expect": {
+      "kind": "kinsoku",
+      "forbidden_at_line_start": ["…", "？"],
+      "forbidden_at_line_end": []
+    },
+    "basis": "研究结论 R1 指出：cosmic-text 依赖的 unicode-linebreak 已覆盖 UAX#14 基础避头尾，自研规则是**补丁式**的。破折号（U+2014 EM DASH）在 UAX#14 中属 B2 类，其前后**都可**断行，与中文排版惯例（破折号不断开）不符，故需补丁——这是本项目相对 UAX#14 的显式增补条目，不是规范原文。省略号 U+2026 属 IN 类，同样需按中文惯例处理。"
+  },
+  {
+    "name": "squeeze:行末逗号压缩半字身",
+    "input": {
+      "kind": "text",
+      "paragraphs": [
+        "书页翻开的时候，光线正好落在那一行字上，把墨色照得发亮，像是刚刚写上去的一样。"
+      ]
+    },
+    "geometry": {
+      "measure_px": 342.0,
+      "font_size_px": 19.0,
+      "line_height": 1.85,
+      "paragraph_indent_em": 2.0
+    },
+    "expect": {
+      "kind": "squeeze",
+      "compression_px": [0.0, 0.0, 9.5]
+    },
+    "basis": "CLreq §3.1.5「标点挤压」：行首/行末的标点可压缩至半字身。19px 字号下半字身为 9.5px。注意这是**允许值**而非强制值——实现须在压缩下限内优先挤压，超出则走 FR-008 硬序的后续步骤。"
+  },
+  {
+    "name": "squeeze:连续标点各自压缩且不改变字符区间归属",
+    "input": {
+      "kind": "text",
+      "paragraphs": [
+        "「真的吗？」他问。「当然，」她说，「我什么时候骗过你。」然后两人都笑了，笑声在屋子里荡开，混着窗外的雨声，久久没有散去，直到夜深了才渐渐停下来，屋子里重新安静得像什么都没有发生过一样。"
+      ]
+    },
+    "geometry": {
+      "measure_px": 361.0,
+      "font_size_px": 19.0,
+      "line_height": 1.85,
+      "paragraph_indent_em": 2.0
+    },
+    "expect": {
+      "kind": "squeeze",
+      "compression_px": [0.0, 0.0, 0.0, 9.5, 19.0]
+    },
+    "basis": "FR-006 明文要求：压缩 MUST NOT 改变字符的顺序或字符区间归属。故本用例的期望只描述**宽度压缩量**，字符区间由 S2-1 的区间归属断言单独覆盖（`chars_per_line` 的计数不因压缩而变）。压缩量取半字身（9.5px）与整字身（19px）两档，对应单标点与连续两标点的情形。"
+  },
+  {
+    "name": "mixed:中西文交界最小间隙且无超宽",
+    "input": {
+      "kind": "text",
+      "paragraphs": [
+        "这本书的英文名是 The Shadow of the Wind，作者 Carlos Ruiz Zafón 在 2001 年出版它的时候，大概没有想到它会被翻译成几十种语言，也没有想到会有这么多人记得那个被遗忘的书之墓地。"
+      ]
+    },
+    "geometry": {
+      "measure_px": 380.0,
+      "font_size_px": 19.0,
+      "line_height": 1.85,
+      "paragraph_indent_em": 2.0
+    },
+    "expect": {
+      "kind": "mixed_script",
+      "overflow": [false, false, false, false, false]
+    },
+    "basis": "FR-009：中西文/数字交界处按最小间隙处理，西文单词优先整词断行。SC-003 要求混排行长在版心内浮动且无超宽，故 `overflow` 全为 false。版心 380px 刻意取非字身整数倍（380/19 = 20 整），使西文单词恰好需要整词回退。"
+  },
+  {
+    "name": "mixed:超长西文单词退化为按字符断行",
+    "input": {
+      "kind": "text",
+      "paragraphs": [
+        "这个术语拼作 pneumonoultramicroscopicsilicovolcanoconiosis，是一个刻意造出来的长词，用来测试当一个西文单词长于整行时，排版是否退化为按字符断行而不是溢出容器。"
+      ]
+    },
+    "geometry": {
+      "measure_px": 228.0,
+      "font_size_px": 19.0,
+      "line_height": 1.85,
+      "paragraph_indent_em": 2.0
+    },
+    "expect": {
+      "kind": "mixed_script",
+      "overflow": [false, false, false, false, false, false]
+    },
+    "basis": "FR-009：「整词放不下且单词长于整行时 MUST 退化为按字符断行」。版心 228px = 12 字身，远小于该单词（45 字符），故必然触发退化路径。overflow 全 false 即断言退化未导致溢出——这是本用例与其他混排用例的区别（它测的是**退化分支**而非正常分支）。"
+  },
+  {
+    "name": "kinsoku_exceptions:版心窄于单字时的例外记录",
+    "input": {
+      "kind": "text",
+      "paragraphs": [
+        "「。」这两个标点挤在一行里，版心被迫压到极窄，任何一种排法都会违反某条禁则，此时硬序走到第四步——放弃禁则——但必须留下记录。"
+      ]
+    },
+    "geometry": {
+      "measure_px": 9.0,
+      "font_size_px": 19.0,
+      "line_height": 1.85,
+      "paragraph_indent_em": 0.0
+    },
+    "expect": {
+      "kind": "kinsoku_exceptions",
+      "count": 1,
+      "rule_ids": ["kinsoku.line_start_close_punctuation"]
+    },
+    "basis": "FR-008：硬序为 ①挤压 → ②悬挂（≤半字身）→ ③整字回退 → ④放弃禁则，走到第 ④ 步 MUST 记录例外（字符位置 + 触发的规则），记录 MUST 可枚举可计数供 SC-002 判定。版心 9px < 半字身 9.5px，故悬挂（第②步）也不可行；单字身 19px 超出版心，整字回退（第③步）亦不可行——四步中前三步被几何条件排除，必然落到第 ④ 步。这是**刻意构造**的必然例外，不是实现缺陷。"
+  }
+]

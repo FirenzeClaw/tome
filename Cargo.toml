@@ -8,6 +8,7 @@ members = [
     "crates/tome-rule",
     "crates/tome-source",
     "crates/tome-local",
+    "crates/tome-reader",
     "crates/tome-cli",
 ]
 
@@ -29,6 +30,7 @@ tome-js = { path = "crates/tome-js" }
 tome-rule = { path = "crates/tome-rule" }
 tome-source = { path = "crates/tome-source" }
 tome-local = { path = "crates/tome-local" }
+tome-reader = { path = "crates/tome-reader" }
 tome-cli = { path = "crates/tome-cli" }
 
 [profile.release]

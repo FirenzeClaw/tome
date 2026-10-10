@@ -1,0 +1,89 @@
+# S2-0 spike —— 独立 crate，**刻意不进主 workspace**
+#
+# ## 为什么不进 workspace
+#
+# 本 crate 是**一次性验证骨架**（tasks.md 002 T005-T009）。若并入 workspace：
+# ① 它要引 wgpu（T007/T009 的离屏探针），会把图形栈拉进主构建链路——
+#    而 `tome-reader` 的 headless 构建恰恰要求零图形包（FR-052，见
+#    `scripts/check-reader-features.sh`）；② 它要引字体子集化的 dev 依赖
+#    （T008），那是构建期工具不是产品依赖；③ 污染 Cargo.lock 的依赖图，
+#    而 workspace 的 lints/profile 是**生产**配置，spike 的依赖不该影响它们。
+#
+# 故此处用 `[workspace]` 空表显式脱离父 workspace（Cargo 的机制：子目录中被
+# 显式声明为独立 workspace 根的包不属于外层 workspace）。
+#
+# ## 为什么要继承 workspace 的 release profile（T007 对照的前提）
+#
+# T007 要测「cosmic-text 全栈带来的体积增量」，而体积数字只有在**同一套优化
+# 配置**下才有可比性、也才能外推到真实产物。故此处逐项复制根 Cargo.toml 的
+# `[profile.release]`（lto=fat / codegen-units=1 / strip / panic=abort）。
+# 复制而非继承是被迫的：脱离 workspace 后 `[profile]` 不再从父级继承。
+# 若日后根配置变更，**必须同步改这里**，否则 T007 的基线失准。
+
+[workspace]
+
+[package]
+name = "tome-s2-spike"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "S2-0 可行性验证骨架（一次性，不进主 workspace）"
+
+[[bin]]
+name = "tome-s2-spike"
+path = "src/main.rs"
+
+[lib]
+name = "tome_s2_spike"
+path = "src/lib.rs"
+
+[dependencies]
+# --- 排版栈（T005/T006 的验证对象；与主 workspace 的 tome-reader 同版本）---
+# 必须带 `std`：cosmic-text 的 `std` feature 是 `skrifa/std` 的传播链，
+# skrifa 有 `compile_error!("Either feature std or libm ...")` 硬检查，
+# `default-features = false` 会让整个栈编译不过（T001 实测踩到）。
+cosmic-text = { version = "0.19.0", optional = true, default-features = false, features = ["std"] }
+
+# 字形簇切分（spike 构造语料时用；与 tome-reader 同源）
+unicode-segmentation = { version = "1.12", optional = true }
+
+# --- 渲染栈（T007 体积对照 / T009 离屏探针）---
+# 与 tome-reader 的 `render` feature 同配置，体积对照才有意义。
+wgpu = { version = "30.0", optional = true, default-features = false, features = [
+    "std",
+    "wgsl",
+    "dx12",
+    "metal",
+    "vulkan",
+    "gles",
+] }
+swash = { version = "0.2", optional = true }
+etagere = { version = "0.3", optional = true }
+
+# 读回纹理后要落 PNG（T009 的基线图）；只有 deflate 需要，不要全套 image 特性。
+png = { version = "0.18", optional = true }
+
+[features]
+default = []
+# T007 的体积对照开关。**默认全关**，为的是得到一个真正的"空壳"臂——
+# 差值才是"接入该栈的代价"，而不是"某个 feature 的代价"
+# （对齐 S0 spike 的 rquickjs 测法）。
+#
+# `cosmic-text-stack`：排版栈（cosmic-text + unicode-segmentation）。
+# 开启后 word_merge / hinting 两个验证模块参与编译（它们需要 cosmic-text）。
+cosmic-text-stack = ["dep:cosmic-text", "dep:unicode-segmentation"]
+
+# `render-stack`：渲染栈（wgpu + swash + etagere + png）。
+# 开启后 offscreen_probe 参与编译。**这一臂默认不开**——它把三平台图形栈
+# 拉进依赖图，只在 T007 的离屏验证与 T009 的探针时才需要。
+render-stack = ["dep:wgpu", "dep:swash", "dep:etagere", "dep:png"]
+
+# 便捷组合：两栈全开（T009 的探针需要同时有排版与渲染）
+full-stack = ["cosmic-text-stack", "render-stack"]
+
+[profile.release]
+# 与根 Cargo.toml 逐项一致（见文件头说明）
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"

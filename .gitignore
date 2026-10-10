@@ -56,3 +56,13 @@
 *.swp
 Thumbs.db
 .DS_Store
+
+# T008 字体子集化的中间产物
+#
+# `.tmp-font/` 放**源字体包**（思源宋体 CN 2.003R，解包后 66MB）与临时分片。
+# 按 plan.md 与 tasks.md T008 的约定：**源 zip 不入 git，只入子集产物**
+# ——源包体积大、可从公开 release 重取，而子集产物是钉版的构建输入
+# （`assets/fonts/`）必须入仓库以保证 CI 零下载。
+#
+# 重取方式（含 sha256 自校验与镜像选择）见 tools/subset-font.py 的模块文档。
+/.tmp-font/

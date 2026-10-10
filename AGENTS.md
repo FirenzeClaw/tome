@@ -69,20 +69,58 @@ crates/
 <!-- AUTO:BUILD -->
 ## 构建与运行
 
-- 构建：`cargo build --workspace`
-- 运行：`cargo run -p tome-cli -- <子命令>`（二进制名 `tome-cli`）。已实现的子命令：
-  - `source import <file|--url <u>|--stdin> [--data-dir <dir>]` —— 导入书源并落注册表
-  - `search <source-id> <keyword> [--source-file <f>] [--format json|human]` —— 搜索
-  - `run <source-id> --action search [--input <关键词>]` —— 通用执行入口（`info`/`toc`/`content` 报能力错误，退出码 3）
-  - 全局：`--format json|human`、`--record/--replay/--offline`（录制回放）、`--data-dir`、`-h/--help`
-  - 退出码：`0` 成功 / `1` 业务错误 / `2` 用法错误 / `3` 不支持能力
-- 测试：`cargo test --workspace`；rquickjs 依赖守卫 `bash scripts/check-rquickjs-features.sh`（CI 同守；`--self-test` 校验守卫自身有效）
-- Lint / 类型检查：`cargo clippy --workspace -- -- -D warnings` 与 `cargo fmt --check`
-- 三平台产物：`.github/workflows/ci.yml`（windows-gnu / macos / ubuntu matrix；首次 push 前未经实跑验证）
+### 构建与检查（均已在仓库根实跑验证）
 
-**工具链现状（2026-10-09 实测）**：`cargo 1.99.0` / `rustc 1.99.0`（stable-x86_64-pc-windows-gnu，由 `rust-toolchain.toml` 钉版 channel=stable；同日 rustup 同步自 1.98.0 升至 1.99.0）。MSRV 声明 `rust-version = "1.98"` 尚未经 1.98 实测。
+| 用途 | 命令 |
+|---|---|
+| 构建 | `cargo build --workspace` |
+| 测试 | `cargo test --workspace` |
+| Lint（CI 同命令） | `cargo clippy --workspace --all-targets -- -D warnings` |
+| 格式检查（CI 同命令） | `cargo fmt --all -- --check` |
+| 文档构建（T099 门） | `cargo doc --no-deps --workspace` |
+| rquickjs 依赖守卫 | `bash scripts/check-rquickjs-features.sh`（`--self-test` 校验守卫自身有效） |
 
-**测试规模（2026-10-10 S1-2 实测）**：`cargo test --workspace` **928 passed / 0 failed**。
+### 运行 CLI
+
+`cargo run -p tome-cli -- <子命令>`（二进制名 `tome-cli`；直接跑 `--help` 打全部命令面）。
+
+全局选项：`--format json|human`、`--record/--replay/--offline`（录制回放）、`--data-dir <path>`、`--config <path>`、`--lang zh|en`、`-h/--help`。
+退出码：`0` 成功 / `1` 业务错误 / `2` 用法错误 / `3` 不支持能力。
+
+常用子命令：
+
+- `source import <file|--url <u>|--stdin> [--data-dir <dir>]` —— 导入书源并落注册表
+- `search <source-id> <keyword> [--source-file <f>] [--format json|human]` —— 搜索
+- `info|toc|content <source-id> <url>` —— 详情 / 目录 / 正文（净化后）
+- `run <source-id> --action <a> [--input <s>]` —— 通用执行入口
+- `run --rule <规则> --input <文本> --trace` —— 规则求值轨迹（FR-037）
+- `local import|toc|scan` —— 本地书（TXT/EPUB/MOBI）
+- `data export|import|clear-cache <chapters|images>|delete` —— 备份与清理
+- `source list|check|group|enable|disable|groups`、`keyword list|add|remove` —— 书源与关键词管理
+- `verify --corpus <dir> [--report <file>]` —— 合成语料差分（SC-002a，≥95%）
+
+### 差分测试与对照数据
+
+| 入口 | 命令 | 说明 |
+|---|---|---|
+| 合成语料差分 | `cargo run -p tome-cli -- verify --corpus tests/corpus/` | 入仓库语料；不达标退出码 1（SC-002a） |
+| 真实书源基线 | `cargo test -p tome-cli --test capture_real_baseline -- --ignored --nocapture` | 重建 `testdata/baselines/fingerprint.json`（基线入仓库） |
+| 基线回归门 | `cargo run -p tome-cli -- verify --real-sources testdata/captures/sources --golden testdata/baselines` | 回退则退出码 1（SC-002b） |
+| 上游参考运行器 | `bash tools/ref-runner/ref-runner.sh probe\|jvm\|gradle-test` | **只黑盒运行，不读源码**（见 `tools/ref-runner/CLEANROOM.md`） |
+| 对照产物落盘 | `cargo test -p tome-cli --test capture_synthetic -- --ignored --nocapture` | 写 `testdata/captures/`（**不入仓库**） |
+
+注意 `testdata/captures/` 被 `.gitignore` 排除，**干净检出下不存在**——需要它时先跑上面两条 `--ignored` 测试生成；`testdata/baselines/fingerprint.json` 入仓库，始终可用。
+
+### CI
+
+- `.github/workflows/ci.yml`：windows-gnu / macos / ubuntu matrix——fmt、clippy、rquickjs 守卫、测试、依赖图断言（`cargo build -p tome-core` 独立 + `cargo test -p tome-cli --test dependency_graph` 星型无环 + 传递依赖无图形栈）
+- `.github/workflows/release.yml`：三平台 release 产物 + 体积基线监控
+
+**工具链现状（2026-10-10 P9 复核）**：`cargo 1.99.0` / `rustc 1.99.0`（stable-x86_64-pc-windows-gnu，由 `rust-toolchain.toml` 钉版 channel=stable）。MSRV 声明 `rust-version = "1.98"` 尚未经 1.98 实测。
+
+**测试规模（2026-10-10 P9 实测）**：`cargo test --workspace` **2320 passed / 0 failed**。
+
+**性能基线**：SC-003/SC-004/SC-005 实测数据见 `specs/001-pc-engine-core/perf-baseline.md`。
 <!-- /AUTO:BUILD -->
 
 ## 生产级护栏（本项目特有）

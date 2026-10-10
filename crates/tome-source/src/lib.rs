@@ -50,5 +50,6 @@ pub mod js;
 pub use error::SourceError;
 pub mod purify;
 pub mod search;
+pub mod search_stream;
 pub mod source;
 pub mod toc;

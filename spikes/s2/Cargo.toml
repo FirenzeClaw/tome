@@ -42,14 +42,14 @@ path = "src/lib.rs"
 # 必须带 `std`：cosmic-text 的 `std` feature 是 `skrifa/std` 的传播链，
 # skrifa 有 `compile_error!("Either feature std or libm ...")` 硬检查，
 # `default-features = false` 会让整个栈编译不过（T001 实测踩到）。
-cosmic-text = { version = "0.19.0", default-features = false, features = ["std"] }
+cosmic-text = { version = "0.19.0", optional = true, default-features = false, features = ["std"] }
 
 # 字形簇切分（spike 构造语料时用；与 tome-reader 同源）
-unicode-segmentation = "1.12"
+unicode-segmentation = { version = "1.12", optional = true }
 
 # --- 渲染栈（T007 体积对照 / T009 离屏探针）---
 # 与 tome-reader 的 `render` feature 同配置，体积对照才有意义。
-wgpu = { version = "30.0", default-features = false, features = [
+wgpu = { version = "30.0", optional = true, default-features = false, features = [
     "std",
     "wgsl",
     "dx12",
@@ -57,21 +57,29 @@ wgpu = { version = "30.0", default-features = false, features = [
     "vulkan",
     "gles",
 ] }
-swash = "0.2"
-etagere = "0.3"
+swash = { version = "0.2", optional = true }
+etagere = { version = "0.3", optional = true }
 
 # 读回纹理后要落 PNG（T009 的基线图）；只有 deflate 需要，不要全套 image 特性。
-png = "0.18"
+png = { version = "0.18", optional = true }
 
 [features]
 default = []
-# T007 的体积对照开关：`--features cosmic-text-stack` 时把排版栈纳入依赖图。
-# 默认**关闭**是为了得到一个"空壳"臂——差值才是"接入 cosmic-text 的代价"，
-# 而不是"某个 feature 的代价"（对齐 S0 spike 的 rquickjs 测法）。
-cosmic-text-stack = []
+# T007 的体积对照开关。**默认全关**，为的是得到一个真正的"空壳"臂——
+# 差值才是"接入该栈的代价"，而不是"某个 feature 的代价"
+# （对齐 S0 spike 的 rquickjs 测法）。
+#
+# `cosmic-text-stack`：排版栈（cosmic-text + unicode-segmentation）。
+# 开启后 word_merge / hinting 两个验证模块参与编译（它们需要 cosmic-text）。
+cosmic-text-stack = ["dep:cosmic-text", "dep:unicode-segmentation"]
 
-# T007 的另一臂：渲染栈。分开开关才能把两项增量分开报告。
-render-stack = []
+# `render-stack`：渲染栈（wgpu + swash + etagere + png）。
+# 开启后 offscreen_probe 参与编译。**这一臂默认不开**——它把三平台图形栈
+# 拉进依赖图，只在 T007 的离屏验证与 T009 的探针时才需要。
+render-stack = ["dep:wgpu", "dep:swash", "dep:etagere", "dep:png"]
+
+# 便捷组合：两栈全开（T009 的探针需要同时有排版与渲染）
+full-stack = ["cosmic-text-stack", "render-stack"]
 
 [profile.release]
 # 与根 Cargo.toml 逐项一致（见文件头说明）

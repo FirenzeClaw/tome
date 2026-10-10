@@ -94,7 +94,9 @@ pub fn shaped_buffer(text: &str, width: f32) -> (FontSystem, Buffer) {
 /// 从 clone 出来的 `ShapeLine` 里取全部 (span 索引, word 索引) → 文本区间。
 ///
 /// 合并行为的判据需要知道"哪些 word 是哪些字"。
-pub fn word_ranges(shape_line: &cosmic_text::ShapeLine) -> Vec<(usize, usize, std::ops::Range<usize>)> {
+pub fn word_ranges(
+    shape_line: &cosmic_text::ShapeLine,
+) -> Vec<(usize, usize, std::ops::Range<usize>)> {
     let mut out = Vec::new();
     for (span_index, span) in shape_line.spans.iter().enumerate() {
         for (word_index, word) in span.words.iter().enumerate() {

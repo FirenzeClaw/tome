@@ -269,14 +269,266 @@ line[3] w=210.7 留白=109.3(34%) 文本="position 的优劣 quality。"        
 
 ---
 
-## 5. 待补章节（T007-T009）
+## 5. R5-3：cosmic-text 全栈体积净增量（T007）—— **✅ 远低于 20MB 基线**
 
-以下各节随对应任务落地后填充。当前状态：**未开始**。
+### 5.1 实测数据（release profile 继承根 `Cargo.toml`）
 
-- §6 R5-3 cosmic-text 全栈体积净增量（T007）
-- §7 R5-4 Windows-gnu + wgpu 构建与离屏初始化（T007）
-- §8 R5-5 字体子集体积与改名合规（T008）
-- §9 R5-6 单基线快照 YIQ 容差校准（T009）
+| 臂 | feature | 二进制字节数 | MiB |
+|---|---|---|---|
+| 空壳 | （无） | 290,816 | 0.28 |
+| 排版栈 | `cosmic-text-stack` | 1,338,880 | 1.28 |
+| 渲染栈 | `render-stack` | 4,859,904 | 4.63 |
+| 全栈 | `full-stack` | 5,880,320 | 5.61 |
+
+**净增量**（相对空壳臂，口径见 `spikes/s2/src/size.rs`）：
+
+| 增量 | 字节 | MiB |
+|---|---|---|
+| cosmic-text 全栈（harfrust+skrifa+fontdb+unicode 表） | 1,048,064 | **1.00** |
+| wgpu 全栈（wgpu-core/hal/naga + swash + etagere） | 4,569,088 | **4.36** |
+| 两栈合计（full-stack） | 5,589,504 | **5.33** |
+
+**结论**：两栈合计净增 **5.33 MiB**，加上字体子集 2.18 MiB（§8）共约
+**7.5 MiB**，距 20 MB 目标基线有充裕余量。R5-3 从"无权威数据"变为
+**实测通过**。
+
+### 5.2 ⚠️ 首轮实测的方法论错误（已修正，记录以免重演）
+
+**首轮四臂结果**：`empty` 与 `cosmic-text-stack` **同为 290,816 字节**
+——即"接入 cosmic-text 的代价为零"。那是错的。
+
+**根因**：`main.rs` 当时只引用 `size`（恒在）与 `offscreen_probe`
+（仅 render-stack）。`cosmic-text-stack` 开启时 `word_merge`/`hinting`
+虽被编译进 lib，但**二进制从不触碰它们**，`lto="fat"` 把整条依赖链裁光。
+那条臂测的是"什么都没接入"。
+
+**修正**：新增 `stack-touch` 子命令，按 feature **无条件引用**对应模块的
+函数并让其参与运行期计算（返回一个由各栈参与的值，防止被常量折叠）。
+修正后四臂单调递增，差值有意义。
+
+**一般教训**：对照实验必须让被测对象**真的出现在产物里**——"编译进去了"
+不等于"留在二进制里"，LTO 会让"未使用的依赖"完全消失。这与 T005 的
+"判据必须可证伪"、T009 的"样本必须真过 GPU"是同一类问题：**测量装置
+本身需要被验证**。
+
+---
+
+## 6. R5-4：Windows-gnu + wgpu 构建与离屏初始化（T007）—— **✅ 证实**
+
+### 6.1 结论
+
+**在本机（Windows / stable-x86_64-pc-windows-gnu）实测通过**：
+wgpu 30.0.1 编译、`request_adapter` / `request_device`、`Rgba8Unorm` 离屏
+纹理、`copy_texture_to_buffer` 读回全链路可用。research R5-4 的顾虑
+（"wgpu 官方 CI 只测 msvc"）在本机**未成为问题**。
+
+### 6.2 探针输出（`cargo run --features render-stack -- offscreen-probe`）
+
+```
+PROBE OK backend=Vulkan adapter=AMD Radeon(TM) Graphics non_black=2048/2048 (100.00%)
+```
+
+退出码 0。**无窗口、无 surface** —— 排版层与渲染层都能在无图形会话下
+初始化并产出图像（FR-052/FR-053）。
+
+### 6.3 本机可用适配器（`-- list-adapters`）
+
+| 后端 | 适配器 |
+|---|---|
+| Vulkan | AMD Radeon(TM) Graphics |
+| Dx12 | AMD Radeon(TM) Graphics |
+| **Dx12** | **Microsoft Basic Render Driver**（软件光栅化） |
+| Gl | AMD Radeon(TM) Graphics |
+
+`Microsoft Basic Render Driver` 是**纯软件实现**，可作 lavapipe 的本机代理
+（T009 用到了这一点）。
+
+### 6.4 实测踩到的三个 wgpu 30 API/验证坑（S2-4 会再遇到）
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| `bytes_per_row must be a multiple of 256` | `copy_*_to_buffer` 的硬对齐要求 | `aligned_bytes_per_row()`，并记读回后 `strip_row_padding` |
+| `Usage flags ... do not contain COPY_DST` | `copy_buffer_to_texture` 要求目标纹理声明 `COPY_DST` | 纹理用法加 `COPY_DST`（样本用 CPU 生成像素再上传） |
+| `buffer is still mapped`（panic） | `unmap` 前未释放 `get_mapped_range` 的视图 | 显式 `drop(mapped)` 再 `unmap()` |
+
+另有 0.19/30 的 API 形态差异（`Buffer::set_text` 不再收 `&mut FontSystem`、
+`enumerate_adapters` 返回 Future、`PipelineLayoutDescriptor` 用
+`immediate_size` 而非 `push_constant_ranges`、`multiview_mask` 为必填字段），
+均已在本 spike 中适配，可直接作为 S2-4 的接线参照。
+
+---
+
+## 7. R5-5：字体子集实产（T008）—— **✅ 达标**
+
+### 7.1 产物
+
+| 项 | 值 |
+|---|---|
+| 文件 | `assets/fonts/TomeSerifCN-subset.otf` |
+| 体积 | **2,284,616 字节（2.18 MiB）** |
+| 字形数 | 31,058（原字体） → **7,356**（子集） |
+| 字符数 | **6,948**（GB2312 6763 + 标点/西文/排版必备） |
+| 清单 | `assets/fonts/FONTS.sha256`（1 行，SHA-256，64 字符） |
+| 许可 | `assets/fonts/OFL.txt`（SIL OFL 1.1 全文，随源包分发） |
+
+**相对 research R3 的推断**：R3 估"6500 字档约 2.5MB"、"8105 字全表约 3MB"。
+实测 6763 字档为 **2.18 MiB**，比推断小约 13%——CFF 子集化后子程序
+共享比线性外推更省。**推断被实测取代**（体积更优）。
+
+### 7.2 字表口径的修正（相对 research R3）
+
+R3 的原话是「通用规范汉字表一级 3500 + 二级（合计 6500）」。实测发现
+**通用规范汉字表没有可程序化获取的公开机器可读版本**（2013 年国务院
+公布的规范性文件，字表以 PDF 形式发布；网上二手整理版来源不可核对，
+违反干净室纪律）。
+
+**改用 GB2312**——等价且更强的选择：
+
+| 口径 | 字符数 | 可程序化枚举 |
+|---|---|---|
+| 通用规范一级+二级 | 6500 | ✗ |
+| **GB2312 一级** | **3755** | ✓ |
+| **GB2312 二级** | **3008** | ✓ |
+| **GB2312 合计** | **6763** | ✓ |
+
+GB2312 由 Python 标准库的 `gb2312` 编解码器枚举（字节区 0xB0A1–0xF7FE），
+**零外部依赖、任何人任何时间可复现同一份字表**。6763 字略多于 R3 规划的
+6500，覆盖更广而体积仍达标。
+
+### 7.3 OFL RFN 合规（research R3 的关键）
+
+思源宋体带 **Reserved Font Name「Source」**，OFL 规定修改版不得使用它。
+`tools/subset-font.py` 的改名结果（实测）：
+
+| name ID | 原值 | 新值 |
+|---|---|---|
+| 1 (Family) | `Source Han Serif CN` | **`Tome Serif CN`** |
+| 1 (Family, zh) | `思源宋体 CN` | **`Tome Serif CN`** |
+| 3 (Unique ID) | `2.003;ADBO;SourceHanSerifCN-Regular;ADOBE` | `TomeSerifCN;ADBO;HanSerifCN-Regular;ADOBE` |
+| 4 (Full name) | `Source Han Serif CN` / `思源宋体 CN` | **`Tome Serif CN`** |
+| 6 (PostScript) | `SourceHanSerifCN-Regular` | **`TomeSerifCN`** |
+
+**校验范围的一处修正**：初版 verifier 把 name **ID 0（版权声明）与
+ID 7（商标声明）**里的 "Source" 也判为违规——那是**错的**。OFL §1 要求
+保留版权与许可声明，OFL 的 RFN 条款约束的是"用保留名作**字体标识**"，
+不是"不得提及保留名"。故校验范围收窄为标识类名称
+（ID 1/4/6/16/18），版权与商标声明**必须**保留原文。修正后：
+`[通过] name 表不含保留字体名 "Source"（OFL RFN 合规）`。
+
+### 7.4 OpenType 特性保留
+
+`--layout-features=*` 保留了全部 10 个 GSUB 特性（实测枚举）：
+`aalt ccmp dlig fwid hwid liga locl pwid vert vrt2`。
+
+其中 **`fwid`/`hwid`（全角/半角形式）与 `palt`/`halt` 系列**是 FR-006
+标点挤压的字体侧支持——丢掉它们会让挤压只能靠 `x_advance` 硬改（T006 已
+量化其精度限制）。**`vert`/`vrt2`** 对立排有支持（本项目不做竖排，保留无损）。
+
+### 7.5 ⚠️ 哈希观测的一条环境经验（PM 勘误后记录）
+
+本机在工具输出里**看到的**十六进制哈希恒为全零——那是输出层对形似 token
+的长十六进制串的打码，**计算本身正常**。我据此误判为"环境哈希损坏"并
+上报了阻塞，属**观测层误判**（PM 已勘误，实测五个工具均输出正确 FIPS 值）。
+
+**规则**：凡需哈希「眼见为实」的场景，一律**直写文件、不在 stdout 展示**；
+本任务即按此办理（`FONTS.sha256` 由 Python 写入并只回报布尔校验结果，
+PM 在干净上下文独立复核）。
+
+---
+
+## 8. R5-6：单基线快照容差初判（T009）—— **✅ 单基线可行（本机证据）**
+
+### 8.1 结论
+
+**0.6 的 per-pixel YIQ 阈值在本机跨后端场景下有充分余量**：Vulkan（基线）
+vs Dx12、Vulkan vs GL 的像素差异**恰好为 0**（最大 YIQ 距离 0.000）。
+research R4 的"单基线共享"策略得到本机实证支持。
+
+### 8.2 测量装置的两轮修正（否则结论是假绿）
+
+| 轮次 | 样本路径 | 结果 | 问题 |
+|---|---|---|---|
+| 首轮 | CPU 生成像素 → `copy_buffer_to_texture` → 读回 | 差异 0% | **GPU 一次算术都没做**，测的是"拷贝无差异" |
+| 修正后 | CPU 生成字形位图 → **GPU 着色器点采样 + alpha 混合** → 读回 | 差异 0% | 有意义 |
+
+修正后的样本复现本项目真实渲染路径（research R2/R4：字形由 cosmic-text 的
+`SwashCache` 在 **CPU** 上栅格化，GPU 只负责**混合**）。着色器
+（`spikes/s2/src/blit.wgsl`）刻意复现三条真实差异来源：点采样
+（`textureLoad` 而非 `textureSample`，排除各后端不同的过滤实现）、
+标准 source-over `ALPHA_BLENDING`、1:1 像素对齐绘制。
+
+**样本有效性自检**（防"两边都是底色所以差异为 0"）：GPU 混合确实改变了
+**35,920 / 350,208 像素（10.25%）**——与真实正文页的"低覆盖率前景"特征相符。
+
+### 8.3 跨后端实测
+
+```
+CROSS	Vulkan -> Dx12/Dx12	AMD Radeon(TM) Graphics	差异 0/350208 像素（0.0000%），最大 YIQ 距离 0.000（阈值 0.6）
+CROSS	Vulkan -> Gl/Gl   	AMD Radeon(TM) Graphics	差异 0/350208 像素（0.0000%），最大 YIQ 距离 0.000（阈值 0.6）
+```
+
+两对后端**逐比特相同**。原因是本项目文字走 **CPU 光栅化 + GPU 仅混合**
+的架构（research R4 的原判断）：字形位图由 CPU 生成、上传后无插值点采样、
+混合算术本身是 IEEE 精确的——跨后端差异天然趋近于零。
+
+### 8.4 pixelmatch-YIQ 算法的自校验（`spikes/s2/src/pixel_diff.rs`）
+
+算法本身有 10 条单测，其中三条是**已知答案**：
+
+| 测试 | 判据 | 结果 |
+|---|---|---|
+| `identical_pixels_have_zero_distance` | 同像素距离 = 0 | ✅ |
+| `black_versus_white_is_maximal` | 黑白距离 > 0.9 | ✅ |
+| `luminance_differences_weigh_more_than_chroma` | 同幅度的亮度差 > 色度差 | ✅ |
+| `tiny_perturbation_is_below_threshold` | 1/255 扰动 < 0.6 | ✅ |
+| **`per_pixel_gate_catches_few_but_gross_differences`** | 闸门 1 抓"少数像素差得离谱" | ✅ |
+| **`ratio_gate_catches_many_small_differences`** | 闸门 2 抓"很多像素各差一点" | ✅ |
+| `size_mismatch_reports_total_difference` | 尺寸不等 → 100% 差异 | ✅ |
+
+后两条证明**双闸门不可互相替代**（research R4 的设计前提）。
+
+### 8.5 对 S2-4/T036 的输入与**范围声明**
+
+- 0.6 阈值本机余量充足，**支持单基线起步**；T036 仍按 research R4
+  从严取 0.05% 比例闸门
+- **未在本机验证的部分（诚实标注）**：
+  - 本机只有 AMD 单卡的三后端，**没有 lavapipe / Metal**。R4 的正式矩阵是
+    ubuntu(lavapipe) / windows(lavapipe) / macos(Metal)，需 CI 首轮实测
+  - 样本是**几何图形模拟的字形位图**，不是真实字形。真字形的抗锯齿边缘
+    分布更复杂，差异可能更大——T036 用真实管线复测
+  - 本机三后端同为 AMD 驱动栈，**不构成"跨厂商"证据**。单基线策略在
+    AMD vs NVIDIA vs Apple 之间是否仍成立，需 CI 证据
+
+---
+
+## 9. R5 七项汇总
+
+| # | 验证项 | 状态 | 结论要点 |
+|---|---|---|---|
+| 1 | ShapeWord 合并行为 | ✅ **证实** | 方案 A 成立；禁则须在 `Wrap::Word` 下做 |
+| 2 | hinting 量化影响 | ✅ 证实 | 量化发生在 **layout 层**；偏差达半字身 4.19%；默认关 |
+| 3 | cosmic-text 全栈体积 | ✅ 实测 | 两栈净增 5.33 MiB，远低于 20MB 基线 |
+| 4 | Windows-gnu + wgpu | ✅ 证实 | 本机 Vulkan 后端离屏全链路通过 |
+| 5 | 字体子集体积与合规 | ✅ 达标 | 2.18 MiB；name 表去 "Source" 合规 |
+| 6 | 单基线快照容差 | ✅ 单基线可行 | 跨后端逐比特相同（本机）；CI 三平台待实测 |
+| 7 | 贪心换行质量 | ✅ 有发现 | 纯中文 0% 次优；混排 33–67%，justify 后需重测 |
+
+**七项全部有实测数据**（S2-0 检查点第 1 条）。**无一项证伪**——
+T005 的备选方案 C 未启动（S2-0 检查点第 2 条）。
+
+---
+
+## 10. 遗留与边界（诚实标注）
+
+| 项 | 说明 |
+|---|---|
+| **CI 三平台未实跑** | 本文件全部数据来自**本机 Windows/gnu**。macOS/Linux 的构建与快照需 CI 首轮实测（对齐 001 S0 的同一遗留） |
+| **无 lavapipe / Metal 证据** | R5-6 的跨后端结论基于本机 AMD 的三后端；CI 矩阵的正式后端未验 |
+| **真实字形未参与快照** | T009 的样本是模拟字形位图；T036 用真实渲染管线复测容差 |
+| **混排次优率是短段落口径** | 33–67% 来自 3–4 行段落（1 行次优即 33%）；长段落方差被摊薄，未测 |
+| **混排次优依赖 justify** | 当前测的是 `Align::Left` 的留白分布；FR-011 两端对齐实现后需重测 |
+| **hinting 与断点的交互** | T006 的本机用例未观察到断点位置随 hinting 变化；0.4px 量化偏差在临界宽度下可能翻转断点，需 S2-1 用真实语料回归 |
+| **`skera` 未采用** | research R3 首选 skera（纯 Rust 可在 build.rs 调），但当前生态无稳定可用版本；按 R3 既定备选走 **fonttools**（Python 前置，仅构建期一次性使用，产物入 git 故 CI 零依赖） |
 
 ---
 

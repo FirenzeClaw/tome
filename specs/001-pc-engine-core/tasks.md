@@ -274,25 +274,25 @@
 
 ### tome-store 基座
 
-- [ ] T053 [US4] tome-store：SQLite actor 线程（独占 Connection，消息通道收发）+ 迁移器（`PRAGMA user_version` + 内嵌 SQL 数组）于 `crates/tome-store/src/db.rs`
-  - [ ] v1 schema 落地（data-model.md 18 表）；GUI/CLI 不阻塞 DB 线程
-  - [ ] WAL 模式；读不阻塞写
-- [ ] T054 [US4] tome-store：实现 tome-core 的 `StoreHost`（真实 SQLite/Pack 支撑 JS 宿主状态类 API）于 `crates/tome-store/src/host.rs`
-  - [ ] JS 的缓存读写/文件读写/Cookie 读写经 StoreHost 落到真实存储
-- [ ] T055 [US4] tome-store：可移植模式数据目录解析（程序同级 `data/` 优先，否则系统数据目录）+ 启动期可写性/磁盘空间检测（不可写或不足时明确报告并给出指引，不静默失败）于 `crates/tome-store/src/datadir.rs`（FR-042/FR-043）
-  - [ ] 程序同级有 `data/` 则用 portable，否则用系统目录；整体搬移后数据可用
-  - [ ] 启动时检测；不可写/磁盘不足时明确报告（FR-043）
-- [ ] T056 [P] [US4] tome-store：DAO·source/source_group（含 enabled/group 字段读写）于 `crates/tome-store/src/dao/source.rs`
-- [ ] T057 [P] [US4] tome-store：DAO·book/chapter（含 UNIQUE(origin,origin_id) 身份规则）于 `crates/tome-store/src/dao/book.rs`
-- [ ] T058 [P] [US4] tome-store：DAO·read_progress/bookmark/highlight/memo（全部字符区间，不存渲染坐标）于 `crates/tome-store/src/dao/trace.rs`（FR-027/FR-028）
-- [ ] T059 [P] [US4] tome-store：DAO·规则（replace/highlight/dict/txt_toc）+ search_keyword + http_log（滚动清理）+ cookie（按源持久化）于 `crates/tome-store/src/dao/misc.rs`（FR-026 Cookie 持久化，重启保留登录态）
-- [ ] T060 [US4] tome-store：Pack 章节缓存容器（追加写→fsync→索引事务提交；按写入顺序分配；容器粒度淘汰）于 `crates/tome-store/src/pack.rs`（FR-029/FR-030/FR-031）
-  - [ ] **崩溃安全故障注入测试**：写入中 kill，重启无悬空引用（FR-030/SC-007）
-  - [ ] 容量开销 ≤1.01×（SC-005）；5 万章文件数 ≤2%（SC-005b）
-  - [ ] 淘汰以容器为单位，无残留引用；清缓存不伤个人数据（SC-015）
-- [ ] T061 [P] [US4] tome-store：图片缓存（与章节缓存为两个可独立清理资源）于 `crates/tome-store/src/image_cache.rs`（FR-019/SC-017）
-- [ ] T062 [P] [US4] tome-store：配置 TOML 加载 + 类型化子集注入（**无全局 CONFIG 单例**，A3）于 `crates/tome-store/src/config.rs`（FR-032 原子写）
-  - [ ] 原子写（临时文件+rename）；类型化子集注入各模块构造函数
+- [x] T053 [US4] tome-store：SQLite actor 线程（独占 Connection，消息通道收发）+ 迁移器（`PRAGMA user_version` + 内嵌 SQL 数组）于 `crates/tome-store/src/db.rs`
+  - [x] v1 schema 落地（data-model.md 18 表）；GUI/CLI 不阻塞 DB 线程
+  - [x] WAL 模式；读不阻塞写
+- [x] T054 [US4] tome-store：实现 tome-core 的 `StoreHost`（真实 SQLite/Pack 支撑 JS 宿主状态类 API）于 `crates/tome-store/src/host.rs`
+  - [x] JS 的缓存读写/文件读写/Cookie 读写经 StoreHost 落到真实存储
+- [x] T055 [US4] tome-store：可移植模式数据目录解析（程序同级 `data/` 优先，否则系统数据目录）+ 启动期可写性/磁盘空间检测（不可写或不足时明确报告并给出指引，不静默失败）于 `crates/tome-store/src/datadir.rs`（FR-042/FR-043）
+  - [x] 程序同级有 `data/` 则用 portable，否则用系统目录；整体搬移后数据可用
+  - [x] 启动时检测；不可写/磁盘不足时明确报告（FR-043）
+- [x] T056 [P] [US4] tome-store：DAO·source/source_group（含 enabled/group 字段读写）于 `crates/tome-store/src/dao/source.rs`
+- [x] T057 [P] [US4] tome-store：DAO·book/chapter（含 UNIQUE(origin,origin_id) 身份规则）于 `crates/tome-store/src/dao/book.rs`
+- [x] T058 [P] [US4] tome-store：DAO·read_progress/bookmark/highlight/memo（全部字符区间，不存渲染坐标）于 `crates/tome-store/src/dao/trace.rs`（FR-027/FR-028）
+- [x] T059 [P] [US4] tome-store：DAO·规则（replace/highlight/dict/txt_toc）+ search_keyword + http_log（滚动清理）+ cookie（按源持久化）于 `crates/tome-store/src/dao/misc.rs`（FR-026 Cookie 持久化，重启保留登录态）
+- [x] T060 [US4] tome-store：Pack 章节缓存容器（追加写→fsync→索引事务提交；按写入顺序分配；容器粒度淘汰）于 `crates/tome-store/src/pack.rs`（FR-029/FR-030/FR-031）
+  - [x] **崩溃安全故障注入测试**：写入中 kill，重启无悬空引用（FR-030/SC-007）
+  - [x] 容量开销 ≤1.01×（SC-005）；5 万章文件数 ≤2%（SC-005b）
+  - [x] 淘汰以容器为单位，无残留引用；清缓存不伤个人数据（SC-015）
+- [x] T061 [P] [US4] tome-store：图片缓存（与章节缓存为两个可独立清理资源）于 `crates/tome-store/src/image_cache.rs`（FR-019/SC-017）
+- [x] T062 [P] [US4] tome-store：配置 TOML 加载 + 类型化子集注入（**无全局 CONFIG 单例**，A3）于 `crates/tome-store/src/config.rs`（FR-032 原子写）
+  - [x] 原子写（临时文件+rename）；类型化子集注入各模块构造函数
 
 ### 组合根装配 + HTTP 日志管线
 

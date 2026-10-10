@@ -7,6 +7,7 @@
 //! | [`placeholder`] | 未缓存区的占位/加载态 | FR-025 |
 //! | [`relayout`] | 重排 + resize 合并 | FR-024 / FR-027 |
 //! | [`switch`] | 阅读形态切换（过渡态不复写进度） | FR-023 |
+//! | [`throttle`] | 滚动事件合并（不累积排队） | FR-027 |
 //!
 //! ## 依赖方向
 //!
@@ -35,3 +36,4 @@ pub mod map;
 pub mod placeholder;
 pub mod relayout;
 pub mod switch;
+pub mod throttle;

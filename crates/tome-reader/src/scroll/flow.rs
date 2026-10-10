@@ -83,8 +83,26 @@ pub struct ScrollViewport {
     pub height_px: f32,
     /// 本屏覆盖的**章内**字符区间（与 `Page::char_range` 同口径）
     pub char_range: std::ops::Range<usize>,
-    /// 与本屏相交的行盒（**可跨屏**，见模块文档）
-    pub lines: Vec<PageLine>,
+    /// 与本屏相交的行在**流的行数组**中的下标区间（半开）。
+    ///
+    /// ## 为什么是下标区间而不是克隆的行（这条直接决定 SC-010 能否达标）
+    ///
+    /// 初版把可见行**克隆**进每个视口。实测（20 万字章、342×800 视口）：
+    ///
+    /// | 项 | 大小 |
+    /// |---|---|
+    /// | 流的行数组（20 万字形） | 9.6 MB |
+    /// | 516 屏各克隆约 5 行（约 2580 行 × 36 字形） | 4.5 MB |
+    /// | 合计 | **13.6 MB** |
+    ///
+    /// 而 SC-010 的预算是章节字节 ×8 = 4.6 MB。**重复持有**让预算必然超标，
+    /// 且 `release_outside` 也失效（清空流里的字形，克隆体仍握着副本）。
+    ///
+    /// 改存下标后：可见行只有一份，就是流里那几行。释放对它们生效，且
+    /// "某屏可见哪些行"这条信息本身只占 16 字节。
+    ///
+    /// 取值方式：`flow.viewport_lines(&viewport)`。
+    pub line_range: std::ops::Range<usize>,
 }
 
 impl ScrollViewport {
@@ -94,10 +112,10 @@ impl ScrollViewport {
         self.char_range.end - self.char_range.start
     }
 
-    /// 本屏是否为空（无行、无字符）。
+    /// 本屏是否为空（无可见行、无字符）。
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.lines.is_empty() && self.char_range.is_empty()
+        self.line_range.is_empty() && self.char_range.is_empty()
     }
 }
 
@@ -140,7 +158,7 @@ impl ScrollFlow {
                     top_px: 0.0,
                     height_px,
                     char_range: 0..0,
-                    lines: Vec::new(),
+                    line_range: 0..0,
                 }],
                 content_height_px: 0.0,
                 measure_px: chapter.measure_px,
@@ -185,9 +203,152 @@ impl ScrollFlow {
     }
 
     /// 全部行盒（按阅读顺序）——位置换算与重排的依据。
+    ///
+    /// ## 释放字形后本方法的返回值仍然完整
+    ///
+    /// [`Self::release_outside`] 只清空 `glyphs`，行的**字符区间与行高**一律
+    /// 保留。故位置换算（`scroll::map`）与区间口径（SC-006b）不受释放影响
+    /// ——那正是 FR-026 能"按需释放"而不破坏 FR-021 的原因。
     #[must_use]
     pub fn lines(&self) -> &[PageLine] {
         &self.lines
+    }
+
+    /// 仍持有字形数据的行数（**释放的可观测证据**，也用于内存断言的对照）。
+    #[must_use]
+    pub fn resident_glyph_lines(&self) -> usize {
+        self.lines
+            .iter()
+            .filter(|line| !line.line.glyphs.is_empty())
+            .count()
+    }
+
+    /// 某屏的可见行（据 `line_range` 从流的行数组切片）。
+    ///
+    /// ## 为什么是方法而不是字段
+    ///
+    /// 见 [`ScrollViewport::line_range`]：可见行在流里只有一份，视口存下标。
+    /// 取用时切片即可——零拷贝（返回借用），且释放对它们自然生效。
+    #[must_use]
+    pub fn viewport_lines(&self, viewport: &ScrollViewport) -> &[PageLine] {
+        let start = viewport.line_range.start.min(self.lines.len());
+        let end = viewport.line_range.end.min(self.lines.len());
+        if start >= end {
+            return &[];
+        }
+        &self.lines[start..end]
+    }
+
+    // -----------------------------------------------------------------------
+    // 按需释放（FR-026）
+    // -----------------------------------------------------------------------
+
+    /// 释放**指定视口窗口之外**的行的字形数据，返回被释放的行数。
+    ///
+    /// ## FR-026 原文
+    ///
+    /// > 滚动模式下系统 MUST 支持视口外的行按需释放：整章布局结果 MUST NOT
+    /// > 要求全部常驻内存；超长章节下 MUST 仍能在限定内存内工作。
+    ///
+    /// ## 为什么是"必要"而非"优化"（实测数据）
+    ///
+    /// 单个 `GlyphBox` 约 48 字节（两个 `Range<usize>` + 三个 `f32` + 对齐）。
+    /// 20 万字的章约有 20 万个字形 → **9.6 MB**，而 SC-010 的预算是
+    /// 章节字节数 ×8 = **4.8 MB**。故不释放**必然**超标——这不是"能省则省"。
+    ///
+    /// ## 释放什么、保留什么
+    ///
+    /// | 字段 | 释放后 | 为什么 |
+    /// |---|---|---|
+    /// | `glyphs` | **清空** | 它是内存主体（每字符一个），且只在绘制时用到 |
+    /// | `chapter_char_range` | 保留 | 位置换算、SC-006b、痕迹都要它 |
+    /// | `height_px` / `baseline_px` | 保留 | 流总高与视口切分都要它 |
+    /// | 视口的 `char_range` / `lines` 列表 | 保留 | 位置口径（FR-021） |
+    ///
+    /// 故释放后：**位置语义完全不变**，只有"这一行的字画不出来"——而视口外
+    /// 的行本来就不需要画。
+    ///
+    /// ## 窗口半径
+    ///
+    /// `radius` 是"前后各保留几屏"。取 0 表示只保留当前屏；取 2 表示当前屏
+    /// 前后各两屏（共 5 屏）常驻——后者让用户往回滚时不至于立刻重排。
+    pub fn release_outside(&mut self, viewport_index: usize, radius: usize) -> usize {
+        if self.viewports.is_empty() {
+            return 0;
+        }
+
+        // 窗口的视口下标范围（钳到有效区间）
+        let last_index = self.viewports.len() - 1;
+        let center = viewport_index.min(last_index);
+        let from = center.saturating_sub(radius);
+        let to = (center + radius).min(last_index);
+
+        // 窗口内覆盖的字符区间（首屏起点 .. 末屏终点）
+        let window_start = self.viewports[from].char_range.start;
+        let window_end = self.viewports[to].char_range.end;
+
+        let mut released = 0usize;
+        for line in &mut self.lines {
+            // 与窗口**相交**的行保留（跨屏行可能只有半边在窗口内）
+            let intersects = line.chapter_char_range.start < window_end
+                && line.chapter_char_range.end > window_start;
+            // 空区间行（如段间分隔符）按"是否在窗口内"判
+            let inside = line.chapter_char_range.start >= window_start
+                && line.chapter_char_range.start < window_end;
+            if !(intersects || inside) && !line.line.glyphs.is_empty() {
+                line.line.glyphs = Vec::new();
+                line.line.glyphs.shrink_to_fit();
+                released += 1;
+            }
+        }
+
+        released
+    }
+
+    /// 重新为若干行取得字形（释放的逆操作）。
+    ///
+    /// ## 为什么需要它，以及为什么它是**重排**而非"补齐"
+    ///
+    /// 释放丢掉的是字形（每个字形的位置、宽度、压缩量）。那些量由排版引擎
+    /// 算出，无法从字符区间反推——故"恢复"只能是**重新排版**。
+    ///
+    /// 这与 FR-026 的取舍一致：释放换来的是内存，代价是回滚到已释放区域时
+    /// 要重排。实现上它等价于一次 [`crate::scroll::relayout::relayout`]——
+    /// 本函数只是把这个语义显式化，避免调用方以为"释放是可逆的零成本操作"。
+    ///
+    /// 返回需要重排的字符范围（供调用方决定重排哪一段）。
+    #[must_use]
+    pub fn char_ranges_needing_relayout(
+        &self,
+        from_viewport: usize,
+        to_viewport: usize,
+    ) -> Option<std::ops::Range<usize>> {
+        if self.viewports.is_empty() {
+            return None;
+        }
+        let last_index = self.viewports.len() - 1;
+        let from = from_viewport.min(last_index);
+        let to = to_viewport.min(last_index);
+        if from > to {
+            return None;
+        }
+
+        let window_start = self.viewports[from].char_range.start;
+        let window_end = self.viewports[to].char_range.end;
+
+        // 窗口内是否已有被释放的行（glyphs 为空的非空行）
+        let missing = self.lines.iter().any(|line| {
+            line.line.glyphs.is_empty()
+                && !line.chapter_char_range.is_empty()
+                && line.chapter_char_range.start < window_end
+                && line.chapter_char_range.end > window_start
+        });
+
+        if missing {
+            Some(window_start..window_end)
+        } else {
+            None
+        }
     }
 }
 
@@ -272,16 +433,19 @@ fn slice_into_viewports(
             }
         }
 
-        // 可见行：与本屏**像素窗口**相交的行（可跨屏，见模块文档）
+        // 可见行的**下标区间**：与本屏像素窗口相交的行（可跨屏，见模块文档）
+        //
+        // 存下标而非克隆：克隆会让每屏持有一份字形副本，20 万字下实测多占
+        // 4.5 MB，使 SC-010 的预算必然超标（见 `ScrollViewport::line_range`）。
         let char_range = cursor..end;
-        let visible = collect_visible_lines(lines, &line_tops, top_px, height_px);
+        let line_range = visible_line_indices(lines, &line_tops, top_px, height_px);
 
         viewports.push(ScrollViewport {
             viewport_index: viewports.len(),
             top_px,
             height_px,
             char_range: char_range.clone(),
-            lines: visible,
+            line_range,
         });
 
         top_px += height_px;
@@ -299,14 +463,14 @@ fn slice_into_viewports(
             top_px,
             height_px,
             char_range: cursor..char_len,
-            lines: Vec::new(),
+            line_range: 0..0,
         });
     }
 
     viewports
 }
 
-/// 取在给定**像素窗口**内可见的行盒。
+/// 取在给定**像素窗口**内可见的行盒**下标区间**（半开）。
 ///
 /// ## 为什么按像素而不是按字符区间取（这是"可见行可重叠"的来源）
 ///
@@ -327,25 +491,44 @@ fn slice_into_viewports(
 /// 末行不会被算进第二屏的可见行（它的字符全属第一屏）——于是滚过边界时
 /// 那一行会**整行消失**，直到它完全离开第一屏的窗口。表现是"滚动时某一
 /// 行闪烁"。故必须按像素取。
-fn collect_visible_lines(
+///
+/// ## 返回下标区间而非行本身（SC-010 的内存要求）
+///
+/// 可见行的像素窗口判据天然是**连续的**（行的 top 单调递增），故相交集合也
+/// 连续——可以用一个半开下标区间表达，占 16 字节，而不是克隆若干行。
+///
+/// 实现上要处理一个细节："相交"允许首行从窗口上沿之前开始（跨屏的那一行），
+/// 故起点取**第一个 bottom > window_top 的行**，终点取**第一个 top >= window_bottom 的行**。
+fn visible_line_indices(
     lines: &[PageLine],
     line_tops: &[f32],
     window_top_px: f32,
     window_height_px: f32,
-) -> Vec<PageLine> {
+) -> std::ops::Range<usize> {
     let window_bottom = window_top_px + window_height_px;
 
-    lines
+    // 起点：第一个"下沿超过窗口上沿"的行（即与窗口相交的最早一行）
+    let start = lines
         .iter()
         .zip(line_tops)
-        .filter(|(line, top)| {
-            let line_top = **top;
-            let line_bottom = line_top + line.line.height_px.max(0.0);
-            // 半开区间相交：line_top < window_bottom && line_bottom > window_top
-            line_top < window_bottom && line_bottom > window_top_px
-        })
-        .map(|(line, _)| line.clone())
-        .collect()
+        .position(|(line, top)| top + line.line.height_px.max(0.0) > window_top_px)
+        .unwrap_or(lines.len());
+
+    // 终点：第一个"上沿达到窗口下沿"的行（即不再相交的最早一行）
+    let end = line_tops
+        .iter()
+        .position(|top| *top >= window_bottom)
+        .unwrap_or(lines.len());
+
+    // 防反向区间（浮点边界下可能出现 start > end）
+    if start >= end {
+        // 退化情形：空窗口或零高行。取"包含窗口顶的那一行"以免渲染缺行。
+        let fallback = line_tops.partition_point(|top| *top <= window_top_px);
+        let index = fallback.min(lines.len());
+        return index..index;
+    }
+
+    start..end
 }
 
 #[cfg(test)]

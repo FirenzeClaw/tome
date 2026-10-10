@@ -165,10 +165,10 @@ fn visible_lines_may_overlap_but_char_ranges_never_do() {
     let mut previous_line_keys: Vec<(usize, usize)> = Vec::new();
 
     for viewport_entry in flow.viewports() {
-        total_visible_lines += viewport_entry.lines.len();
+        total_visible_lines += flow.viewport_lines(viewport_entry).len();
 
-        let keys: Vec<(usize, usize)> = viewport_entry
-            .lines
+        let keys: Vec<(usize, usize)> = flow
+            .viewport_lines(viewport_entry)
             .iter()
             .map(|line| (line.chapter_char_range.start, line.chapter_char_range.end))
             .collect();
@@ -190,7 +190,7 @@ fn visible_lines_may_overlap_but_char_ranges_never_do() {
             .viewports()
             .iter()
             .flat_map(|v| {
-                v.lines
+                flow.viewport_lines(v)
                     .iter()
                     .map(|line| (line.chapter_char_range.start, line.chapter_char_range.end))
             })
@@ -233,7 +233,7 @@ fn viewport_shape_is_isomorphic_to_page() {
     for entry in flow.viewports() {
         // 与 `Page` 一样：字符区间 + 可见行盒序列 + 一个"我在流里的位置"
         let _: &std::ops::Range<usize> = &entry.char_range;
-        let _: &[tome_reader::paginate::page::PageLine] = &entry.lines;
+        let _: &[tome_reader::paginate::page::PageLine] = flow.viewport_lines(entry);
         let _: f32 = entry.top_px;
         let _: f32 = entry.height_px;
 
@@ -272,7 +272,7 @@ fn content_height_has_no_pagination_padding() {
             .viewports()
             .iter()
             .flat_map(|v| {
-                v.lines
+                flow.viewport_lines(v)
                     .iter()
                     .map(|line| (line.chapter_char_range.start, line.line.height_px))
                     .map(|(start, height)| (start, 0usize, height))
@@ -323,7 +323,7 @@ fn empty_chapter_yields_one_viewport() {
     let flow = build_flow("", &geometry(), &Viewport::new(342.0, 200.0));
     assert_eq!(flow.viewports().len(), 1, "空章应产出一屏");
     assert_eq!(flow.viewports()[0].char_range, 0..0);
-    assert!(flow.viewports()[0].lines.is_empty());
+    assert!(flow.viewport_lines(&flow.viewports()[0]).is_empty());
 }
 
 /// 仅空白正文同样产出一屏。
@@ -433,7 +433,10 @@ fn scroll_flow_is_deterministic() {
     for (a, b) in first.viewports().iter().zip(second.viewports()) {
         assert_eq!(a.char_range, b.char_range);
         assert_eq!(a.top_px, b.top_px);
-        assert_eq!(a.lines.len(), b.lines.len());
+        assert_eq!(
+            first.viewport_lines(a).len(),
+            second.viewport_lines(b).len()
+        );
     }
     assert_eq!(first.content_height_px(), second.content_height_px());
 }
@@ -450,7 +453,7 @@ fn scroll_viewport_is_a_plain_value() {
         top_px: 600.0,
         height_px: 200.0,
         char_range: 100..150,
-        lines: Vec::new(),
+        line_range: 0..0,
     };
     assert_eq!(entry.char_len(), 50);
     assert_eq!(entry.viewport_index, 3);
@@ -460,7 +463,7 @@ fn scroll_viewport_is_a_plain_value() {
         top_px: 600.0,
         height_px: 200.0,
         char_range: 100..150,
-        lines: Vec::new(),
+        line_range: 0..0,
     };
     assert_eq!(entry, same, "同字段应相等（DTO 的可比性）");
 }

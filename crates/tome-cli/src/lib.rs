@@ -36,6 +36,7 @@
 
 pub mod commands;
 pub mod flags;
+pub mod i18n;
 pub mod js_host;
 // `local` 是 T076-T083 的 CLI 面，全部实现收在这一个文件里（P7 合并）。
 pub mod local;

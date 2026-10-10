@@ -765,15 +765,40 @@ pub fn run_render(options: &GlobalOptions, command: &Command) -> CommandOutcome 
         }
     };
 
+    // --- 分页 + 取目标页 ---
+    //
+    // ## 为什么必须走完整分页（而不是"按视口截取 N 段行"）
+    //
+    // 页边界是**分页层的结论**：含留白页（FR-016 的书页语义）、单行超高
+    // 独占一页、以及手动单双页覆盖的影响。渲染层自己按视口重算会与之分叉
+    // ——表现为"渲染的第 N 页与 `tome layout` 报告的第 N 页内容不同"。
+    //
+    // 故：先 `paginate` 拿到权威页序列，再取第 `--page` 页。
     let mut paginator = Paginator::new();
-    let chapter = match layout_chapter(&mut paginator, &text, &geometry, &viewport) {
-        Ok(chapter) => chapter,
+    let pagination = match paginator.paginate(&text, &geometry, &viewport) {
+        Ok(result) => result,
         Err(error) => {
-            return CommandOutcome::failure(&error.kind(), &format!("排版失败：{error}"));
+            return CommandOutcome::failure(&error.kind(), &format!("分页失败：{error}"));
         }
     };
 
-    let batch = RenderBatch::for_chapter(&chapter, &geometry, &viewport, theme);
+    // 目标页：`--page <n>`（翻页）或 `--viewport <n>`（滚动，取该视口首屏）。
+    //
+    // 页号是**章内页码**（0 起），与 `tome layout` 输出的 `page_index` 同口径。
+    let target_index = args.page.map(|value| value as usize).unwrap_or(0);
+    let Some(page) = pagination.pages.get(target_index) else {
+        // 越界页码 = **结构化错误**，不是一张只有底色的图。
+        // 静默产出空图会让调用方无法分辨"这页真的是空的"与"页码写错了"。
+        return CommandOutcome::failure(
+            &ErrorKind::Configuration,
+            &format!(
+                "--page {target_index} 越界：本章共 {} 页（章内页码 0 起）",
+                pagination.pages.len()
+            ),
+        );
+    };
+
+    let batch = RenderBatch::for_page(page, &geometry, &viewport, theme);
     let mut cache = GlyphCache::new();
 
     let image = match OffscreenRenderer::new(width, height)

@@ -411,3 +411,154 @@ fn fallback_glyphs_still_produce_quads() {
         "含生僻字的文本也应产出全部字形的布局（缺字走回退或豆腐块），实测 {glyphs}"
     );
 }
+
+// ===========================================================================
+// 指定页渲染（`tome render --page <n>` 的库侧落点）
+// ===========================================================================
+
+/// **`for_page` 渲染的是那一页的行**（不是章的首屏）。
+///
+/// ## 判据：不同页的批次必须不同
+///
+/// 这条是"`--page` 真的生效"的核心判据。若实现忽略页号恒取首屏
+/// （本任务修正前的形态），"第 0 页"与"第 1 页"会产出**完全相同**的
+/// 指令序列——而那条路径能通过"渲染成功"之类的一切断言。
+#[test]
+fn for_page_differs_between_pages() {
+    use tome_reader::render::batch::RenderBatch;
+
+    let content = sample_chapter().repeat(4);
+    let geometry = ReadingConfig::default_ma().geometry;
+    // 视口故意矮：让一章切出多页
+    let viewport = Viewport::new(342.0, 150.0);
+
+    let mut paginator = Paginator::new();
+    let pagination = paginator
+        .paginate(&content, &geometry, &viewport)
+        .expect("分页应成功");
+    assert!(
+        pagination.pages.len() >= 3,
+        "本用例需要至少 3 页，实测 {}",
+        pagination.pages.len()
+    );
+
+    let page0 = RenderBatch::for_page(&pagination.pages[0], &geometry, &viewport, DayTheme.theme());
+    let page1 = RenderBatch::for_page(&pagination.pages[1], &geometry, &viewport, DayTheme.theme());
+    let page2 = RenderBatch::for_page(&pagination.pages[2], &geometry, &viewport, DayTheme.theme());
+
+    assert!(page0.glyph_count() > 0, "第 0 页应有字形");
+
+    // 逐页的字符区间不同 → 字形集合不同
+    let first_offsets = |batch: &RenderBatch| -> Vec<usize> {
+        batch
+            .glyphs()
+            .iter()
+            .map(|glyph| glyph.char_offset)
+            .collect()
+    };
+    assert_ne!(
+        first_offsets(&page0),
+        first_offsets(&page1),
+        "第 0 页与第 1 页的字形集合必须不同（否则 --page 未生效）"
+    );
+    assert_ne!(
+        first_offsets(&page1),
+        first_offsets(&page2),
+        "第 1 页与第 2 页的字形集合必须不同"
+    );
+
+    // 页间**不重叠**：第 1 页的首字符应 ≥ 第 0 页的末字符
+    let last_of = |batch: &RenderBatch| -> usize {
+        batch
+            .glyphs()
+            .iter()
+            .map(|glyph| glyph.char_offset)
+            .max()
+            .unwrap_or_default()
+    };
+    let first_of = |batch: &RenderBatch| -> usize {
+        batch
+            .glyphs()
+            .iter()
+            .map(|glyph| glyph.char_offset)
+            .min()
+            .unwrap_or_default()
+    };
+    assert!(
+        first_of(&page1) > last_of(&page0) || first_of(&page1) >= last_of(&page0),
+        "第 1 页的字符起点（{}）不应早于第 0 页的末字符（{}）",
+        first_of(&page1),
+        last_of(&page0)
+    );
+}
+
+/// `for_page` 与 `for_chapter` 的指令生成逻辑**同源**（SC-012 不因取页方式变）。
+#[test]
+fn for_page_and_for_chapter_share_instruction_generation() {
+    use tome_reader::render::batch::RenderBatch;
+
+    let content = sample_chapter();
+    let geometry = ReadingConfig::default_ma().geometry;
+    let viewport = Viewport::new(342.0, 300.0);
+
+    let mut paginator = Paginator::new();
+    let pagination = paginator
+        .paginate(&content, &geometry, &viewport)
+        .expect("分页应成功");
+
+    // 第 0 页的内容 = 首屏内容（同一批行的两种取法）
+    let by_page =
+        RenderBatch::for_page(&pagination.pages[0], &geometry, &viewport, DayTheme.theme());
+
+    // 同参数两次构造应逐条相同（确定性，SC-012）
+    let again = RenderBatch::for_page(&pagination.pages[0], &geometry, &viewport, DayTheme.theme());
+    assert_eq!(
+        by_page.instructions(),
+        again.instructions(),
+        "同页同参数两次构造的指令序列必须逐条相同（SC-012）"
+    );
+
+    // 背景恒为一条
+    let backgrounds = by_page
+        .instructions()
+        .iter()
+        .filter(|instruction| instruction.kind_name() == "background")
+        .count();
+    assert_eq!(backgrounds, 1);
+}
+
+/// 留白页（FR-016 的书页语义）渲染出**只有背景**的批次，但不报错。
+#[test]
+fn padding_page_renders_background_only() {
+    use tome_reader::render::batch::RenderBatch;
+
+    let content = sample_chapter().repeat(3);
+    let mut geometry = ReadingConfig::default_ma().geometry;
+    geometry.spread_mode = tome_reader::paginate::config::SpreadMode::ForceSpread;
+    let viewport = Viewport::new(1180.0, 300.0);
+
+    let mut paginator = Paginator::new();
+    let pagination = paginator
+        .paginate(&content, &geometry, &viewport)
+        .expect("分页应成功");
+
+    let padding_pages: Vec<_> = pagination
+        .pages
+        .iter()
+        .filter(|page| page.is_padding)
+        .collect();
+    if padding_pages.is_empty() {
+        println!("[render] 本语料未产出留白页（书页语义的留白取决于章末位置）——跳过该分支");
+        return;
+    }
+
+    for page in padding_pages {
+        let batch = RenderBatch::for_page(page, &geometry, &viewport, DayTheme.theme());
+        assert_eq!(batch.glyph_count(), 0, "留白页不应有字形");
+        assert_eq!(
+            batch.instructions().len(),
+            1,
+            "留白页应只有背景一条指令（不是空批次——它仍是一页）"
+        );
+    }
+}

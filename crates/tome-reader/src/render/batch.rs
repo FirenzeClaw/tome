@@ -212,6 +212,15 @@ impl DrawInstruction {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderBatch {
     background: Background,
+    /// 正文墨色（FR-030：MUST NOT 低于主题的 `text_secondary`）
+    ///
+    /// ## 为什么批次要携带颜色而不是让渲染层去问主题
+    ///
+    /// `RenderBatch` 是"这一页画什么"的完整描述——它若不含颜色，
+    /// 渲染层就得多持有一个 `Theme` 参数，于是"同一个批次在不同主题下
+    /// 画出不同结果"成为可能（而 SC-005 要求主题只影响绘制参数、
+    /// 不影响几何）。把颜色放进批次让"一个批次 = 一次确定的绘制"成立。
+    text_color: tome_core::model::theme::Color,
     images: Vec<ImagePlacement>,
     decorations: Vec<DecorationQuad>,
     glyphs: Vec<GlyphQuad>,
@@ -234,6 +243,57 @@ impl RenderBatch {
         viewport: &Viewport,
         theme: Theme,
     ) -> Self {
+        // 首屏 = 章内前若干行（按视口高截取，与滚动流的切分同口径）
+        let mut lines: Vec<&crate::paginate::page::PageLine> = Vec::new();
+        let mut used_height = 0.0f32;
+        let page_height = viewport.available_height_px.max(0.0);
+        for page_line in &chapter.lines {
+            let line_height = page_line.line.height_px.max(0.0);
+            if used_height + line_height > page_height && !lines.is_empty() {
+                break;
+            }
+            used_height += line_height;
+            lines.push(page_line);
+        }
+
+        Self::from_lines(&lines, geometry, viewport, theme, 0.0)
+    }
+
+    /// 从**指定页**构造批次（`tome render --page <n>` 的落点）。
+    ///
+    /// ## 与 [`Self::for_chapter`] 的关系
+    ///
+    /// `for_chapter` 取章的首屏；本函数取分页层切好的**第 N 页**。
+    /// 两者共用 [`Self::from_lines`] 的绘制指令生成——"同输入同指令序列"
+    /// （SC-012）不因取页方式而变。
+    ///
+    /// ## 为什么直接消费 `page.lines` 而不重新按视口截取
+    ///
+    /// 页边界是**分页层的结论**（含留白页、单行超高独占一页等规则）。
+    /// 渲染层若再按视口算一遍，两套切分会分叉——表现为"渲染出的第 N 页
+    /// 与 `tome layout` 报告的第 N 页内容不一致"。故页渲染只消费、不重算。
+    #[must_use]
+    pub fn for_page(
+        page: &crate::paginate::page::Page,
+        geometry: &GeometryConfig,
+        viewport: &Viewport,
+        theme: Theme,
+    ) -> Self {
+        let lines: Vec<&crate::paginate::page::PageLine> = page.lines.iter().collect();
+        Self::from_lines(&lines, geometry, viewport, theme, 0.0)
+    }
+
+    /// 由**一组行盒**构造批次（`for_chapter` 与 `for_page` 的共同实现）。
+    ///
+    /// `origin_y_px` 是这些行在画布上的纵向起点：首屏取 0（章顶即画布顶），
+    /// 单页渲染同样取 0（该页顶即画布顶）。
+    fn from_lines(
+        lines: &[&crate::paginate::page::PageLine],
+        geometry: &GeometryConfig,
+        viewport: &Viewport,
+        theme: Theme,
+        origin_y_px: f32,
+    ) -> Self {
         let palette = theme.palette();
         let background = Background {
             width: viewport.available_width_px.max(0.0) as u32,
@@ -242,18 +302,15 @@ impl RenderBatch {
             color: palette.bg_reading,
         };
 
-        // 按"视口能装多少行"截取——与滚动流的切分同口径（逐行累加行高）
         let mut glyphs = Vec::new();
-        let mut used_height = 0.0f32;
-        for page_line in &chapter.lines {
+        let mut used_height = origin_y_px;
+
+        for page_line in lines {
             let line_height = page_line.line.height_px.max(0.0);
-            if used_height + line_height > background.height as f32 && !glyphs.is_empty() {
-                break;
-            }
+            // 行顶 = 本行之前的累计高
+            let line_top = used_height;
             used_height += line_height;
 
-            // 行顶（本行的基线上方起点）
-            let line_top = used_height - line_height;
             // 行内容原点：段首缩进行的内容从 indent 开始（FR-018）
             let content_origin = page_line.line.indent_px;
 
@@ -265,13 +322,10 @@ impl RenderBatch {
                         .start
                         .saturating_sub(page_line.line.char_range.start);
 
-                // 字形位图在行内是以基线为基准放置的；这里给出的是**四边形
-                // 的左下角相对画布的位置**。绘制层再按 placement 偏移调整。
                 glyphs.push(GlyphQuad {
                     x: content_origin + glyph.x_px,
                     // 行的**基线**位置 = 行顶 + 基线偏移
                     y: line_top + page_line.line.baseline_px,
-                    // 位图尺寸由缓存给出（此处用字身近似：宽=步进，高=字号）
                     width: glyph.advance_px.max(0.0),
                     height: f32::from(geometry.font_size_px),
                     char_offset,
@@ -284,12 +338,12 @@ impl RenderBatch {
             }
         }
 
-        // 字形颜色取主题正文色（FR-030：不得低于 text_secondary）
         let _text_color = palette.text_primary;
         let _paragraph_mode: ParagraphMode = geometry.paragraph_mode;
 
         let mut batch = Self {
             background,
+            text_color: palette.text_primary,
             images: Vec::new(),
             decorations: Vec::new(),
             glyphs,
@@ -308,6 +362,7 @@ impl RenderBatch {
                 height,
                 color: theme.palette().bg_reading,
             },
+            text_color: theme.palette().text_primary,
             images: Vec::new(),
             decorations: Vec::new(),
             glyphs: Vec::new(),
@@ -321,6 +376,12 @@ impl RenderBatch {
     #[must_use]
     pub fn background(&self) -> Background {
         self.background
+    }
+
+    /// 正文墨色（FR-030）。
+    #[must_use]
+    pub fn text_color(&self) -> tome_core::model::theme::Color {
+        self.text_color
     }
 
     /// 字形数。

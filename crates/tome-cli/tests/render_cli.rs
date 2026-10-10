@@ -344,3 +344,128 @@ fn render_handles_empty_chapter() {
     assert_eq!(code, 0, "空章也应能渲染，stderr: {stderr}");
     assert!(out.exists(), "空章也应产出文件");
 }
+
+// ===========================================================================
+// `--page` 的消费（契约 §2.3 的"目标页"）
+// ===========================================================================
+
+/// 造一份**足够长**的正文（确保切出多页）。
+///
+/// 篇幅按 12 段算：19px 字号、342×200 视口下会切出 10 页左右，
+/// 足以让"第 0 页与第 1 页不同"这条判据有观测面。
+fn write_long_sample(dir: &Path) -> std::path::PathBuf {
+    let path = dir.join("long.txt");
+    let paragraph = "他的手指在书页边缘停了很久。那一行字写的是「山有木兮木有枝」，".to_owned()
+        + "后面跟着一个逗号，逗号之后是半句话，半句话没有说完，句子就断了。";
+    let text = (0..12)
+        .map(|index| format!("第{}段。{paragraph}", index + 1))
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&path, text).expect("应能写入临时正文");
+    path
+}
+
+/// **`--page N` 渲染的是第 N 页**（不同页的内容必须不同）。
+///
+/// ## 为什么"渲染成功"不构成判据
+///
+/// `--page` 未被消费时（本任务修正前的形态），传任何页号都渲染首屏——
+/// 而"成功产出 PNG"这条断言照样通过。故判据是**差分**：渲染第 0 页与第 1
+/// 页，两者的前景像素内容必须**不同**。
+#[test]
+fn render_page_selects_the_requested_page() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let text = write_long_sample(dir.path());
+    let page0 = dir.path().join("p0.png");
+    let page1 = dir.path().join("p1.png");
+
+    let render = |page: &str, out: &Path| -> (i32, String, String) {
+        run_cli(&[
+            "render",
+            "--text",
+            text.to_str().unwrap(),
+            "--page",
+            page,
+            "--out",
+            out.to_str().unwrap(),
+            "--width",
+            "342",
+            "--height",
+            "200",
+        ])
+    };
+
+    let (code0, out0, err0) = render("0", &page0);
+    if code0 == 3 {
+        println!("[render] SKIPPED: 本机无图形后端");
+        return;
+    }
+    assert_eq!(code0, 0, "渲染第 0 页应成功，stderr: {err0}");
+    let (code1, out1, err1) = render("1", &page1);
+    assert_eq!(code1, 0, "渲染第 1 页应成功，stderr: {err1}");
+
+    let value0: serde_json::Value = serde_json::from_str(&out0).expect("应是 JSON");
+    let value1: serde_json::Value = serde_json::from_str(&out1).expect("应是 JSON");
+
+    let bytes0 = std::fs::read(&page0).expect("应能读第 0 页");
+    let bytes1 = std::fs::read(&page1).expect("应能读第 1 页");
+
+    // 两页的 PNG 内容必须不同（同一份正文的不同页不可能逐字节相同）
+    assert_ne!(
+        bytes0, bytes1,
+        "第 0 页与第 1 页的像素内容必须不同——相同说明 --page 未被消费"
+    );
+
+    // 且两者都有前景（不是"第 1 页是空的"这种平凡差异）
+    for (label, value) in [("第 0 页", &value0), ("第 1 页", &value1)] {
+        assert!(
+            value["foreground_pixels"].as_u64().unwrap_or(0) > 0,
+            "{label} 应有前景像素：{value}"
+        );
+    }
+}
+
+/// **越界页码报结构化错误**（不产出文件、不静默出空图）。
+///
+/// ## 为什么这条重要
+///
+/// 页码越界时若静默产出一张只有底色的图，调用方无法分辨"这一页真的是空的"
+/// 与"页号写错了"——前者是合法结果（留白页），后者是用法错误。
+/// 两者必须可区分，故越界走**配置错误**（退出码 1）而非"成功"。
+#[test]
+fn render_rejects_out_of_range_page() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let text = write_sample(dir.path());
+    let out = dir.path().join("nope.png");
+
+    let (code, _, stderr) = run_cli(&[
+        "render",
+        "--text",
+        text.to_str().unwrap(),
+        "--page",
+        "9999",
+        "--out",
+        out.to_str().unwrap(),
+        "--width",
+        "342",
+        "--height",
+        "300",
+    ]);
+
+    if code == 3 {
+        println!("[render] SKIPPED: 本机无图形后端");
+        return;
+    }
+    assert_eq!(
+        code, 1,
+        "越界页码应是业务/配置错误（退出码 1），实测 {code}；stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("9999") || stderr.contains("越界") || stderr.contains("共"),
+        "错误应说明页号与总页数：{stderr}"
+    );
+    assert!(
+        !out.exists(),
+        "越界时 MUST NOT 产出文件（否则调用方会把它当成一页的有效结果）"
+    );
+}

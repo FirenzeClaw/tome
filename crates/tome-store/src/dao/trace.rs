@@ -189,6 +189,30 @@ impl TraceDao {
         })
     }
 
+    /// 某书的**全部**阅读记录（不限日期，按日期排序）。
+    ///
+    /// # 为什么单独一个方法而不是用 `read_records(book, "", "9999")`
+    ///
+    /// 那个写法依赖"空串比任何日期都小、`9999` 比任何日期都大"这一
+    /// **字典序技巧**。它能工作，但把"不限范围"的意图编码进了两个魔法
+    /// 字符串里——读代码的人得先想明白为什么是这两个值。备份导出
+    /// （T087）要的正是"这本书的全部记录"，给它一个语义直白的方法。
+    pub fn read_records_of(&self, book_id: i64) -> Result<Vec<ReadRecord>, StoreError> {
+        self.db.read(move |connection| {
+            let mut statement = connection
+                .prepare_cached("SELECT * FROM read_record WHERE book_id=?1 ORDER BY date")
+                .map_err(sql)?;
+            let rows = statement
+                .query_map(rusqlite::params![book_id], read_record)
+                .map_err(sql)?;
+            let mut records = Vec::new();
+            for row in rows {
+                records.push(row.map_err(sql)?);
+            }
+            Ok(records)
+        })
+    }
+
     /// 全部书的阅读记录（按日期范围，跨书聚合统计用）。
     pub fn all_read_records(
         &self,

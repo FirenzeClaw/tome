@@ -44,6 +44,7 @@
 // 逼成"绕开空间检测"，那等于放弃 FR-043。
 #![deny(unsafe_code)]
 
+pub mod backup;
 pub mod config;
 pub mod dao;
 pub mod datadir;

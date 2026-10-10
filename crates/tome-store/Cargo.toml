@@ -12,11 +12,15 @@ tome-core = { workspace = true }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.11.0"
 thiserror = "2.0.21"
 toml = "0.8.23"
 
 [dev-dependencies]
 tempfile = "3"
+# 集成测试要直接操作数据库写夹具（用 rusqlite 的 params! 宏）。
+# 依赖它而不是另加一个"测试专用"的 SQL 门面：那会是又一套需要同步维护的 API。
+rusqlite = { version = "0.40.2", features = ["bundled"] }
 
 [lints]
 workspace = true

@@ -353,11 +353,15 @@ pub fn schema_version(connection: &Connection) -> Result<i64, StoreError> {
         .map_err(from_rusqlite)
 }
 
-/// 供 DAO 复用的 SQLite → [`StoreError`] 转换。
+/// SQLite → [`StoreError`] 转换。
 ///
 /// 各 DAO 的 `query_map`/`execute` 都要做这一步；集中一处保证"磁盘满判别"
 /// 等转换点逻辑不会在某个 DAO 里被漏掉。
-pub(crate) fn sql(error: rusqlite::Error) -> StoreError {
+///
+/// 公开而不是 `pub(crate)`：集成测试（`tests/`）要用它写夹具——那些测试
+/// 拿不到 crate 私有项，而"用另一套错误转换"会让测试与生产路径两条消息
+/// 通道分叉。
+pub fn sql(error: rusqlite::Error) -> StoreError {
     from_rusqlite(error)
 }
 

@@ -46,6 +46,16 @@ use crate::error::{from_io, StoreError};
 /// `setCookie` 写入、无 HTTP domain 语义"）留出区分空间。
 pub const SCRIPT_COOKIE_DOMAIN: &str = "script";
 
+/// JS 宿主通道里 Cookie 键的前缀。
+///
+/// **必须与 `tome_js::api::state` 的 `COOKIE_KEY_PREFIX` 同值**——它是
+/// 跨 crate 的隐式协议，`tome-store` 尚无反查 `tome-js` 常量的途径
+/// （依赖方向不允许：`tome-js` 不依赖 `tome-store`，反之亦然）。
+///
+/// 故本模块有 `cookie_键前缀与_js_侧一致` 测试，把 "tome://cookie/" 这个
+/// 字面量钉住；改动任一侧都会让该测试红，从而迫使两处同步。
+pub const COOKIE_KEY_PREFIX: &str = "tome://cookie/";
+
 /// 真实存储支撑的 [`StoreHost`]。
 ///
 /// 每个书源脚本一个实例（`source_id` 不同即实例不同），故脚本的缓存与 Cookie
@@ -156,7 +166,26 @@ impl SqliteStoreHost {
     /// 产生一次异常——书源的 `try/catch` 降级逻辑会被无关的"缓存没有"触发。
     /// （与 `read_file` 的"文件不存在是事实错误"相对，见 `MemoryStoreHost` 的
     /// 对照表。）
+    ///
+    /// # Cookie 键走 `cookie` 表
+    ///
+    /// `tome-js` 的 `java.getCookie`/`setCookie` 经 `cache_get`/`cache_put`
+    /// 走宿主通道，键带 `tome://cookie/` 前缀（见 `tome_js::api::state` 的
+    /// `COOKIE_KEY_PREFIX`）。这里**识别该前缀并转存到 `cookie` 表**——
+    /// 若不转，Cookie 会以普通脚本缓存的形式躺在 `script_cache` 里，
+    /// 与 `MiscDao` 的 Cookie 读写（界面登出、导入导出）看到的是两处数据，
+    /// 表现为"脚本登录了但界面上显示未登录"。
+    ///
+    /// ## 用 `cache_get`/`cache_put` 而不是给 trait 加方法
+    ///
+    /// `StoreHost` 是 `tome-core` 定的接缝，加方法会波及 `tome-js` 的
+    /// 全部实现与替身。而"Cookie 就是一类带前缀的缓存键"这个约定已经
+    /// 在 JS 侧成立，在存储侧承认它即可——两边共用同一个前缀常量
+    /// （[`crate::host::COOKIE_KEY_PREFIX`]，与 `tome-js` 的值一致并有测试守着）。
     pub(crate) fn cache_get_inner(&self, key: &str) -> Result<Option<Vec<u8>>, StoreError> {
+        if let Some(name) = key.strip_prefix(COOKIE_KEY_PREFIX) {
+            return Ok(self.cookie_get(name)?.map(String::into_bytes));
+        }
         self.db.read(|connection| {
             let mut statement = connection
                 .prepare_cached("SELECT value FROM script_cache WHERE source_id=?1 AND key=?2")
@@ -173,6 +202,16 @@ impl SqliteStoreHost {
 
     /// `cache_put` 的 crate 内版本。
     pub(crate) fn cache_put_inner(&self, key: &str, value: &[u8]) -> Result<(), StoreError> {
+        if let Some(name) = key.strip_prefix(COOKIE_KEY_PREFIX) {
+            // Cookie 值按定义是文本（`setCookie(name, value)` 的 value 是字符串）。
+            // 非法 UTF-8 说明调用方用错了通道——报内容错误而不是 lossy 转换，
+            // 那会把"脚本写错了"变成"存了一个带替换字符的凭据"。
+            let text = std::str::from_utf8(value).map_err(|_| StoreError::Corrupt {
+                subject: format!("cookie:{name}"),
+                reason: "Cookie 值不是合法 UTF-8".to_string(),
+            })?;
+            return self.cookie_put(name, text);
+        }
         let now = crate::now_unix();
         // 闭包跨线程（actor 通道），故必须持有数据的所有权而非借用。
         // 直接把 `&str`/`&[u8]` move 进去会让闭包带上 `self` 的生命周期，
@@ -225,6 +264,18 @@ impl SqliteStoreHost {
     }
 
     /// 读 Cookie（按源隔离）。
+    ///
+    /// # 为什么这里又有一份（与 [`crate::dao::misc::MiscDao::cookie`] 并列）
+    ///
+    /// 两者服务不同的调用方，形状要求不同：
+    ///
+    /// - `MiscDao::cookie` 给**上层**用（界面展示、导入导出），返回完整
+    ///   `Cookie` DTO，含 `domain`/`expires_at`。
+    /// - 本方法给**JS 宿主**用（`java.getCookie`），只关心值。JS 侧没有
+    ///   domain 的概念（`setCookie(name, value)` 只有两个参数）。
+    ///
+    /// 二者共用同一张表与同一套 `(source_id, name, 'script')` 主键，
+    /// 故脚本写的 Cookie 与上层看到的 Cookie 不会分裂成两份。
     pub(crate) fn cookie_get(&self, name: &str) -> Result<Option<String>, StoreError> {
         self.db.read(|connection| {
             let mut statement = connection
@@ -355,6 +406,55 @@ mod tests {
             host: SqliteStoreHost::new(db, &dir, source_id),
             dir,
         }
+    }
+
+    #[test]
+    fn cookie_键前缀与_js_侧一致() {
+        // 这是跨 crate 的隐式协议（tome-js 用这个前缀把 Cookie 塞进 cache 通道）。
+        // 依赖方向不允许 tome-store 反过来引用 tome-js 的常量，故用字面量钉住：
+        // 改动任一侧都会让本测试红，从而迫使另一侧同步。
+        assert_eq!(COOKIE_KEY_PREFIX, "tome://cookie/");
+    }
+
+    #[test]
+    fn 带_cookie_前缀的键落到_cookie_表() {
+        // 若不转存，Cookie 会躺在 script_cache 里，而 MiscDao 的 Cookie 读写
+        // 看的是 cookie 表——表现为"脚本登录了但界面上显示未登录"
+        let fixture = fixture("cookie-routing", "https://a.com");
+        fixture
+            .host
+            .cache_put_inner(&format!("{COOKIE_KEY_PREFIX}token"), b"abc")
+            .expect("应能写");
+        assert_eq!(
+            fixture
+                .host
+                .cache_get_inner(&format!("{COOKIE_KEY_PREFIX}token"))
+                .expect("应能读"),
+            Some(b"abc".to_vec())
+        );
+
+        // 关键：它必须能被 MiscDao 的 Cookie 接口看到
+        let dao = crate::dao::misc::MiscDao::with_now(fixture.host.db.clone(), 0);
+        assert_eq!(
+            dao.cookie("https://a.com", "token", None)
+                .expect("应能读")
+                .expect("应有")
+                .value,
+            "abc",
+            "经 JS 通道写的 Cookie 必须与 MiscDao 看到的是同一份"
+        );
+
+        // 而不该污染 script_cache
+        let cached: i64 = fixture
+            .host
+            .db
+            .read(|connection| {
+                connection
+                    .query_row("SELECT COUNT(*) FROM script_cache", [], |row| row.get(0))
+                    .map_err(sql)
+            })
+            .expect("应能查");
+        assert_eq!(cached, 0, "Cookie 不该落进 script_cache");
     }
 
     #[test]

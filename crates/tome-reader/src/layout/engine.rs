@@ -32,16 +32,21 @@ use cosmic_text::{
 };
 
 use crate::layout::linebox::{GlyphBox, HardOrderStep, LineBox, RuleExceptionRecord};
+use crate::layout::paragraph_mode::ParagraphMode;
 use crate::rules::cjk::{break_decision, BreakDecision};
 use crate::text::model::TextModel;
 
 /// 排版几何参数（T013 阶段的最小集；完整的 `ReadingConfig` 属 T017）。
 ///
-/// ## 为什么只放这三项
+/// ## 为什么只放这几项
 ///
 /// T013 只负责"文本 → 行盒"。几何参数里真正影响**断行**的只有版心宽度；
-/// 字号与行高影响**度量**（字形位置与行盒高度）。其余参数（段缩进、
-/// 中缝、单双页）属分页层（T019/T020），此处不引入以免过早耦合。
+/// 字号与行高影响**度量**（字形位置与行盒高度）。其余参数（中缝、单双页）
+/// 属分页层（T019/T020），此处不引入以免过早耦合。
+///
+/// **例外是 [`Self::paragraph_mode`]**（前导 2 补入）：它两条效果都落在行盒上
+/// ——段首行左偏移与段末行高——故与版心宽度同理属排版层的关切。它是几何
+/// 而非呈现参数（FR-019/SC-005 把"段缩进模式"列在页数**依赖**的几何子集里）。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Geometry {
     /// 版心宽度（px）
@@ -52,6 +57,8 @@ pub struct Geometry {
     pub line_height: f32,
     /// 对齐方式（FR-011：正文默认两端对齐）
     pub alignment: crate::rules::justify::Alignment,
+    /// 段落排布模式（FR-018：缩进 / 间距，互斥）
+    pub paragraph_mode: ParagraphMode,
 }
 
 impl Geometry {
@@ -63,6 +70,7 @@ impl Geometry {
             font_size_px: 19.0,
             line_height: 1.85,
             alignment: crate::rules::justify::Alignment::Justified,
+            paragraph_mode: ParagraphMode::Indent { em: 2.0 },
         }
     }
 
@@ -70,6 +78,18 @@ impl Geometry {
     #[must_use]
     pub fn line_height_px(&self) -> f32 {
         self.font_size_px * self.line_height
+    }
+
+    /// 段首行的左缩进量（px）——转发到模式（FR-018）。
+    #[must_use]
+    pub fn first_line_indent_px(&self) -> f32 {
+        self.paragraph_mode.first_line_indent_px(self.font_size_px)
+    }
+
+    /// 段末行的额外间距（px）——转发到模式（FR-018）。
+    #[must_use]
+    pub fn paragraph_gap_px(&self) -> f32 {
+        self.paragraph_mode.paragraph_gap_px(self.font_size_px)
     }
 }
 
@@ -197,6 +217,23 @@ impl LayoutEngine {
             };
         }
 
+        // FR-018 的段模式只作用于**正文段落**（缩进/间距是正文的排版约定）。
+        // 居中行（章节标题、引用）本就以版心为准居中，给它加缩进会让标题
+        // 相对版心肉眼可见地偏移——那不是"段首缩进"的语义，是错位。
+        // 故居中对齐时不施加模板的两条效果（缩进与段距同为 0）。
+        let body_geometry = if matches!(
+            geometry.alignment,
+            crate::rules::justify::Alignment::Centered
+        ) {
+            Geometry {
+                paragraph_mode: ParagraphMode::Gap { em: 0.0 },
+                ..*geometry
+            }
+        } else {
+            *geometry
+        };
+        let geometry = &body_geometry;
+
         let metrics = Metrics::relative(geometry.font_size_px, geometry.line_height);
 
         let mut buffer = Buffer::new(&mut self.font_system, metrics);
@@ -239,7 +276,26 @@ impl LayoutEngine {
         // layout 之后改字身只能让行变宽，无法参与断行。
         let degraded_words = apply_overlong_word_degradation(&mut merged, text, geometry);
 
-        // 第 3.5 步：**中西文最小间隙**（FR-009）
+        // 第 3.5 步：**段首缩进**（FR-018 / 前导 2）
+        //
+        // ## 为什么必须在 layout 之前（与间隙、挤压同一理由）
+        //
+        // 缩进占掉首行的可用宽度，**断行必须知道**。若在 layout 之后把首行
+        // 整体右移，首行会按"未缩进"的宽度断行、再被推进版心右侧——直接
+        // 溢出（SC-003 破），而现象只是"首行右边多出两个字"。
+        //
+        // ## 缩进量怎么进 shape 层
+        //
+        // 加在**首个字形**的 `x_advance` 上（em 单位，与间隙的做法一致）。
+        // 这样 layout 算宽度时天然含缩进，断行按缩进后的可用宽进行。
+        // layout 之后再把首字形的 `x_px` 与 `advance_px` 还原——否则缩进会
+        // 被计入"字形步进之和"，两端对齐会把那段当作可撑开的余白。
+        //
+        // 还原的判据是"本行是否段落首行"，那要等 layout 给出断行结果才知道，
+        // 故先后各做一半：先在 shape 层预留，后在行盒组装时归位。
+        apply_paragraph_indent_to_shape(&mut merged, geometry);
+
+        // 第 3.6 步：**中西文最小间隙**（FR-009）
         //
         // ## 为什么必须在 layout 之前做（实测踩到过）
         //
@@ -266,6 +322,12 @@ impl LayoutEngine {
             None,
             Hinting::Disabled,
         );
+
+        // 缩进在 shape 层是"预留在首字形的步进里"（见第 3.5 步），
+        // 到此为止它的使命已结束——layout 已按含缩进的宽度断行。
+        // 下面两行是把它从"步进"改成"行盒字段"所需的换算量。
+        let indent_px = geometry.first_line_indent_px();
+        let gap_px = geometry.paragraph_gap_px();
 
         // 第 5 步：字节 → 字符换算 + 组装行盒
         let mut lines = Vec::with_capacity(laid_out.len());
@@ -307,13 +369,53 @@ impl LayoutEngine {
                 continue;
             };
 
+            // 第 5.2 步：**把首行的缩进预留换成行盒字段**（FR-018）
+            //
+            // shape 层给首字形加的缩进量有两个使命：① 让 layout 按缩进后的
+            // 可用宽断行（已完成）；② 成为行盒的左偏移。
+            //
+            // ## 为什么只需要动**一个**字形
+            //
+            // `x_advance` 的语义是"本字形**之后**的空隙"，故加在首字形上时，
+            // layout 给出的位置是：
+            //
+            // ```text
+            //   pos0 = 0            pos1 = i + a0       pos2 = i + a0 + a1   …
+            // ```
+            //
+            // 而我们要的是 `pos0 = i`、`pos1 = i + a0`、`pos2 = i + a0 + a1`——
+            // **除首字形外全都已经是对的**。故只需把首字形右移 `i`，并把它的
+            // 步进从 `i + a0` 减回 `a0`：
+            //
+            // | 量 | 修正后 | 自洽性 |
+            // |---|---|---|
+            // | 字形盒 | `glyph0 = [i, i+a0)`，`glyph1 = [i+a0, …)` | 相邻无缝、无重叠 |
+            // | 步进和 | `A = a0 + a1 + …`（不含 i） | 与 `content_width_px()` 一致 |
+            // | 视觉宽 | `indent_px + A` | 等于末字形右缘 |
+            //
+            // **初版把整行字形统统左移**，结果是首字形跑到 `x = -i`（实测
+            // -38px），且缩进被算进了"字形步进之和"。两处都错。
+            let mut line_indent_px = 0.0f32;
+            if line_index == 0 && indent_px > 0.0 {
+                if let Some(first) = glyphs.first_mut() {
+                    first.x_px += indent_px;
+                    first.advance_px = (first.advance_px - indent_px).max(0.0);
+                    line_indent_px = indent_px;
+                }
+            }
+
             // 第 5.5 步：**标点挤压**（FR-006 / T014）
             //
             // 溢出量为正时，把超出版心的部分压给行内可压缩标点。
             // 这一步必须在**行已确定**之后做——挤压不改变断点（那会把
             // 断行与字身的依赖变成循环），它只让已经排定的一行"收进版心"。
+            //
+            // 可用宽度 = 版心 − 本行缩进（FR-018）：缩进占掉的那段空间是
+            // **已消耗**的，不参与容纳内容。漏掉它会算出比实际小一整段缩进的
+            // 溢出量，把标点压得过紧。
+            let line_available_px = (geometry.measure_px - line_indent_px).max(0.0);
             let content_width: f32 = glyphs.iter().map(|glyph| glyph.advance_px).sum();
-            let overflow_px = content_width - geometry.measure_px;
+            let overflow_px = content_width - line_available_px;
             let squeeze_px = apply_squeeze(&mut glyphs, text, overflow_px, geometry.font_size_px);
 
             // 第 5.6 步：**两端对齐**（FR-011 / T015）
@@ -340,22 +442,40 @@ impl LayoutEngine {
             // 正确判据是"当前行是第几行"：末行即 `laid_out` 的最后一条。
             // 故必须用**迭代下标**而非字符位置。
             let is_last_line = line_index + 1 == laid_out.len();
+            // 对齐的余白按**本行可用宽**算（版心 − 缩进），否则缩进会被
+            // 当作可撑开的余白摊到字间（FR-018 与 FR-011 的协同点）。
+            let justify_geometry = Geometry {
+                measure_px: line_available_px,
+                ..*geometry
+            };
             let justify_extra_px = apply_justify(
                 &mut glyphs,
                 text,
-                geometry,
+                &justify_geometry,
                 is_last_line,
                 geometry.alignment,
             );
+
+            // 第 5.7 步：**段末行的额外段距**（FR-018 / 前导 2）
+            //
+            // 间距模式（`Gap`）把 `0.4em` 加在段落的**末行**行高上，缩进模式
+            // 加 0。记在段后而非段前，是因为页与滚动视口的装填都逐行累加
+            // `height_px`——间距进入行高即被两者同时遵守，无需各写一遍
+            // （记段前则需要"本行是否某段首行"这个分页层才有的信息）。
+            //
+            // 只作用于**本段末行**：段内其余行保持基准行高，否则间距会变成
+            // "段内行距"（那是行高参数的职责，两者混淆会让 1.85 的语义漂移）。
+            let height_px = geometry.line_height_px() + if is_last_line { gap_px } else { 0.0 };
 
             lines.push(LineBox {
                 paragraph_index,
                 char_range: char_start..char_end,
                 glyphs,
-                height_px: geometry.line_height_px(),
+                height_px,
                 baseline_px: line.max_ascent,
                 squeeze_px,
                 justify_extra_px,
+                indent_px: line_indent_px,
                 rule_exception: None,
             });
         }
@@ -820,6 +940,48 @@ fn apply_squeeze(glyphs: &mut [GlyphBox], text: &str, overflow_px: f32, font_siz
     applied_total
 }
 
+/// 把段首缩进**预留**到 shape 层的首字形步进里（FR-018 / 前导 2）。
+///
+/// ## 为什么在 shape 层（与中西文间隙、标点挤压同一注入点）
+///
+/// 缩进占掉首行的可用宽度，**断行必须知道**。见调用处的详细说明。
+///
+/// ## 加在哪个字形上
+///
+/// **本段第一个字形**。加在末字形或中间都是错的——那会让缩进出现在行中间，
+/// 而"缩进"的定义是内容之前多出的一段空间。
+///
+/// ## 为什么用 em 而不是 px
+///
+/// `ShapeGlyph::x_advance` 的单位是 **em**（`ShapeGlyph::width()` =
+/// `font_size × x_advance`，见 cosmic-text 的 `shape.rs`）。写 px 会让缩进
+/// 随字号被放大成 `font_size × px` 倍——实测 19px 字号下 38px 写进去变成
+/// 722px，整段只剩一个字。
+///
+/// ## 空 `x_advance` 的字形（零宽标记）
+///
+/// 取第一个 `x_advance > 0` 的字形作为载体；全为零时不动（该段没有可缩进的
+/// 内容，缩进无处安放而不是"丢掉"）。
+fn apply_paragraph_indent_to_shape(shape_line: &mut ShapeLine, geometry: &Geometry) {
+    let indent_px = geometry.first_line_indent_px();
+    if indent_px <= 0.0 || geometry.font_size_px <= 0.0 {
+        return;
+    }
+    let indent_em = indent_px / geometry.font_size_px;
+
+    let Some(span) = shape_line.spans.first_mut() else {
+        return;
+    };
+    let Some(word) = span.words.first_mut() else {
+        return;
+    };
+    let Some(glyph) = word.glyphs.iter_mut().find(|glyph| glyph.x_advance > 0.0) else {
+        return;
+    };
+
+    glyph.x_advance += indent_em;
+}
+
 /// 把中西文最小间隙写入 shape 层的 `x_advance`（FR-009 / T014）。
 ///
 /// ## 为什么在 shape 层（而不是 layout 之后）
@@ -934,6 +1096,7 @@ mod tests {
             font_size_px: 19.0,
             line_height: 1.85,
             alignment: crate::rules::justify::Alignment::Justified,
+            paragraph_mode: ParagraphMode::default(),
         };
         let result = engine.layout_paragraph(&model, 0, &geometry);
 
@@ -952,6 +1115,7 @@ mod tests {
             font_size_px: 19.0,
             line_height: 1.85,
             alignment: crate::rules::justify::Alignment::Justified,
+            paragraph_mode: ParagraphMode::default(),
         };
         let result = engine.layout_paragraph(&model, 0, &geometry);
 

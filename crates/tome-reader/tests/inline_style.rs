@@ -27,6 +27,7 @@ fn geometry(measure_px: f32) -> Geometry {
         font_size_px: 19.0,
         line_height: 1.85,
         alignment: Alignment::Justified,
+        paragraph_mode: tome_reader::paginate::config::ParagraphMode::default(),
     }
 }
 
@@ -181,6 +182,7 @@ fn fr010_heading_line_height_scales_with_reading_font_size() {
             font_size_px: reading_size,
             line_height: 1.85,
             alignment: Alignment::Justified,
+            paragraph_mode: tome_reader::paginate::config::ParagraphMode::default(),
         };
         let result = engine.layout_styled_paragraph(&model, 0, &base, &styles);
 
@@ -226,18 +228,47 @@ fn fr011_heading_and_quote_are_centered() {
     }
 }
 
-/// **反例**：正文不居中（首字形 x ≈ 0）。
+/// **反例**：正文不居中（首字形 x = 段首缩进量，而非居中偏移）。
+///
+/// ## 为什么判据不是"x ≈ 0"
+///
+/// 前导 2 之后 FR-018 生效：默认缩进模式下，正文的段首行**本来就该**离左缘
+/// 2em（19px 字号下 38px）。故"x ≈ 0"不再等价于"没有居中"——它会随
+/// 段模式的默认值一起失效。
+///
+/// 本测试的关切是 FR-011 的"正文不居中"，故判据改为与**居中偏移**比较：
+/// 居中的话首字形会被推到 `(版心 − 内容宽)/2`，缩进则是固定的 2em。
+/// 两者在这个语料下相差一个量级（143px vs 38px），区分度充分。
 #[test]
 fn fr011_body_is_not_centered() {
+    use tome_reader::layout::paragraph_mode::ParagraphMode;
+
     let text = "正文不该居中。";
     let mut engine = LayoutEngine::new();
     let model = TextModel::new(text);
     let result = engine.layout_styled_paragraph(&model, 0, &geometry(400.0), &[]);
 
-    let first_x = result.lines[0].glyphs[0].x_px;
+    let line = &result.lines[0];
+    let first_x = line.glyphs[0].x_px;
+
+    // 缩进口径：首字形 x == 段首缩进量（内容始于此）
+    let expected_indent = ParagraphMode::default().first_line_indent_px(19.0);
     assert!(
-        first_x.abs() < 1.0,
-        "正文应左对齐（首字形 x = {first_x:.2}）"
+        (first_x - expected_indent).abs() < 1.0,
+        "正文段首行应落在段首缩进处（{expected_indent:.2}px），实测 {first_x:.2}px"
+    );
+
+    // 居中口径：若真居中，首字形会被推到 (版心 − 内容宽)/2，远大于缩进
+    let centering_offset =
+        tome_reader::rules::justify::centering_offset_px(line.content_width_px(), 400.0);
+    assert!(
+        centering_offset > expected_indent + 10.0,
+        "本语料下居中偏移（{centering_offset:.2}px）应显著大于缩进（{expected_indent:.2}px），\
+         否则本条判据分辨不出两者"
+    );
+    assert!(
+        (first_x - centering_offset).abs() > 1.0,
+        "正文不该居中：首字形 x = {first_x:.2}px，而居中偏移 = {centering_offset:.2}px"
     );
 }
 

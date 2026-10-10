@@ -180,6 +180,7 @@ mod tests {
                     baseline_px: 28.0,
                     squeeze_px: 0.0,
                     justify_extra_px: 0.0,
+                    indent_px: 0.0,
                     rule_exception: None,
                 },
                 chapter_char_range: 0..len,

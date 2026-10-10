@@ -417,6 +417,10 @@ pub fn layout_chapter(
         font_size_px: f32::from(geometry.font_size_px),
         line_height: geometry.line_height,
         alignment: crate::rules::justify::Alignment::Justified,
+        // FR-018：段缩进模式是**几何参数**（FR-019/SC-005 把"段缩进模式"
+        // 列在页数依赖的几何子集里），故必须传进排版——留默认值会让
+        // 配置里的模式永远不生效（"schema 有、施加无"的半成品形态）。
+        paragraph_mode: geometry.paragraph_mode,
     };
 
     // 逐段排版，把行盒换算成章内区间。

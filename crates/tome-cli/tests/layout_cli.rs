@@ -188,11 +188,37 @@ fn layout_golden_fields_for_fixed_input() {
     assert_eq!(paragraphs[0]["char_start"], 0);
     assert_eq!(paragraphs[0]["char_len"], 11, "10 个汉字 + 1 个句号");
 
-    // 行：11 字 / 每行 12 字 → 单行（版心够宽）
+    // 行：**段首行带 2em 缩进**，故可用宽 = 228 − 38 = 190px
+    //
+    // ## 这条断言为什么在 S2-4 前导 2 之后改了
+    //
+    // 旧断言是"12 字身版心容纳 11 字 → 单行"。那个前提在 FR-018 的**施加**
+    // 落地后不再成立：默认缩进模式下段首行要留 2em（38px），实际可用宽
+    // 只剩 190px——11 字必然折行。
+    //
+    // 这不是缺陷，正是"缩进模式真的生效了"的可观测证据：同一输入在
+    // `--paragraph-mode gap` 下仍是单行（见
+    // `paragraph_mode_changes_line_breaking`）。
+    //
+    // ## 为什么首行是 9 字而不是 10 字（手算会算错的地方）
+    //
+    // 190px 确实容得下 10 个字身，但**末两字不是两个独立单元**：
+    // 「癸。」是「闭标点与前一字」的合并单元（BASELINE §11.1 实测：
+    // `unicode-linebreak` 已把中文标点与其前一字绑成多字 word），
+    // 宽 38px。故首行只能取 9 字（171px）——再放这个单元会到 209px > 190px。
     let lines = paragraphs[0]["lines"].as_array().expect("lines 是数组");
-    assert_eq!(lines.len(), 1, "228px 版心容纳 12 字，11 字应单行");
+    assert_eq!(
+        lines.len(),
+        2,
+        "228px 版心 − 2em 缩进 = 190px 可用宽，11 字应折两行"
+    );
     assert_eq!(lines[0]["char_start"], 0);
-    assert_eq!(lines[0]["char_len"], 11);
+    assert_eq!(
+        lines[0]["char_len"], 9,
+        "首行容 9 字（「癸。」是 2 字一体的禁则单元，放不下）"
+    );
+    assert_eq!(lines[1]["char_start"], 9);
+    assert_eq!(lines[1]["char_len"], 2, "次行收「癸。」这个不可拆单元");
     assert_eq!(lines[0]["paragraph_index"], 0);
 
     // 分页与滚动属后续切片——**空数组而非伪造**
@@ -953,4 +979,77 @@ fn scroll_output_is_deterministic() {
             "滚动形态 {height}px 下两次运行必须逐字节相同"
         );
     }
+}
+
+/// **FR-018 的两模式经 CLI 可观测**（前导 2 的端到端证据）。
+///
+/// ## 这条测试要证明什么
+///
+/// `layout_golden_fields_for_fixed_input` 断言了"缩进模式下 11 字折两行"。
+/// 但那个断言之于 FR-018 是**不充分**的——"行数变了"也可能由任何别的几何
+/// 差异造成。有效判据是**对照**：同一输入、同一版心，只切段模式，
+/// 断行结果必须不同，且差异方向与"缩进占掉 2em"一致。
+///
+/// 同时钉住另一侧：间距模式不应有首行缩进，故它仍是单行。
+#[test]
+fn paragraph_mode_changes_line_breaking() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let path = dir.path().join("fixed.txt");
+    std::fs::write(&path, "甲乙丙丁戊己庚辛壬癸。").expect("写临时正文");
+    let path = path.to_str().unwrap();
+
+    let run = |mode: &str| -> serde_json::Value {
+        let (code, stdout, stderr) = run_layout(&[
+            "layout",
+            "--text",
+            path,
+            "--width",
+            "228",
+            "--font-size",
+            "19",
+            "--line-height",
+            "1.85",
+            "--measure-em",
+            "12",
+            "--gutter",
+            "64",
+            "--paragraph-mode",
+            mode,
+        ]);
+        assert_eq!(code, 0, "mode={mode} 应成功，stderr: {stderr}");
+        serde_json::from_str(&stdout).expect("输出应是 JSON")
+    };
+
+    let indent = run("indent");
+    let gap = run("gap");
+
+    // 回显：模式如实出现在几何里
+    assert_eq!(indent["geometry"]["paragraph_mode"], "indent");
+    assert_eq!(gap["geometry"]["paragraph_mode"], "gap");
+
+    let line_count = |value: &serde_json::Value| -> usize {
+        value["paragraphs"][0]["lines"]
+            .as_array()
+            .map_or(0, Vec::len)
+    };
+
+    // 缩进模式：2em 缩进占掉可用宽 → 折行
+    assert_eq!(
+        line_count(&indent),
+        2,
+        "缩进模式下 11 字应折两行（228 − 38 = 190px 可用宽）"
+    );
+    // 间距模式：无首行缩进 → 228px 容 12 字身 → 单行
+    assert_eq!(
+        line_count(&gap),
+        1,
+        "间距模式下无首行缩进，11 字应单行"
+    );
+
+    // 两模式的**断行结果必须不同**——这是"模式真的生效了"的核心判据
+    assert_ne!(
+        line_count(&indent),
+        line_count(&gap),
+        "两模式的断行必须不同，否则模式未被施加"
+    );
 }

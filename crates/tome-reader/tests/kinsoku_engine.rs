@@ -137,6 +137,7 @@ fn layout(
         font_size_px: 19.0,
         line_height: 1.85,
         alignment: tome_reader::rules::justify::Alignment::Justified,
+        paragraph_mode: tome_reader::paginate::config::ParagraphMode::default(),
     };
     let result = engine.layout_paragraph(&model, 0, &geometry);
     (result.lines, result.exceptions)
@@ -426,6 +427,7 @@ fn multi_paragraph_kinsoku_holds_per_paragraph() {
             font_size_px: 19.0,
             line_height: 1.85,
             alignment: tome_reader::rules::justify::Alignment::Justified,
+            paragraph_mode: tome_reader::paginate::config::ParagraphMode::default(),
         };
         let result = engine.layout_paragraph(&model, index, &geometry);
 

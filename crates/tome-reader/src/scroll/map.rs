@@ -210,21 +210,43 @@ impl<'a> PositionMap<'a> {
             return Some(line.chapter_char_range.start);
         }
 
-        let mut accumulated = 0.0f32;
+        // ## 判据用字形的**实际位置**（`x_px`）而不是"累加步进"
+        //
+        // 两者在**无缩进**时等价，但段首缩进（FR-018）让首行从 `indent_px`
+        // 开始——那时"从 0 累加步进"会整体少算一个缩进量，把行内所有点都
+        // 映射到偏左一个缩进的字符上（实测偏差 49.88px ≈ 2 字身）。
+        //
+        // 用 `x_px`（布局给出的真实左缘，含缩进）则天然正确，且与
+        // `char_to_point_in_line` 的取法（同样读 `x_px`）口径一致——
+        // 两者不一致正是往返不闭合的来源。
+        let paragraph_offset = line
+            .chapter_char_range
+            .start
+            .saturating_sub(line.line.char_range.start);
+
         for glyph in &line.line.glyphs {
-            accumulated += glyph.advance_px.max(0.0);
-            if x_px < accumulated {
+            let right_edge = glyph.x_px.max(0.0) + glyph.advance_px.max(0.0);
+            if x_px < right_edge {
                 // 字形区间是**段内**的，加段起始换算为章内
-                let paragraph_offset = line
-                    .chapter_char_range
-                    .start
-                    .saturating_sub(line.line.char_range.start);
                 return Some(glyph.char_range.start + paragraph_offset);
             }
         }
 
         // 超出内容宽度 → 行末
         Some(line.chapter_char_range.end)
+    }
+
+    /// 行内容的**左缘**（行内坐标，px）。
+    ///
+    /// ## 为什么命中测试需要它
+    ///
+    /// 段首缩进行的内容不从 0 开始，而 `[0, indent)` 那段是"缩进留白"。
+    /// 落在留白里的点击应判给**本行首字符**（用户意图是"点在这行上"），
+    /// 但往返误差的判据（FR-040 的半个字形）只在**内容区**内有意义——
+    /// 留白宽度（2em）远大于半个字形，拿它当误差就是判据错位。
+    #[must_use]
+    pub fn line_content_origin_px(&self, line: &PageLine) -> f32 {
+        line.line.indent_px.max(0.0)
     }
 
     /// 字符（章内下标）→ 行内 x（相对行左边缘）。
@@ -290,6 +312,7 @@ mod tests {
                 baseline_px: height * 0.8,
                 squeeze_px: 0.0,
                 justify_extra_px: 0.0,
+                indent_px: 0.0,
                 rule_exception: None,
             },
             chapter_char_range: start..(start + len),

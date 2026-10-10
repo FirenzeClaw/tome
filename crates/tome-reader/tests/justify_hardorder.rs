@@ -26,6 +26,7 @@ fn geometry(measure_px: f32, alignment: Alignment) -> Geometry {
         font_size_px: 19.0,
         line_height: 1.85,
         alignment,
+        paragraph_mode: tome_reader::paginate::config::ParagraphMode::default(),
     }
 }
 
@@ -193,6 +194,15 @@ fn fr011_punctuation_adjacency_is_not_stretched() {
 }
 
 /// **居中**：余白对半分到两侧，字距不变（故不会拉散）。
+///
+/// ## 判据为什么不是"居中 = 左对齐 + 半余白"
+///
+/// 前导 2 之后 FR-018 生效：同一段文本走**正文**路径时带段首缩进，而居中
+/// 路径（标题/引用）不带——两条路径的起点本就不同，"左对齐 + 偏移"这个
+/// 差分式不再成立。
+///
+/// 居中的**定义**与段模式无关：左右余白相等。故此处直接断言该不变量
+/// （两侧余白之差 ≈ 0 且首字形落在半余白处），它对两种段模式都成立。
 #[test]
 fn fr011_centered_splits_slack_in_half() {
     let text = "标题";
@@ -202,22 +212,34 @@ fn fr011_centered_splits_slack_in_half() {
     let left = engine.layout_paragraph(&model, 0, &geometry(342.0, Alignment::Left));
     let centered = engine.layout_paragraph(&model, 0, &geometry(342.0, Alignment::Centered));
 
-    let left_first_x = left.lines[0].glyphs[0].x_px;
-    let centered_first_x = centered.lines[0].glyphs[0].x_px;
+    let centered_line = &centered.lines[0];
+    let centered_first_x = centered_line.glyphs[0].x_px;
+    let content_width = centered_line.content_width_px();
 
     // 内容宽 = 2 字身 = 38px；余白 = 342 - 38 = 304px；半 = 152px
-    let expected_offset = (342.0 - 38.0) / 2.0;
+    let expected_offset = (342.0 - content_width) / 2.0;
     assert!(
-        (centered_first_x - (left_first_x + expected_offset)).abs() < 1.0,
-        "居中应把余白对半：期望首字形 x ≈ {:.2}，实测 {:.2}",
-        left_first_x + expected_offset,
-        centered_first_x
+        (centered_first_x - expected_offset).abs() < 1.0,
+        "居中应把余白对半：期望首字形 x ≈ {expected_offset:.2}，实测 {centered_first_x:.2}"
     );
 
-    // 字距不变
+    // 两条余白相等（居中的定义）
+    let right_margin = 342.0 - (centered_first_x + content_width);
+    assert!(
+        (centered_first_x - right_margin).abs() < 1.0,
+        "居中时左右余白应相等：左 {centered_first_x:.2}px，右 {right_margin:.2}px"
+    );
+
+    // 居中不改变字距
     assert_eq!(
-        centered.lines[0].glyphs[0].advance_px, left.lines[0].glyphs[0].advance_px,
+        centered_line.glyphs[0].advance_px, left.lines[0].glyphs[0].advance_px,
         "居中不改字距"
+    );
+
+    // 居中行不带段首缩进（标题以版心为准居中，见引擎的居中分支说明）
+    assert_eq!(
+        centered_line.indent_px, 0.0,
+        "居中行不该有段首缩进——缩进会让标题相对版心偏斜"
     );
 }
 

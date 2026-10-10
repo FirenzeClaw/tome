@@ -530,6 +530,7 @@ fn content_page(chapter_index: usize, page_in_chapter: u32, range: std::ops::Ran
         baseline_px: 28.0,
         squeeze_px: 0.0,
         justify_extra_px: 0.0,
+        indent_px: 0.0,
         rule_exception: None,
     };
     Page {

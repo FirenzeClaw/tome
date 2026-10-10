@@ -321,14 +321,25 @@ fn horizontal_roundtrip_is_within_half_glyph() {
     // 超过恒定 `font_size/2 = 9.5px`。那不是映射误差：用户点 x=0 确实落在
     // 首字形内，反向给出的"该字形的代表点"就是它的中心。用恒定阈值会把
     // **正确的排布**判成违规。
+    // ## 采样从**内容左缘**开始，而不是 0
+    //
+    // 段首缩进行（FR-018）的内容从 `indent_px` 开始，`[0, indent_px)` 是刻意的
+    // 留白。落在那段留白里的 x 唯一合理的答案是"本行首字符"（用户点在这一行上
+    // 的空白处），而首字符的**代表点**是它的中心——两者相距半个字身加上整个
+    // 缩进。那不是映射误差，是"留白被点中"这件事本身没有更精确的答案。
+    //
+    // FR-040 的半个字形界约束的是**字符位置**附近的往返，故采样域是内容区
+    // （`[content_origin, 末字形右缘)`）。缩进留白的往返语义由
+    // `point_in_line_maps_within_that_line` 覆盖（它只要求落在本行内）。
     let mut checked = 0usize;
     for line in flow.lines().iter().take(20) {
+        let content_origin = map.line_content_origin_px(line);
         let line_width: f32 = line
             .line
             .glyphs
             .last()
             .map_or(0.0, |glyph| glyph.x_px + glyph.advance_px.max(0.0));
-        if line_width <= 0.0 {
+        if line_width <= content_origin {
             continue;
         }
         let paragraph_offset = line
@@ -336,7 +347,7 @@ fn horizontal_roundtrip_is_within_half_glyph() {
             .start
             .saturating_sub(line.line.char_range.start);
 
-        let mut x = 0.0f32;
+        let mut x = content_origin;
         while x <= line_width {
             let Some(char_offset) = map.point_in_line_to_char(line, x) else {
                 panic!("行内 x={x} 应可映射到字符");

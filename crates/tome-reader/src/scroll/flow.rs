@@ -548,6 +548,7 @@ mod tests {
                 baseline_px: height * 0.8,
                 squeeze_px: 0.0,
                 justify_extra_px: 0.0,
+                indent_px: 0.0,
                 rule_exception: None,
             },
             chapter_char_range: start..(start + len),

@@ -61,56 +61,11 @@ pub const DEFAULT_MEASURE_MAX_EM: f32 = 42.0;
 pub const DEFAULT_GUTTER_PX: u16 = 64;
 
 /// 默认段首缩进（em）。MASTER §5.1 `--reading-paragraph-indent: 2em`。
-pub const DEFAULT_PARAGRAPH_INDENT_EM: f32 = 2.0;
-
-/// 默认段间距（em）。MASTER §5.1 `--reading-paragraph-gap: 0.4em`。
-pub const DEFAULT_PARAGRAPH_GAP_EM: f32 = 0.4;
-
-/// 段落的排布模式（FR-018：两者**互斥**）。
 ///
-/// ## 为什么用一个枚举而不是两个 `Option<f32>`
-///
-/// FR-018 明文要求"缩进模式无额外段距，间距模式无首行缩进"。两个可选量
-/// 可以表达 `(Some, Some)` 这种**非法组合**——那时谁生效要靠约定。一个
-/// 枚举让"两种模式"在类型上互斥，非法组合**无法构造**。
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum ParagraphMode {
-    /// 段首缩进（默认 2em），段间无额外间距。
-    Indent {
-        /// 缩进量（em）
-        em: f32,
-    },
-    /// 段间间距（默认 0.4em），首行不缩进。
-    Gap {
-        /// 间距量（em）
-        em: f32,
-    },
-}
-
-impl Default for ParagraphMode {
-    /// FR-018 / 裁决 OQ#12→A：**默认段首缩进 2em**。
-    fn default() -> Self {
-        Self::Indent {
-            em: DEFAULT_PARAGRAPH_INDENT_EM,
-        }
-    }
-}
-
-impl ParagraphMode {
-    /// 该模式的量（em）。
-    #[must_use]
-    pub fn amount_em(&self) -> f32 {
-        match *self {
-            Self::Indent { em } | Self::Gap { em } => em,
-        }
-    }
-
-    /// 是否为首行缩进模式。
-    #[must_use]
-    pub fn is_indent(self) -> bool {
-        matches!(self, Self::Indent { .. })
-    }
-}
+/// 定义在 [`crate::layout::paragraph_mode`]（施加方所在层），此处再导出。
+pub use crate::layout::paragraph_mode::{
+    validate_paragraph_mode, ParagraphMode, DEFAULT_PARAGRAPH_GAP_EM, DEFAULT_PARAGRAPH_INDENT_EM,
+};
 
 /// 单双页模式：自动判据 + 两个**手动覆盖**档（FR-015）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -318,16 +273,6 @@ pub fn validate_measure_em(value: f32) -> Result<(), &'static str> {
 pub fn validate_gutter_px(value: u16) -> Result<(), &'static str> {
     let _ = value;
     Ok(())
-}
-
-/// 校验段模式与段量（负值/NaN 被拒）。
-pub fn validate_paragraph_mode(value: &ParagraphMode) -> Result<(), &'static str> {
-    let em = value.amount_em();
-    if em.is_finite() && em >= 0.0 {
-        Ok(())
-    } else {
-        Err("paragraph_mode")
-    }
 }
 
 /// **呈现子集**：只决定绘制的参数（FR-028）。

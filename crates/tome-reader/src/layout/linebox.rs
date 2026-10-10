@@ -110,6 +110,18 @@ pub struct LineBox {
     /// 保留此字段的理由：`content_width_px()` 是"字身之和"，而"视觉行长"
     /// 是 `字身之和 + 伸展`；没有它就无法从行盒判断"这行是否已对齐"。
     pub justify_extra_px: f32,
+    /// 段首缩进的左偏移（px；0 表示本行不缩进，FR-018）
+    ///
+    /// ## 为什么行盒要单独记账，而不是"看首字形的 x_px"就够了
+    ///
+    /// 首字形的 `x_px` 确实已经含缩进（缩进就是把首字形推到那里）。但**行长**
+    /// 不一样：`content_width_px()` 是"从行原点量到内容右缘"，缩进占掉的那段
+    /// 空间必须计入，否则 SC-003 的"无任一行超出容器"会把缩进行判为更窄，
+    /// 而两端对齐的余白计算（`measure - 内容宽`）会**把缩进当成可用余白**去
+    /// 撑开字间——视觉上缩进被"拉平"消失。故缩进在行盒上独立成字段。
+    ///
+    /// 缩进模式默认 2em（[`crate::layout::paragraph_mode`]）。
+    pub indent_px: f32,
     /// 硬序第 ④ 步的例外记录（data-model §4 `rule_exception`）
     pub rule_exception: Option<RuleExceptionRecord>,
 }
@@ -129,9 +141,20 @@ impl LineBox {
     /// 但若实现有 bug（如忘了更新 `x_px`），两种算法会分叉。
     /// 本方法取求和（最直接的定义），并另有测试断言两种算法一致——
     /// 那个断言就是"挤压改写是否自洽"的判据。
+    ///
+    /// **不含缩进**：缩进是"内容之前留出的空间"，见 [`Self::visual_width_px`]。
     #[must_use]
     pub fn content_width_px(&self) -> f32 {
         self.glyphs.iter().map(|glyph| glyph.advance_px).sum()
+    }
+
+    /// 行的**视觉宽度**（px）——含段首缩进，即"从行原点量到哪里"。
+    ///
+    /// SC-003（混排无超宽）与两端对齐的余白判据都以此为口径：缩进占的
+    /// 那段空间是**已消耗**的，不能当成可用余白。
+    #[must_use]
+    pub fn visual_width_px(&self) -> f32 {
+        self.indent_px + self.content_width_px()
     }
 
     /// 行内字形压缩量之和——必须等于 [`Self::squeeze_px`]。
@@ -175,6 +198,7 @@ mod tests {
             baseline_px: 28.0,
             squeeze_px: 9.5,
             justify_extra_px: 0.0,
+            indent_px: 0.0,
             rule_exception: None,
         };
 
@@ -198,6 +222,7 @@ mod tests {
             baseline_px: 28.0,
             squeeze_px: 14.25,
             justify_extra_px: 0.0,
+            indent_px: 0.0,
             rule_exception: None,
         };
 

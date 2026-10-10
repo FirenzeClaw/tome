@@ -36,6 +36,7 @@ fn geometry(measure_px: f32) -> Geometry {
         font_size_px: 19.0,
         line_height: 1.85,
         alignment: tome_reader::rules::justify::Alignment::Justified,
+        paragraph_mode: tome_reader::paginate::config::ParagraphMode::default(),
     }
 }
 
@@ -133,12 +134,18 @@ fn sc003_no_line_exceeds_measure() {
             data_points += 1;
 
             for line in &result.lines {
-                let width = line.content_width_px();
+                // SC-003 的"行宽"是**视觉宽**（含段首缩进，FR-018）：
+                // 缩进占的是版心内的空间，故 `content + indent > measure`
+                // 就是真的溢出。只看 `content_width_px()` 会漏掉"缩进行
+                // 内容仍排满版心"这一情形（实测首行恰为 38+304=342）。
+                let width = line.visual_width_px();
                 assert!(
                     width <= measure_px + EPSILON,
-                    "SC-003 违反：行宽 {width:.2}px 超出容器 {measure_px}px（超出 {:.2}px）\n\
+                    "SC-003 违反：行宽 {width:.2}px 超出容器 {measure_px}px（超出 {:.2}px，\
+                     其中缩进 {:.2}px）\n\
                      行字符区间 {:?}\n行内容前 30 字：{:?}",
                     width - measure_px,
+                    line.indent_px,
                     line.char_range,
                     text.chars()
                         .skip(line.char_range.start)
@@ -301,7 +308,18 @@ fn us1_scenario_1_line_width_within_one_squeeze_unit() {
             for line in body {
                 checked_lines += 1;
                 let width = line.content_width_px();
-                let slack = measure_px - width;
+
+                // ## 可用宽 = 版心 − 本行缩进（FR-018 的落点，装置侧）
+                //
+                // 与引擎同口径：段首缩进行的内容可用宽比版心少一个缩进量。
+                // 装置若仍用 `measure_px - width`，缩进行会**恒**被算出一个
+                // 等于缩进量的"留白"（实测 38px），而那个空间是刻意留出的、
+                // 不参与容纳任何单元——于是每一行缩进行都变成一个假违规。
+                //
+                // 这与 §11.4 记的那次装置缺陷同类（漏算"被丢弃的间隔"）：
+                // 判据漏了一个真实的几何量，方向是**误报**。
+                let line_available_px = (measure_px - line.indent_px).max(0.0);
+                let slack = line_available_px - width;
 
                 // 下一行的首个可断单元能否放进本行剩余空间？
                 let next_unit_px = next_breakable_unit_width(&result.lines, line, text, measure_px);

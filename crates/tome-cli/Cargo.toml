@@ -15,7 +15,15 @@ tome-js = { workspace = true }
 tome-rule = { workspace = true }
 tome-source = { workspace = true }
 tome-local = { workspace = true }
-# S2 排版层（T048 的先行部分：`layout` 子命令）
+# S2 排版层（T048 的先行部分：`layout` / `render` / `fonts` 子命令）
+#
+# `render` feature 经 `reader-render` 透传（见文件尾的 `[features]`）：
+# 关掉它时 `tome-reader` 的渲染面在**编译期**消失，于是 `render` 子命令
+# 以能力错误 + 退出码 3 回应（contracts/cli.md §2.3、tasks.md 002 T032）。
+# 注意：不写 `default-features = false`——workspace 依赖项未声明
+# default-features，cargo 会忽略该覆盖（实测警告："default-features is ignored"）。
+# headless 构建走 `--no-default-features`（它同时关掉本 crate 的 reader-render），
+# 效果相同且无歧义。
 tome-reader = { workspace = true }
 
 # CLI 输出是 JSON（contracts/cli.md：默认 `--format json`），
@@ -29,6 +37,15 @@ serde_json = "1"
 tempfile = "3"
 # Phase 7 的 TXT 编码测试要用 GBK 编码样本
 encoding_rs = "0.8.42"
+
+[features]
+# 默认带渲染面（开发/发布构建都需要它）。
+#
+# headless CI job 用 `--no-default-features` 构建并断言 `render` 子命令
+# 返回退出码 3——那时依赖树里连 wgpu 都没有（宪法 IV / FR-052 的最强形态：
+# 不是"运行时不用图形栈"，而是"编译期不存在"）。
+default = ["reader-render"]
+reader-render = ["tome-reader/render"]
 
 [lints]
 workspace = true

@@ -126,6 +126,26 @@ pub struct LayoutArgs {
     pub target_mode: Option<String>,
 }
 
+/// `render` 子命令的参数（`contracts/cli.md` §2.3）。
+///
+/// 复用 [`LayoutArgs`] 的几何选项（离屏渲染要按同一套几何排版），
+/// 另加渲染专有项：目标页/视口、输出路径、主题。
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RenderArgs {
+    /// 几何与正文来源（与 `layout` 完全同一套）
+    pub layout: LayoutArgs,
+    /// `--page <n>`（翻页模式的目标页）
+    pub page: Option<u32>,
+    /// `--viewport <n>`（滚动模式的目标视口）
+    pub viewport_index: Option<u32>,
+    /// `--out <path>`（输出 PNG）
+    pub out: Option<PathBuf>,
+    /// `--theme day|night`（默认 day）
+    pub theme: Option<String>,
+    /// `--reduced-motion`（关闭动效；不影响静态渲染结果，FR-032）
+    pub reduced_motion: bool,
+}
+
 /// 解析出的命令。
 /// `[NOTE]` **不派生 `Eq`**：`layout` 的几何选项含 `f32`（宽高/字号/
 /// 行高），而浮点没有全序——`Eq` 会让"NaN == NaN 为假"这类语义混进来。
@@ -232,6 +252,15 @@ pub enum Command {
     ///
     /// 排版与分页/滚动流计算。**不渲染**（纯计算，无需图形环境）。
     Layout(LayoutArgs),
+    /// `render --text <f> --page <n> --out <png>`（`contracts/cli.md` §2.3）
+    ///
+    /// 离屏渲染一页为图像。后端不可用时以退出码 3 + 结构化能力错误回应
+    /// （FR-053：MUST NOT 伪装成功）。
+    Render(Box<RenderArgs>),
+    /// `fonts`（`contracts/cli.md` §2.4）
+    ///
+    /// 报告内嵌字体子集与回退链状态（FR-050/051、SC-017）。
+    Fonts,
     /// `layout-anchor --text <file> --char <offset>`（`contracts/cli.md` §2.2）
     ///
     /// 位置换算与阅读形态切换：输出指定字符在给定几何下**两种形态**各自的
@@ -446,6 +475,12 @@ pub fn parse(args: &[String]) -> ParseOutcome {
     let mut anchor_offset: Option<usize> = None;
     let mut anchor_char: Option<usize> = None;
     let mut target_mode: Option<String> = None;
+    // --- `render` / `fonts` 子命令的选项（contracts/cli.md §2.3/§2.4）---
+    let mut render_page: Option<u32> = None;
+    let mut render_viewport: Option<u32> = None;
+    let mut render_out: Option<PathBuf> = None;
+    let mut render_theme: Option<String> = None;
+    let mut render_reduced_motion = false;
     let mut group: Option<String> = None;
     let mut enabled_only = false;
     let mut check_all = false;
@@ -578,6 +613,51 @@ pub fn parse(args: &[String]) -> ParseOutcome {
                 };
                 chapter = Some(value);
                 2
+            }
+            "--page" => {
+                let value = match args.get(index + 1).and_then(|v| v.parse::<u32>().ok()) {
+                    Some(value) => value,
+                    None => {
+                        return ParseOutcome::Usage("--page 需要一个非负整数".to_string());
+                    }
+                };
+                render_page = Some(value);
+                2
+            }
+            "--viewport" => {
+                let value = match args.get(index + 1).and_then(|v| v.parse::<u32>().ok()) {
+                    Some(value) => value,
+                    None => {
+                        return ParseOutcome::Usage("--viewport 需要一个非负整数".to_string());
+                    }
+                };
+                render_viewport = Some(value);
+                2
+            }
+            "--out" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => PathBuf::from(value),
+                    None => return ParseOutcome::Usage("--out 需要一个文件路径".to_string()),
+                };
+                render_out = Some(value);
+                2
+            }
+            "--theme" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value.to_string(),
+                    None => return ParseOutcome::Usage("--theme 需要一个值".to_string()),
+                };
+                if value != "day" && value != "night" {
+                    return ParseOutcome::Usage(format!(
+                        "--theme 只接受 day 或 night，实际 `{value}`"
+                    ));
+                }
+                render_theme = Some(value);
+                2
+            }
+            "--reduced-motion" => {
+                render_reduced_motion = true;
+                1
             }
             "--text" => {
                 // 排版验证需要一个**正文来源**。`--chapter <book>#<n>` 要求
@@ -1220,6 +1300,43 @@ pub fn parse(args: &[String]) -> ParseOutcome {
             anchor_char,
             target_mode: target_mode.clone(),
         }),
+        // `render`（contracts/cli.md §2.3）
+        "render" => {
+            let Some(out) = render_out.clone() else {
+                return ParseOutcome::Usage("render 需要 --out <png>（输出路径）".to_string());
+            };
+            let has_target = render_page.is_some() || render_viewport.is_some();
+            if !has_target {
+                return ParseOutcome::Usage(
+                    "render 需要 --page <n>（翻页）或 --viewport <n>（滚动）之一".to_string(),
+                );
+            }
+            Command::Render(Box::new(RenderArgs {
+                layout: LayoutArgs {
+                    chapter,
+                    text_file,
+                    mode: layout_mode,
+                    width,
+                    height,
+                    font_size,
+                    line_height,
+                    paragraph_mode,
+                    measure_em,
+                    gutter,
+                    spread,
+                    anchor: anchor_offset,
+                    anchor_char,
+                    target_mode: target_mode.clone(),
+                },
+                page: render_page,
+                viewport_index: render_viewport,
+                out: Some(out),
+                theme: render_theme,
+                reduced_motion: render_reduced_motion,
+            }))
+        }
+        // `fonts`（contracts/cli.md §2.4）
+        "fonts" => Command::Fonts,
         // `layout-anchor`（contracts/cli.md §2.2）
         "layout-anchor" => {
             let Some(char_offset) = anchor_char.or(anchor_offset) else {
@@ -1362,6 +1479,9 @@ pub fn help_text() -> String {
         "  tome layout --chapter <book>#<n> [几何选项]         同上（书架形式，WIP）",
         "  tome layout-anchor --text <f> --char <n>           位置换算与形态切换（SC-005b）",
         "                   [--mode p|scroll] [--target-mode p|scroll] [几何选项]",
+        "  tome render --text <f> --page <n> --out <png>      离屏渲染一页为 PNG（SC-011）",
+        "                   [--theme day|night] [--reduced-motion] [几何选项]",
+        "  tome fonts                                         内嵌字体子集与回退链报告（SC-017）",
         "  tome verify --corpus <dir> [--report <file>]       跑合成语料差分（SC-002a）",
         "  tome verify --real-sources <dir> --golden <dir>     真实书源对照基线（SC-002b）",
         "              [--write-baseline] [--report <file>]",
@@ -1398,6 +1518,13 @@ pub fn help_text() -> String {
         "  --anchor <offset>      报告该锚点落在哪一行/哪一屏",
         "  --char <offset>        layout-anchor 的目标字符位置（§2.2）",
         "  --target-mode paginated|scroll  layout-anchor 的目标形态（§2.2）",
+        "",
+        "render 选项（contracts/cli.md §2.3）：",
+        "  --page <n>             目标页（翻页模式）",
+        "  --viewport <n>         目标视口（滚动模式），与 --page 二选一",
+        "  --out <png>            输出 PNG 路径（必需）",
+        "  --theme day|night      主题（默认 day，FR-030）",
+        "  --reduced-motion       关闭动效（不影响静态渲染结果，FR-032）",
         "  -h, --help             显示本帮助",
         "",
         "退出码：0 成功 / 1 业务错误 / 2 用法错误 / 3 不支持能力",

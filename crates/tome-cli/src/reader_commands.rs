@@ -677,3 +677,235 @@ pub fn run_layout_anchor(options: &GlobalOptions, command: &Command) -> CommandO
         }
     }
 }
+
+// ===========================================================================
+// `render` —— 离屏渲染一页为 PNG（contracts/cli.md §2.3）
+// ===========================================================================
+//
+// ## 门控与诚实报告
+//
+// `tome-reader` 的 `render` feature 关闭时，本函数编译成"永远报能力错误"
+// 的形态（见下方 cfg 分支）——那正是 headless 构建的预期行为
+// （tasks.md 002 T032 的门控约定、T048 的第三条验收）。
+//
+// ## 后端不可用 → 退出码 3
+//
+// contracts/cli.md §2.3："MUST 输出结构化错误并退出码 3
+// （`UnsupportedCapability { capability: "offscreenRendering" }`），
+// MUST NOT 产出空文件或伪造成功"。
+//
+// 两条不可用路径（编译期无渲染面 / 运行期无后端）**共用同一个能力标识**，
+// 因为对调用方而言处置相同：本机拿不到图像，应改走 `tome layout` 做结构验证。
+
+/// 执行 `render` 子命令。
+#[cfg(feature = "reader-render")]
+pub fn run_render(options: &GlobalOptions, command: &Command) -> CommandOutcome {
+    use tome_reader::render::batch::RenderBatch;
+    use tome_reader::render::glyph_cache::GlyphCache;
+    use tome_reader::render::offscreen::OffscreenRenderer;
+    use tome_reader::render::pipeline::{PipelineError, RenderPipeline};
+
+    let Command::Render(args) = command else {
+        return CommandOutcome::failure(
+            &ErrorKind::Configuration,
+            "run_render 收到的不是 Render 命令",
+        );
+    };
+
+    let (_chapter_index, text) =
+        match resolve_chapter_text(&args.layout.chapter, &args.layout.text_file) {
+            Ok(resolved) => resolved,
+            Err(outcome) => return outcome,
+        };
+
+    let (geometry, viewport) = match resolve_geometry(
+        args.layout.width,
+        args.layout.height,
+        args.layout.font_size,
+        args.layout.line_height,
+        args.layout.paragraph_mode.as_deref(),
+        args.layout.measure_em,
+        args.layout.gutter,
+        args.layout.spread.as_deref(),
+        args.layout.mode.as_deref(),
+    ) {
+        Ok(resolved) => resolved,
+        Err(outcome) => return outcome,
+    };
+
+    // 主题（默认 day，FR-030）
+    let theme = match args.theme.as_deref() {
+        Some("night") => tome_core::model::theme::NightTheme.theme(),
+        _ => tome_core::model::theme::DayTheme.theme(),
+    };
+
+    let width = viewport.available_width_px.round().max(1.0) as u32;
+    let height = viewport.available_height_px.round().max(1.0) as u32;
+
+    let backend = match RenderPipeline::probe_backend() {
+        Ok(backend) => backend,
+        Err(PipelineError::NoAdapter { reason }) => {
+            return capability_failure(&format!("离屏渲染不可用：无图形后端（{reason}）"));
+        }
+        Err(other) => {
+            return CommandOutcome::failure(
+                &ErrorKind::Content,
+                &format!("图形后端探测以意外方式失败：{other}"),
+            );
+        }
+    };
+
+    let pipeline = match RenderPipeline::new(backend.clone(), width, height) {
+        Ok(pipeline) => pipeline,
+        Err(error) => {
+            return CommandOutcome::failure(
+                &ErrorKind::Content,
+                &format!("离屏管线初始化失败：{error}"),
+            );
+        }
+    };
+
+    let mut paginator = Paginator::new();
+    let chapter = match layout_chapter(&mut paginator, &text, &geometry, &viewport) {
+        Ok(chapter) => chapter,
+        Err(error) => {
+            return CommandOutcome::failure(&error.kind(), &format!("排版失败：{error}"));
+        }
+    };
+
+    let batch = RenderBatch::for_chapter(&chapter, &geometry, &viewport, theme);
+    let mut cache = GlyphCache::new();
+
+    let image = match OffscreenRenderer::new(width, height)
+        .and_then(|renderer| renderer.render(&pipeline, &batch, &mut cache))
+    {
+        Ok(image) => image,
+        Err(error) => {
+            return CommandOutcome::failure(&ErrorKind::Content, &format!("离屏渲染失败：{error}"));
+        }
+    };
+
+    let Some(out) = args.out.as_ref() else {
+        return CommandOutcome::failure(&ErrorKind::Configuration, "render 缺少 --out");
+    };
+
+    let png = crate::png::encode_png(image.width, image.height, &image.pixels);
+    if let Err(error) = std::fs::write(out, &png) {
+        return CommandOutcome::failure(
+            &ErrorKind::Storage,
+            &format!("写入 {} 失败：{error}", out.display()),
+        );
+    }
+
+    let palette = theme.palette();
+    let foreground = image.foreground_pixels([
+        palette.bg_reading.red,
+        palette.bg_reading.green,
+        palette.bg_reading.blue,
+    ]);
+
+    let report = serde_json::json!({
+        "out": out.display().to_string(),
+        "width": image.width,
+        "height": image.height,
+        "bytes": png.len(),
+        "foreground_pixels": foreground,
+        "total_pixels": image.total_pixels(),
+        "backend": backend.name(),
+        "adapter": backend.adapter_name(),
+        "software": backend.is_software,
+        "theme": args.theme.clone().unwrap_or_else(|| "day".to_owned()),
+        "reduced_motion": args.reduced_motion,
+    });
+
+    CommandOutcome::with_stdout(format_report(options, &report))
+}
+
+/// `render` 的 headless 形态（`tome-reader` 的 `render` feature 关闭）。
+///
+/// ## 这条路径就是 T048 第三条验收的被测对象
+///
+/// "渲染面在编译期就不存在" 是 §2.3 要求的最强形态——比 "运行期拿不到
+/// 后端" 更彻底：连试图渲染的代码都不在二进制里。
+#[cfg(not(feature = "reader-render"))]
+pub fn run_render(_options: &GlobalOptions, _command: &Command) -> CommandOutcome {
+    capability_failure(concat!(
+        "本构建未启用渲染面（tome-reader 的 render feature 关闭）：离屏渲染不可用。",
+        "处置：用默认 feature 构建（开发/发布构建默认带渲染面），",
+        "或改走 `tome layout` 做排版结构验证（无需图形环境）。"
+    ))
+}
+
+/// 构造 `offscreenRendering` 能力错误的 `CommandOutcome`（退出码 3）。
+///
+/// ## 为什么抽成函数
+///
+/// 两条路径（编译期无渲染面 / 运行期无后端）**必须给出同一形态的错误**——
+/// 否则调用方要写两条分支来处理"同样一件事"。抽成函数让"同一形态"是
+/// 结构性的，而不是两处各写一遍碰巧相同。
+fn capability_failure(message: &str) -> CommandOutcome {
+    CommandOutcome::failure(
+        &ErrorKind::unsupported_capability(tome_core::ErrorCapability::new(
+            tome_reader::capability::OFFSCREEN_RENDERING,
+        )),
+        message,
+    )
+}
+
+/// 执行 `fonts` 子命令（`contracts/cli.md` §2.4）。
+pub fn run_fonts(options: &GlobalOptions) -> CommandOutcome {
+    let report = tome_reader::render::fonts::FontsReport::collect();
+    let json = serde_json::json!({
+        "embedded": [{
+            "role": report.embedded_role,
+            "family": report.embedded_family,
+            "subset_coverage": report.subset_coverage,
+            "bytes": report.embedded_bytes,
+        }],
+        "system_fallbacks": { "reading_serif": report.system_fallbacks },
+        "budget_bytes": report.budget_bytes,
+        "within_budget": report.within_budget,
+    });
+    CommandOutcome::with_stdout(format_report(options, &json))
+}
+
+/// 按 `--format` 渲染 JSON 或人类可读摘要。
+///
+/// ## 为什么人类形态不另走一套序列化
+///
+/// 契约要求默认 `--format json`（供脚本消费），`human` 是给人看的摘要。
+/// 若为 human 另写一套结构体，两份输出会随字段增减而漂移——那是
+/// "文档与实现不一致" 的经典形态。故 human 直接从同一个 `Value` 平铺出来。
+fn format_report(options: &GlobalOptions, value: &serde_json::Value) -> String {
+    match options.format {
+        OutputFormat::Json => {
+            serde_json::to_string_pretty(value).unwrap_or_else(|_| "{}".to_owned())
+        }
+        OutputFormat::Human => {
+            let mut lines = Vec::new();
+            if let Some(object) = value.as_object() {
+                for (key, entry) in object {
+                    match entry {
+                        serde_json::Value::Object(nested) => {
+                            lines.push(format!("{key}:"));
+                            for (nested_key, nested_value) in nested {
+                                lines.push(format!("  {nested_key}: {nested_value}"));
+                            }
+                        }
+                        serde_json::Value::Array(items) => {
+                            lines.push(format!("{key}:"));
+                            for item in items {
+                                lines.push(format!("  {item}"));
+                            }
+                        }
+                        other => lines.push(format!("{key}: {other}")),
+                    }
+                }
+            }
+            lines.join(
+                "
+",
+            )
+        }
+    }
+}

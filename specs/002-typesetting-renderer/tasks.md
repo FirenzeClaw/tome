@@ -139,29 +139,30 @@
 
 **Independent Test**: `tome layout --mode scroll` 视口区间并集逐字符等于原文（SC-006b）；两方向切换锚点不变（SC-005b）；滚动到未缓存区零抓取（FR-025）。
 
-- [ ] T025 [US7] 滚动流排布于 `crates/tome-reader/src/scroll/flow.rs`（FR-020 连续流无分页空白；FR-021 视口=字符区间与 Page 同构，不引入第二套坐标）
-  - [ ] SC-006b：`crates/tome-reader/tests/scroll_flow_integrity.rs`——视口区间并集与正文逐字符相等；相邻视口连续无缺口无重叠
-- [ ] T026 [US7] 滚动偏移↔字符位置双向映射于 `crates/tome-reader/src/scroll/map.rs`（FR-022/040：与 001 锚点口径一致）
-  - [ ] 互逆往返误差 ≤ 半个字形（`crates/tome-reader/tests/scroll_map_inverse.rs`，翻页与滚动两形态都可用）
-- [ ] T027 [US7] 翻页⇄滚动切换于 `crates/tome-reader/src/scroll/flow.rs`（FR-023：双向位置不丢；进度以切换稳定后的锚点为准，中间态不写库）
-  - [ ] SC-005b：`crates/tome-reader/tests/mode_switch_anchor.rs`——两方向切换锚点值 100% 不变且字符 100% 可见
-  - [ ] 切换过程中无进度写库（同文件断言）
-- [ ] T028 [US7] 滚动重排保锚点（FR-024：几何参数/窗口尺寸变化后锚点字符仍落视口内；resize 合并/节流不累积）
-  - [ ] 参数化测试（`crates/tome-reader/tests/scroll_relayout_anchor.rs`，含窗口连续变化）；无"保留像素偏移"式漂移断言
-- [ ] T029 [US7] 滚动不触发抓取（FR-025：未缓存区以明确占位/加载态呈现；继承 001 §FR-019b）
-  - [ ] 请求计数断言：`crates/tome-reader/tests/scroll_no_fetch.rs`——滚动到未缓存区抓取次数 = 0
-  - [ ] 加载态/占位可辨识（同文件断言其存在与文案标识）
-- [ ] T030 [US7] 按需释放 + 事件节流（FR-026 视口外的行可释放、超长章限定内存；FR-027 滚动事件合并/节流不累积排队）
-  - [ ] 20 万字章滚动：内存 ≤ 章节字节 ×8（`crates/tome-reader/tests/scroll_memory.rs`，SC-010 实测）
-  - [ ] 事件风暴（惯性滚动模拟）后无排队任务断言（同文件）
-- [ ] T031 [US7] 阅读记录两量产出与去重口径于 `crates/tome-reader/src/record.rs`（FR-039：已展示字符区间去重累计、回翻/回滚不重复、跨模式统一、上报节流；经 001 §FR-026b 接口落库，无界面可用）
-  - [ ] SC-013b：`crates/tome-reader/tests/record_dedup_cross_mode.rs`——同段字符两模式阅读字数相同；模式间来回切换只计一次
-  - [ ] 快速翻页不产生高频写库（同文件节流断言）
+- [x] T025 [US7] 滚动流排布于 `crates/tome-reader/src/scroll/flow.rs`（FR-020 连续流无分页空白；FR-021 视口=字符区间与 Page 同构，不引入第二套坐标）
+  - [x] SC-006b：`crates/tome-reader/tests/scroll_flow_integrity.rs`——视口区间并集与正文逐字符相等；相邻视口连续无缺口无重叠
+- [x] T026 [US7] 滚动偏移↔字符位置双向映射于 `crates/tome-reader/src/scroll/map.rs`（FR-022/040：与 001 锚点口径一致）
+  - [x] 互逆往返误差 ≤ 半个字形（`crates/tome-reader/tests/scroll_map_inverse.rs`，翻页与滚动两形态都可用）
+- [x] T027 [US7] 翻页⇄滚动切换于 `crates/tome-reader/src/scroll/flow.rs`（FR-023：双向位置不丢；进度以切换稳定后的锚点为准，中间态不写库）
+  - [x] SC-005b：`crates/tome-reader/tests/mode_switch_anchor.rs`——两方向切换锚点值 100% 不变且字符 100% 可见
+  - [x] 切换过程中无进度写库（同文件断言）
+- [x] T028 [US7] 滚动重排保锚点（FR-024：几何参数/窗口尺寸变化后锚点字符仍落视口内；resize 合并/节流不累积）
+  - [x] 参数化测试（`crates/tome-reader/tests/scroll_relayout_anchor.rs`，含窗口连续变化）；无"保留像素偏移"式漂移断言
+- [x] T029 [US7] 滚动不触发抓取（FR-025：未缓存区以明确占位/加载态呈现；继承 001 §FR-019b）
+  - [x] 请求计数断言：`crates/tome-reader/tests/scroll_no_fetch.rs`——滚动到未缓存区抓取次数 = 0
+  - [x] 加载态/占位可辨识（同文件断言其存在与文案标识）
+- [x] T030 [US7] 按需释放 + 事件节流（FR-026 视口外的行可释放、超长章限定内存；FR-027 滚动事件合并/节流不累积排队）
+  - [x] 20 万字章滚动：内存 ≤ 章节字节 ×8（`crates/tome-reader/tests/scroll_memory.rs`，SC-010 实测）
+  - [x] 事件风暴（惯性滚动模拟）后无排队任务断言（同文件）
+- [x] T031 [US7] 阅读记录两量产出与去重口径于 `crates/tome-reader/src/record.rs`（FR-039：已展示字符区间去重累计、回翻/回滚不重复、跨模式统一、上报节流；经 001 §FR-026b 接口落库，无界面可用）
+  - [x] SC-013b：`crates/tome-reader/tests/record_dedup_cross_mode.rs`——同段字符两模式阅读字数相同；模式间来回切换只计一次
+  - [x] 快速翻页不产生高频写库（同文件节流断言）
 
 > **⛔ 检查点：S2-3 之后（形态一致性门）**
-> - [ ] SC-005b 切换保锚点 100%；SC-006b 滚动流完整 100%；SC-013b 记录跨模式一致 100%
-> - [ ] FR-025 滚动到未缓存区不发起抓取（请求计数断言）且以明确占位/加载态呈现
-> - [ ] 人工审查后进入下一阶段
+> - [x] SC-005b 切换保锚点 100%；SC-006b 滚动流完整 100%；SC-013b 记录跨模式一致 100%
+> - [x] FR-025 滚动到未缓存区不发起抓取（请求计数断言）且以明确占位/加载态呈现
+> - [x] 人工审查后进入下一阶段
+>   - PM 注记（2026-10-11）：形态一致性门通过（SC-005b/006b/013b 全 100%，FR-025 零抓取三断言）。滚动维度锚点矩阵 [WIP] 已转正（真实 ScrollFlow）。**遗留补漏**：`ParagraphMode`（FR-018）schema 已备但引擎未施加缩进/间距——归 Phase 6 前导任务。scroll_memory.rs 的 unsafe 计数分配器批准（测试装置固有条件，生产代码仍 forbid）。
 
 ---
 

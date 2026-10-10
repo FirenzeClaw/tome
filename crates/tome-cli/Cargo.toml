@@ -23,8 +23,10 @@ serde_json = "1"
 
 [dev-dependencies]
 serde_json = "1"
-# 测试要写临时书源文件（不污染仓库）
+# 测试要写临时书源/本地书文件（不污染仓库）
 tempfile = "3"
+# Phase 7 的 TXT 编码测试要用 GBK 编码样本
+encoding_rs = "0.8.42"
 
 [lints]
 workspace = true

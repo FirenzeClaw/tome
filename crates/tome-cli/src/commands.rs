@@ -181,6 +181,19 @@ pub fn run_with_js(
             action,
             input,
         } => run_action(options, source_id, action, input.as_deref(), host, hosts),
+        // [P7-MERGE] 本地书面（T076-T083）——实现在 `crate::local`，
+        // 与本模块的其余命令零耦合（本地书全程离线，不碰网络与存储）。
+        Command::LocalImport {
+            path,
+            copy,
+            library,
+        } => crate::local::run_import(options, path, *copy, library.as_deref()),
+        Command::LocalToc { path } => crate::local::run_toc(options, path),
+        Command::LocalScan {
+            directory,
+            roots,
+            _unused: _,
+        } => crate::local::run_scan(options, directory, roots),
         Command::Verify { corpus, report } => run_verify(corpus, report.as_deref()),
     }
 }

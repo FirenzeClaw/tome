@@ -112,6 +112,31 @@ pub enum Command {
         /// 动作的输入（`search` 时是关键词）
         input: Option<String>,
     },
+    /// `local import <path> [--copy] [--library <dir>]`（`contracts/cli.md`）
+    ///
+    /// [P7-MERGE] T076-T083 的本地书面。实现在 `crate::local`。
+    LocalImport {
+        /// 要导入的本地文件
+        path: PathBuf,
+        /// FR-024：是否把文件复制到库目录（可选行为）
+        copy: bool,
+        /// `--copy` 的目标库根
+        library: Option<PathBuf>,
+    },
+    /// `local toc <path>`（`contracts/cli.md`）——只输出目录识别结果。
+    LocalToc {
+        /// 要解析的本地文件
+        path: PathBuf,
+    },
+    /// `local scan <dir> [--library <dir>...]`（`contracts/cli.md`）——库根扫描。
+    LocalScan {
+        /// 要扫描的库根目录
+        directory: PathBuf,
+        /// 额外的库根（多库根扫描，FR-023）
+        roots: Vec<PathBuf>,
+        /// `--copy` 用于 `local import`，此处仅为签名一致而占位（未使用）
+        _unused: (),
+    },
     /// `verify --corpus <dir> [--report <file>]`（`contracts/cli.md`）
     ///
     /// 跑合成语料差分：逐条比对引擎输出与期望，输出一致率与逐条 diff。
@@ -168,6 +193,9 @@ pub fn parse(args: &[String]) -> ParseOutcome {
     let mut input: Option<String> = None;
     let mut corpus: Option<PathBuf> = None;
     let mut report: Option<PathBuf> = None;
+    // [P7-MERGE] 本地书面（T076-T083）
+    let mut copy = false;
+    let mut library: Vec<PathBuf> = Vec::new();
 
     // ## 迭代协议：每个分支返回"消费了几个参数"，循环统一推进
     //
@@ -265,6 +293,19 @@ pub fn parse(args: &[String]) -> ParseOutcome {
                     None => return ParseOutcome::Usage("--corpus 需要一个目录".to_string()),
                 };
                 corpus = Some(PathBuf::from(value));
+                2
+            }
+            // [P7-MERGE] 本地书：`--copy` 与 `--library`（可重复）
+            "--copy" => {
+                copy = true;
+                1
+            }
+            "--library" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => return ParseOutcome::Usage("--library 需要一个路径".to_string()),
+                };
+                library.push(PathBuf::from(value));
                 2
             }
             "--report" => {
@@ -401,9 +442,58 @@ pub fn parse(args: &[String]) -> ParseOutcome {
             };
             Command::Verify { corpus, report }
         }
+        // [P7-MERGE] `local` 子命令（T076-T083）
+        "local" => {
+            let Some(action) = rest.first().map(String::as_str) else {
+                return ParseOutcome::Usage(
+                    "local 需要一个动作（import / toc / scan）".to_string(),
+                );
+            };
+            match action {
+                "import" => {
+                    let Some(path) = rest.get(1) else {
+                        return ParseOutcome::Usage(
+                            "local import 需要 <path>（用法：local import <file> [--copy --library <dir>]）"
+                                .to_string(),
+                        );
+                    };
+                    Command::LocalImport {
+                        path: PathBuf::from(path),
+                        copy,
+                        library: library.first().cloned(),
+                    }
+                }
+                "toc" => {
+                    let Some(path) = rest.get(1) else {
+                        return ParseOutcome::Usage(
+                            "local toc 需要 <path>（用法：local toc <file>）".to_string(),
+                        );
+                    };
+                    Command::LocalToc {
+                        path: PathBuf::from(path),
+                    }
+                }
+                "scan" => {
+                    let Some(directory) = rest.get(1) else {
+                        return ParseOutcome::Usage(
+                            "local scan 需要 <dir>（用法：local scan <dir> [--library <dir>]）"
+                                .to_string(),
+                        );
+                    };
+                    Command::LocalScan {
+                        directory: PathBuf::from(directory),
+                        roots: library.clone(),
+                        _unused: (),
+                    }
+                }
+                other => {
+                    return ParseOutcome::Usage(format!("未知的 local 动作 `{other}`"));
+                }
+            }
+        }
         other => {
             return ParseOutcome::Usage(format!(
-                "未知子命令 `{other}`（已实现 source import / search / run / verify）"
+                "未知子命令 `{other}`（已实现 source import / search / run / verify / local）"
             ));
         }
     };
@@ -610,9 +700,12 @@ mod tests {
 
     #[test]
     fn 未知子命令报用法错() {
-        // 用未实现的子命令（`contracts/cli.md` 定义了它，但本切片不实现）
-        let text = parse_usage(&["local", "import", "x"]);
-        assert!(text.contains("local"), "{text}");
+        // 用未实现的子命令（`contracts/cli.md` 定义了它，但本切片不实现）。
+        //
+        // 注意：`local` 已在 T076-T083 落地，故这里改用 `data`——它仍在
+        // `contracts/cli.md` 里被定义而尚未实现，是这条测试的好样本。
+        let text = parse_usage(&["data", "export"]);
+        assert!(text.contains("data"), "{text}");
         assert!(text.contains("source import"), "应提示可用命令：{text}");
     }
 

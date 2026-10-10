@@ -386,14 +386,14 @@
 
 ### 数据导入导出 + 阅读记录 + 书内搜索
 
-- [ ] T087 [US4] tome-store：全部阅读数据导出/导入（书源+书架+进度+书签+高亮+批注+规则，JSON，对称可导回）于 `crates/tome-store/src/backup.rs`（FR-033）
-  - [ ] 导出→清空→导入→数据一致（往返测试）
-- [ ] T088 [P] [US4] tome-store：Android 备份书源导入（上游备份 zip 中的书源 JSON 解析）于 `crates/tome-store/src/backup_android.rs`（FR-034）
-  - [ ] Android 备份样本可导入（FR-034 验收落点）
-- [ ] T089 [P] [US4] tome-store：阅读记录落库（每书阅读时长/字数，可聚合；无界面下也落库）于 `crates/tome-store/src/dao/read_record.rs`（FR-026b）
-- [ ] T090 [P] [US6] tome-store：书内全文搜索（FTS5 索引已缓存章节）于 `crates/tome-store/src/fts.rs`（FR-019b，仅检索已缓存，不触发额外抓取）
-- [ ] T091 [P] [US4] tome-store：完整删除用户数据（配置、缓存与个人数据）于 `crates/tome-store/src/delete.rs`（FR-035）
-  - [ ] 删除后书架/进度/痕迹/规则/配置全清；不残留文件或索引引用
+- [x] T087 [US4] tome-store：全部阅读数据导出/导入（书源+书架+进度+书签+高亮+批注+规则，JSON，对称可导回）于 `crates/tome-store/src/backup.rs`（FR-033）
+  - [x] 导出→清空→导入→数据一致（往返测试）
+- [x] T088 [P] [US4] tome-store：Android 备份书源导入（上游备份 zip 中的书源 JSON 解析）于 `crates/tome-store/src/backup_android.rs`（FR-034）
+  - [x] Android 备份样本可导入（FR-034 验收落点）
+- [x] T089 [P] [US4] tome-store：阅读记录落库（每书阅读时长/字数，可聚合；无界面下也落库）于 `crates/tome-store/src/dao/read_record.rs`（FR-026b）
+- [x] T090 [P] [US6] tome-store：书内全文搜索（FTS5 索引已缓存章节）于 `crates/tome-store/src/fts.rs`（FR-019b，仅检索已缓存，不触发额外抓取）
+- [x] T091 [P] [US4] tome-store：完整删除用户数据（配置、缓存与个人数据）于 `crates/tome-store/src/delete.rs`（FR-035）
+  - [x] 删除后书架/进度/痕迹/规则/配置全清；不残留文件或索引引用
 
 ### 错误本地化 + CLI 完整命令面 + 无头验证 + CI 收口
 

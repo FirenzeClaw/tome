@@ -37,11 +37,16 @@
 pub mod commands;
 pub mod flags;
 pub mod js_host;
+// `local` 是 T076-T083 的 CLI 面，全部实现收在这一个文件里（P7 合并）。
+pub mod local;
 pub mod pipeline_commands;
 pub mod root;
 
 pub use commands::{build_executor, run, CommandOutcome};
 pub use flags::{
     exit_code_for, parse, Command, GlobalOptions, NetworkMode, OutputFormat, ParseOutcome,
+};
+pub use local::{
+    run_import as run_local_import, run_scan as run_local_scan, run_toc as run_local_toc,
 };
 pub use root::{AppRoot, ConfigProxyOverride, StoreHostFactory};

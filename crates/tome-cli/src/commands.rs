@@ -208,6 +208,19 @@ pub fn run_with_js(
         Command::SourceCheck { source_id, all } => {
             crate::pipeline_commands::run_source_check(options, source_id.as_deref(), *all, host)
         }
+        // 本地书面（T076-T083，P7 合并）——实现在 `crate::local`，
+        // 与本模块的其余命令零耦合（本地书全程离线，不碰网络）。
+        Command::LocalImport {
+            path,
+            copy,
+            library,
+        } => crate::local::run_import(options, path, *copy, library.as_deref()),
+        Command::LocalToc { path } => crate::local::run_toc(options, path),
+        Command::LocalScan {
+            directory,
+            roots,
+            _unused: _,
+        } => crate::local::run_scan(options, directory, roots),
         Command::Verify { corpus, report } => run_verify(corpus, report.as_deref()),
     }
 }

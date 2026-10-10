@@ -101,6 +101,15 @@ pub struct LineBox {
     pub baseline_px: f32,
     /// 本行标点压缩**总量**（px；data-model §4 `squeeze_amount`）
     pub squeeze_px: f32,
+    /// 本行两端对齐的**伸展总量**（px；0 表示未伸展）
+    ///
+    /// 与 [`Self::squeeze_px`] 是"一收一放"的关系：挤压把溢出的行收进版心，
+    /// 对齐把不满的行撑满。两者都在行定案后施加，且都只改字身不改区间归属。
+    ///
+    /// data-model §4 的七字段里没有它——那是设计时未预见对齐需要独立记账。
+    /// 保留此字段的理由：`content_width_px()` 是"字身之和"，而"视觉行长"
+    /// 是 `字身之和 + 伸展`；没有它就无法从行盒判断"这行是否已对齐"。
+    pub justify_extra_px: f32,
     /// 硬序第 ④ 步的例外记录（data-model §4 `rule_exception`）
     pub rule_exception: Option<RuleExceptionRecord>,
 }
@@ -165,6 +174,7 @@ mod tests {
             height_px: 35.15,
             baseline_px: 28.0,
             squeeze_px: 9.5,
+            justify_extra_px: 0.0,
             rule_exception: None,
         };
 
@@ -187,6 +197,7 @@ mod tests {
             height_px: 35.15,
             baseline_px: 28.0,
             squeeze_px: 14.25,
+            justify_extra_px: 0.0,
             rule_exception: None,
         };
 

@@ -50,6 +50,8 @@ pub struct Geometry {
     pub font_size_px: f32,
     /// 行高（字号倍数）
     pub line_height: f32,
+    /// 对齐方式（FR-011：正文默认两端对齐）
+    pub alignment: crate::rules::justify::Alignment,
 }
 
 impl Geometry {
@@ -60,6 +62,7 @@ impl Geometry {
             measure_px: 36.0 * 19.0, // 36em @ 19px = 684px
             font_size_px: 19.0,
             line_height: 1.85,
+            alignment: crate::rules::justify::Alignment::Justified,
         }
     }
 
@@ -77,6 +80,12 @@ pub struct LayoutResult {
     pub lines: Vec<LineBox>,
     /// 本段产生的全部禁则例外（供 SC-002 计数）
     pub exceptions: Vec<RuleExceptionRecord>,
+    /// 因超长而退化为按字符断行的西文词数（FR-009 的诊断口径）
+    ///
+    /// 非零表示"该段的断行结果里有词被拆开"——那是 FR-009 允许的两种
+    /// 情形之一（单词长于整行）。SC-003 的判据之一是"西文断裂只发生在
+    /// FR-009 允许的两种情形"，本计数是那个判据的输入。
+    pub degraded_words: usize,
 }
 
 /// 排版引擎（持有 `FontSystem`——它是昂贵的字体库句柄）。
@@ -126,6 +135,7 @@ impl LayoutEngine {
             return LayoutResult {
                 lines: Vec::new(),
                 exceptions: Vec::new(),
+                degraded_words: 0,
             };
         }
 
@@ -151,11 +161,25 @@ impl LayoutEngine {
             return LayoutResult {
                 lines: Vec::new(),
                 exceptions: Vec::new(),
+                degraded_words: 0,
             };
         };
 
         // 第 3 步：按禁则合并（在克隆体上）
         let (mut merged, merge_plan) = merge_for_kinsoku(&shape_line, text);
+
+        // 第 3.2 步：**超长西文单词的退化**（FR-009 / T015 硬序第 ③ 步）
+        //
+        // ## 为什么在 shape 层拆（与间隙同一理由）
+        //
+        // T005 spike 实测 `Wrap::Word` 对超宽词是**溢出**而非切分
+        // （268px 的词在 60px 版心下产出 268px 的行）。而 `WordOrGlyph`
+        // 的 glyph 路径无视 word 边界，会让禁则合并失效。
+        //
+        // 故唯一的办法是**自己把这些词的 word 拆开**——让 `Wrap::Word`
+        // 自然把它们分到不同行。这必须在 layout 之前做，理由与间隙相同：
+        // layout 之后改字身只能让行变宽，无法参与断行。
+        let degraded_words = apply_overlong_word_degradation(&mut merged, text, geometry);
 
         // 第 3.5 步：**中西文最小间隙**（FR-009）
         //
@@ -189,7 +213,7 @@ impl LayoutEngine {
         let mut lines = Vec::with_capacity(laid_out.len());
         let mut exceptions = Vec::new();
 
-        for line in &laid_out {
+        for (line_index, line) in laid_out.iter().enumerate() {
             let mut glyphs = Vec::with_capacity(line.glyphs.len());
             let mut char_start: Option<usize> = None;
             let mut char_end = 0usize;
@@ -234,6 +258,38 @@ impl LayoutEngine {
             let overflow_px = content_width - geometry.measure_px;
             let squeeze_px = apply_squeeze(&mut glyphs, text, overflow_px, geometry.font_size_px);
 
+            // 第 5.6 步：**两端对齐**（FR-011 / T015）
+            //
+            // ## 为什么在挤压之后
+            //
+            // FR-008 的硬序是"① 挤压 → ……"；对齐不是硬序的一步，它是在
+            // 硬序处理完"放不下"之后，处理"**放不满**"的手段。
+            // 顺序反过来（先对齐再加挤压）会让两者互相抵消：
+            // 挤压收回溢出的同时又撑开余白，结果既没省下空间也没对齐。
+            //
+            // ## 末行不伸展
+            //
+            // 段落的最后一行天然不满（段落结束了），把它伸展成满行
+            // 反而显得刻意。故按"**本行是否段落的末行**"决定。
+            //
+            // ## 为什么按"行下标"而不是按"末字符位置"
+            //
+            // 初版写成 `laid_out.last()...glyph.end == text.len()`——
+            // 那个条件在**每一轮迭代**里算出的都是同一个值（段落的末行
+            // 是否到文末），于是所有行都被判为末行、**对齐永不生效**
+            // （实测：22 行里 0 行被伸展）。
+            //
+            // 正确判据是"当前行是第几行"：末行即 `laid_out` 的最后一条。
+            // 故必须用**迭代下标**而非字符位置。
+            let is_last_line = line_index + 1 == laid_out.len();
+            let justify_extra_px = apply_justify(
+                &mut glyphs,
+                text,
+                geometry,
+                is_last_line,
+                geometry.alignment,
+            );
+
             lines.push(LineBox {
                 paragraph_index,
                 char_range: char_start..char_end,
@@ -241,6 +297,7 @@ impl LayoutEngine {
                 height_px: geometry.line_height_px(),
                 baseline_px: line.max_ascent,
                 squeeze_px,
+                justify_extra_px,
                 rule_exception: None,
             });
         }
@@ -263,7 +320,11 @@ impl LayoutEngine {
             }
         }
 
-        LayoutResult { lines, exceptions }
+        LayoutResult {
+            lines,
+            exceptions,
+            degraded_words,
+        }
     }
 }
 
@@ -469,6 +530,184 @@ fn rule_affects_line_end(rule_id: &str) -> bool {
     rule_id.starts_with("kinsoku.line_end.")
 }
 
+/// 对一行施加两端对齐（FR-011 / T015）。
+///
+/// ## 返回
+///
+/// 实际施加的伸展总量（px）。调用方把它写进 `LineBox::justify_extra_px`。
+///
+/// ## 与挤压的协同（FR-011 的括号要求）
+///
+/// 挤压（收）与对齐（放）都会改写字形的 `advance_px`，但**作用方向相反**：
+/// 挤压只在行溢出时动作、对齐只在行不满时动作，故同一行不会两者都大动。
+/// 这一点由"先挤压、后对齐"的顺序保证——挤压后若已填满，对齐的余白为 0
+/// 自然不动作；若挤压后仍不满，对齐才补足。
+fn apply_justify(
+    glyphs: &mut [GlyphBox],
+    text: &str,
+    geometry: &Geometry,
+    is_last_line: bool,
+    alignment: crate::rules::justify::Alignment,
+) -> f32 {
+    use crate::rules::justify::{centering_offset_px, plan_justify, Alignment};
+
+    match alignment {
+        Alignment::Left => 0.0,
+        Alignment::Justified => {
+            // 两端对齐不作用于末行（段落结束了，撑满会显得刻意）
+            let plan = plan_justify(
+                glyphs,
+                text,
+                geometry.measure_px,
+                geometry.font_size_px,
+                is_last_line,
+            );
+            if !plan.stretched {
+                return 0.0;
+            }
+
+            // ## 施加时的**硬上界**（实测踩到过）
+            //
+            // `plan_justify` 的 slack 是按调用时的 `advance_px` 求和算的，
+            // 而本函数在 `apply_squeeze` **之后**执行——挤压已经改小了
+            // 部分 advance。若两者失配（plan 用旧值、施加用新值），
+            // 伸展量会超出实际余白，把行撑过版心。
+            //
+            // 实测：某行伸展后达 437px（版心 418px），超出正好一个字身。
+            //
+            // 故此处按**当前实际值**重算可伸展总量，并把每处伸展按比例
+            // 钳到"不超过余白"：
+            let content_now: f32 = glyphs.iter().map(|glyph| glyph.advance_px).sum();
+            let slack_now = (geometry.measure_px - content_now).max(0.0);
+            let planned_total: f32 = plan.extra_px.iter().sum();
+            let scale = if planned_total > 1e-3 {
+                (slack_now / planned_total).min(1.0)
+            } else {
+                0.0
+            };
+
+            let mut total = 0.0f32;
+            let mut shift = 0.0f32;
+            for (index, glyph) in glyphs.iter_mut().enumerate() {
+                glyph.x_px += shift;
+                let extra = plan.extra_px.get(index).copied().unwrap_or(0.0) * scale;
+                if extra > 1e-4 {
+                    glyph.advance_px += extra;
+                    total += extra;
+                    shift += extra;
+                }
+            }
+            total
+        }
+        Alignment::Centered => {
+            // 居中不改变字间距离（故不会"拉散"），只整体左移余白的一半
+            let content_width: f32 = glyphs.iter().map(|glyph| glyph.advance_px).sum();
+            let offset = centering_offset_px(content_width, geometry.measure_px);
+            for glyph in glyphs.iter_mut() {
+                glyph.x_px += offset;
+            }
+            // 居中不是"伸展"，故返回 0（余白在两侧，不在字间）
+            0.0
+        }
+    }
+}
+
+/// 把超长西文单词**拆成多个 word**（FR-009 的退化实现 / 硬序第 ③ 步）。
+///
+/// ## 原理
+///
+/// `Wrap::Word` 只在 **word 边界**断行。故"让长词能被断"的手段就是
+/// **把它的 word 切小**——切完后 `Wrap::Word` 会自然把各片段分到不同行。
+/// 这与 T013 的禁则合并是**同一个机制的两个方向**：
+///
+/// | 目的 | 手段 |
+/// |---|---|
+/// | 禁止某处断行 | 把相邻 word **合并** |
+/// | 允许某处断行（退化） | 把 word **切分** |
+///
+/// ## 必须切在字形的**标记**上而非任意位置
+///
+/// `ShapeWord` 是 `{ blank, glyphs }`，切分即在指定下标处把一个 word
+/// 拆成两个（`glyphs` 的 `split_off`）。**不得**改动任何 `ShapeGlyph`
+/// 本身——那样会破坏字符区间归属（001 §FR-028 的前提）。
+///
+/// ## 返回
+///
+/// 被拆分的词数（供诊断与测试断言）。
+pub fn apply_overlong_word_degradation(
+    shape_line: &mut ShapeLine,
+    text: &str,
+    geometry: &Geometry,
+) -> usize {
+    use crate::rules::mixed::{chars_per_line_for_measure, find_overlong_words};
+
+    let overlong = find_overlong_words(text, geometry.measure_px, geometry.font_size_px);
+    if overlong.is_empty() {
+        return 0;
+    }
+
+    // **单位换算**：`find_overlong_words` 给的是**字符**区间（对外口径），
+    // 而 `ShapeGlyph::start/end` 是**字节**偏移（cosmic-text 的口径）。
+    // 比较两者前必须把字符起点换成字节——初版直接比较，匹配恒失败
+    // （实测 `degraded_words = 0`，词被整词溢出）。
+    let char_to_byte: Vec<usize> = {
+        let mut offsets: Vec<usize> = text.char_indices().map(|(offset, _)| offset).collect();
+        offsets.push(text.len());
+        offsets
+    };
+
+    let chunk = chars_per_line_for_measure(geometry.measure_px, geometry.font_size_px);
+    let mut degraded = 0usize;
+
+    for span in &mut shape_line.spans {
+        // 逐个处理超长词：找到覆盖它的 word，按 chunk 切成若干段。
+        // 从后往前处理避免下标位移（与 merge_words 同样的理由）。
+        for word in overlong.iter().rev() {
+            let Some(expected_byte_start) = char_to_byte.get(word.char_range.start).copied() else {
+                continue;
+            };
+            let Some(word_index) = span.words.iter().position(|candidate| {
+                candidate
+                    .glyphs
+                    .first()
+                    .is_some_and(|glyph| glyph.start == expected_byte_start)
+            }) else {
+                continue;
+            };
+
+            // 该 word 的字符数（不假定等于 glyphs.len()——组合簇会不等）
+            let glyph_count = span.words[word_index].glyphs.len();
+            if glyph_count <= chunk {
+                continue;
+            }
+
+            // 从后往前按 chunk 切分：每次把尾部 chunk 个字形 split_off 出去
+            let mut remaining = glyph_count;
+            let mut inserted = 0usize;
+            while remaining > chunk {
+                let split_at = remaining - chunk;
+                let tail = span.words[word_index].glyphs.split_off(split_at);
+                span.words.insert(
+                    word_index + 1,
+                    ShapeWord {
+                        // 片段不是空白词（它由字母组成）
+                        blank: false,
+                        glyphs: tail,
+                    },
+                );
+                remaining = split_at;
+                inserted += 1;
+            }
+
+            if inserted > 0 {
+                degraded += 1;
+            }
+        }
+    }
+
+    degraded
+}
+
 /// 取一行**末尾**的字符。
 fn char_at_end_of_line(line: &LineBox, text: &str) -> Option<char> {
     let glyph = line.glyphs.last()?;
@@ -636,6 +875,7 @@ mod tests {
             measure_px: 400.0,
             font_size_px: 19.0,
             line_height: 1.85,
+            alignment: crate::rules::justify::Alignment::Justified,
         };
         let result = engine.layout_paragraph(&model, 0, &geometry);
 
@@ -653,6 +893,7 @@ mod tests {
             measure_px: 57.0, // 3 字身
             font_size_px: 19.0,
             line_height: 1.85,
+            alignment: crate::rules::justify::Alignment::Justified,
         };
         let result = engine.layout_paragraph(&model, 0, &geometry);
 

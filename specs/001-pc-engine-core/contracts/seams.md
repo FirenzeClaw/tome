@@ -55,6 +55,12 @@ resolve_anchor(book, anchor) → Result<(chapter_index, char_offset)>  -- 锚点
 prefetch(book, around_index, depth)   -- 预取（顺读预热），无副作用失败
 ```
 
+**ChapterContent 形态**（2026-10-10 S2 规格审查增补，PM 裁决 OQ#13）：
+- `text`：净化后正文的**纯文本**（字符区间口径的唯一事实来源）
+- `images: Vec<ImageRef>`：本章内嵌图片的引用列表。每项含占位符在 `text` 中的**字符位置**（char_offset）、缓存键（ImageCacheRef）、alt 文本。S2 的图文混排（002 §FR-036）据此把图片插入排版流——正文文本与图片句柄必须同源到达，否则阅读层无法成组排版
+- 本地书 adapter 同样填充（EPUB 内嵌资源→图片缓存键）
+- 落地时点：契约增补先行（本节），实现随 Phase 8 收口任务补齐（T068 的图片抓取管线先行产出缓存键，本字段在 P8 接线）
+
 **关键不变量**：
 - **净化/高亮/词典规则在 seam 下游统一应用**（FR-014 顺序固定：替换→高亮→词典），网络书与本地书一视同仁
 - `chapter_content` 对网络书：先查 Pack 缓存，未命中则抓取并写入缓存（崩溃安全 FR-030）；对本地书：按偏移直读

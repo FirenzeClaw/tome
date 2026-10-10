@@ -34,66 +34,19 @@ use tome_reader::text::paragraph;
 use crate::commands::CommandOutcome;
 use crate::flags::{Command, GlobalOptions, OutputFormat};
 
-/// 排版参数（`contracts/cli.md` §2.1 的默认值来自 MASTER §5.1）。
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LayoutOptions {
-    /// 阅读区可用宽度（px）——**不是窗口宽度**（spec §FR-014 的口径）
-    pub width_px: f32,
-    /// 阅读区可用高度（px）
-    pub height_px: f32,
-    /// 阅读字号（px）
-    pub font_size_px: f32,
-    /// 行高（字号倍数）
-    pub line_height: f32,
-    /// 版心目标（em）
-    pub measure_em: f32,
-    /// 双页中缝（px）
-    pub gutter_px: f32,
-}
-
-impl Default for LayoutOptions {
-    /// 默认值取自 `design-system/MASTER.md` §5.1 与 `contracts/cli.md` §2.1。
-    fn default() -> Self {
-        Self {
-            // 契约示例里的默认阅读区（1180×800）——它是"阅读区可用宽度"
-            // 而非窗口宽度（§5.2 的口径声明）
-            width_px: 1180.0,
-            height_px: 800.0,
-            font_size_px: 19.0,
-            line_height: 1.85,
-            measure_em: 36.0,
-            gutter_px: 64.0,
-        }
-    }
-}
-
-impl LayoutOptions {
-    /// 实际用于排版的**版心宽度**（px）。
-    ///
-    /// ## 口径（spec §FR-014 / 裁决 OQ#22→A）
-    ///
-    /// 单页时版心 = `min(measure_em × font_size, width)`，
-    /// 且不超过 `measure_max_em`（42em）——超过则留白而非拉伸
-    /// （MASTER §5.3 的"单页版心封顶 42em"裁决）。
-    ///
-    /// 双页判据属 T019（分页），本阶段按 `--spread` 的显式值或自动判据
-    /// 决定是否减半。
-    #[must_use]
-    pub fn measure_width_px(&self, columns: usize) -> f32 {
-        let per_column_target = self.measure_em * self.font_size_px;
-        let usable = if columns <= 1 {
-            self.width_px
-        } else {
-            // 双页：扣除中缝后对半
-            (self.width_px - self.gutter_px) / columns as f32
-        };
-        // MASTER §5.3：单页版心封顶 42em（超出留白，不拉伸）
-        let cap = 42.0 * self.font_size_px;
-        per_column_target.min(usable).min(cap).max(1.0)
-    }
-}
-
 /// `layout` 子命令的实现（`contracts/cli.md` §2.1）。
+///
+/// ## 版心与分栏的计算归属
+///
+/// 全部由 `tome_reader::paginate` 负责（`spread::column_measure_px` 与
+/// `resolve_columns`）。CLI **不重复实现**它们——只把选项映射成
+/// `GeometryConfig` 与 `Viewport`，然后回显结果（薄壳，宪法 IV 的 DRY）。
+///
+/// CLI 自己只需要两个默认值：阅读区可用宽高（`contracts/cli.md` §2.1 的
+/// 示例 1180×800）。它们**不是** `GeometryConfig` 的字段——几何子集描述
+/// 版心与字号，可用尺寸来自外壳布局（FR-014 的口径：扣侧栏与内边距之后）。
+const DEFAULT_AVAILABLE_WIDTH_PX: f32 = 1180.0;
+const DEFAULT_AVAILABLE_HEIGHT_PX: f32 = 800.0;
 ///
 /// ## 输出形态
 ///
@@ -161,13 +114,14 @@ pub fn run_layout(options: &GlobalOptions, command: &Command) -> CommandOutcome 
     // （FR-014 的口径），它不是 `GeometryConfig` 的字段（几何子集描述的是
     // 版心与字号，可用尺寸来自外壳布局），故由 CLI 自己承载并用于构造
     // `Viewport`。
-    let mut layout_options = LayoutOptions::default();
+    let mut available_width_px = DEFAULT_AVAILABLE_WIDTH_PX;
+    let mut available_height_px = DEFAULT_AVAILABLE_HEIGHT_PX;
     let mut geometry = ReadingConfig::default_ma().geometry;
     if let Some(value) = width {
-        layout_options.width_px = *value;
+        available_width_px = *value;
     }
     if let Some(value) = height {
-        layout_options.height_px = *value;
+        available_height_px = *value;
     }
     if let Some(value) = font_size {
         // `f32` → `u16`：`flags` 已在校验阶段拒绝非整数与越界值（退出码 2），
@@ -210,7 +164,7 @@ pub fn run_layout(options: &GlobalOptions, command: &Command) -> CommandOutcome 
         );
     }
 
-    let viewport = Viewport::new(layout_options.width_px, layout_options.height_px);
+    let viewport = Viewport::new(available_width_px, available_height_px);
 
     // --- 排版与分页（一条管线：`paginate` 内部含逐段排版）---
     let mut paginator = Paginator::new();
@@ -289,8 +243,8 @@ pub fn run_layout(options: &GlobalOptions, command: &Command) -> CommandOutcome 
             "line_height": geometry.line_height,
             "measure_em": geometry.measure_em,
             "gutter": geometry.gutter_px,
-            "width": layout_options.width_px,
-            "height": layout_options.height_px,
+            "width": available_width_px,
+            "height": available_height_px,
             "paragraph_mode": paragraph_mode.as_deref().unwrap_or("indent"),
             "spread": spread.as_deref().unwrap_or("auto"),
             "columns": paginated.spread.columns.count(),

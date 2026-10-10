@@ -554,3 +554,112 @@ fn 崩溃后清缓存不影响个人数据() {
 
     let _ = std::fs::remove_dir_all(dir);
 }
+
+// ---------------------------------------------------------------------------
+// 外部 kill 变体
+// ---------------------------------------------------------------------------
+//
+// 上面的场景用 `std::process::abort()` 在**代码位置**上精确卡住崩溃窗口，
+// 不依赖调度时序（时序竞态会让这类测试变成 flaky，而 flaky 的崩溃安全
+// 测试等于没有——它绿的时候你不知道是真绿）。
+//
+// 但 tasks.md 的原文是"**写入中 kill**"。为覆盖那个字面形态，这里再补一个
+// 真正的外部终止：**父进程按固定节奏反复写，父进程自己到点就杀**。
+//
+// ## 为什么不是"子进程 sleep 等父进程 kill"
+//
+// 那个形态必然要在"子进程睡多久"与"父进程何时杀"之间赌一个时序。赌宽了
+// 测试慢，赌窄了杀在写入之外、测了个寂寞。故这里反过来：**让写入无限循环，
+// 父进程固定时刻杀**——无论杀在哪一刻，都必然落在"某一章的写入过程中"。
+
+/// 一个只做写入的循环子进程（由环境变量触发）。
+#[test]
+fn 崩溃注入循环写入子进程() {
+    let Ok(data_dir) = std::env::var("TOME_CRASH_LOOP_DIR") else {
+        return;
+    };
+    let root = Path::new(&data_dir).join("cache").join("packs");
+    let db = Db::open(&Path::new(&data_dir).join("tome.db")).expect("应能开库");
+    let store = PackStore::new(&root, db.clone());
+    let (_db2, _book_id, chapter_ids) = setup_lookup(&db);
+    let content = "正文内容".repeat(200).into_bytes();
+
+    // 无限循环地写：父进程会在某一刻杀掉本进程，那时必然在某章的写入中
+    let mut round = 0usize;
+    loop {
+        for chapter_id in &chapter_ids {
+            store.write_chapter(*chapter_id, &content).expect("应能写");
+        }
+        round += 1;
+        // 防御性上限：万一父进程没能杀掉，自己退出而不是挂住整个测试
+        if round > 1000 {
+            return;
+        }
+    }
+}
+
+#[test]
+fn 写入中外部终止后重启无悬空引用() {
+    // 这一条对应 tasks.md 的字面要求："**写入中 kill**，重启无悬空引用"
+    use std::time::Duration;
+
+    let dir = std::env::temp_dir().join(format!(
+        "tome-crash-extkill-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("应能建目录");
+    // 先建好书与章节
+    let (db, _book_id, _chapter_ids) = setup(&dir.join("tome.db"), 32);
+    drop(db);
+
+    let exe = std::env::current_exe().expect("应能取到测试二进制路径");
+    let mut child = Command::new(exe)
+        .args([
+            "崩溃注入循环写入子进程",
+            "--exact",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env("TOME_CRASH_LOOP_DIR", &dir)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("应能启动子进程");
+
+    // 让它写一会儿再杀——固定延时而非"看它写了多少"：后者要读它的输出，
+    // 而那会让父进程与子进程耦合在一条管道上（子进程被缓冲阻塞时反而不写了）
+    std::thread::sleep(Duration::from_millis(300));
+    child.kill().expect("应能杀掉子进程");
+    // 等它真正退出，否则接下来打开的库可能还被它持有
+    let _ = child.wait();
+
+    // 重启并检查：SC-007 的原文是"数据 100% 可读且不存在指向缺失内容的引用"
+    let db = Db::open(&dir.join("tome.db")).expect("重启应能开库");
+    let root = dir.join("cache").join("packs");
+    assert_no_dangling_references(&db, &root);
+
+    let store = PackStore::new(&root, db.clone());
+    eprintln!(
+        "[崩溃注入实测·外部 kill] 数据目录={} 已提交缓存条目={} 磁盘占用={} 孤儿占用={} 悬空引用=0",
+        dir.display(),
+        store.entry_count().expect("应能数"),
+        store.disk_bytes().expect("应能算"),
+        store.orphan_bytes().expect("应能算"),
+    );
+
+    // 崩溃后系统仍可用：能继续写、能读回
+    let (_db2, _book_id, chapter_ids) = setup_lookup(&db);
+    store
+        .write_chapter(chapter_ids[0], "恢复后的内容".as_bytes())
+        .expect("恢复后应能继续写");
+    assert_eq!(
+        store.read_chapter(chapter_ids[0]).expect("应可读"),
+        Some("恢复后的内容".as_bytes().to_vec())
+    );
+    // 再确认一次（含刚写的那条）
+    assert_no_dangling_references(&db, &root);
+
+    let _ = std::fs::remove_dir_all(dir);
+}

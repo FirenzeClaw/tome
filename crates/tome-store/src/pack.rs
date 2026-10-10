@@ -1671,14 +1671,22 @@ mod tests {
         // 报告实测数据（供汇报引用）
         let usage = fixture.store.usage_bytes().expect("应能算");
         let content = fixture.store.content_bytes().expect("应能算");
+        let disk = fixture.store.disk_bytes().expect("应能算");
+        // 核算值必须与磁盘实际占用一致——否则 SC-005 的比值算的是幻觉
+        assert_eq!(
+            disk, usage,
+            "按索引算的占用与磁盘实际占用不符（差额 = 孤儿占用）"
+        );
+        let ratio = usage as f64 / content as f64;
+        assert!(
+            ratio <= 1.01,
+            "容量开销 {ratio:.6} 超过 1.01（占用 {usage} / 内容 {content}）"
+        );
         eprintln!(
             "[SC-005b 实测] 章数={total_chapters} 文件数={files} 占比={:.4}% 上限={limit}",
             files as f64 / total_chapters as f64 * 100.0
         );
-        eprintln!(
-            "[SC-005 实测] 占用={usage} 内容={content} 比值={:.6}",
-            usage as f64 / content as f64
-        );
+        eprintln!("[SC-005 实测] 磁盘占用={disk} 核算占用={usage} 内容={content} 比值={ratio:.6}");
     }
 
     #[test]

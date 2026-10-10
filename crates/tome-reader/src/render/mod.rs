@@ -15,10 +15,12 @@
 //! | [`offscreen`] | 离屏渲染 + 256 对齐读回（能力错误诚实报告） | FR-053 | [DONE] T035 |
 //! | [`pixel_diff`] | pixelmatch-YIQ 双闸门（快照比对算法） | SC-011 | [DONE] T036 |
 //! | [`fonts`] | 内嵌子集注册 + 平台回退链（零网络） | FR-050/051/047 | [DONE] T037 |
+//! | [`animate`] | 翻页动效档位 + reduced-motion 降级 | FR-046 / FR-032 | [DONE] T038 |
 //!
 //! 后续落点（见 `specs/002-typesetting-renderer/plan.md` Project Structure）：
 //! `animate.rs`（T038）· `image.rs`（T039）· `fonts.rs`（T037）。
 
+pub mod animate;
 pub mod atlas;
 pub mod batch;
 pub mod fonts;

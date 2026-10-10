@@ -401,6 +401,7 @@ fn 录制后离线重放输出逐字节一致() {
         format: OutputFormat::Json,
         network: tome_cli::NetworkMode::Record(capture_dir.path().to_path_buf()),
         data_dir: None,
+        ..GlobalOptions::default()
     };
     let record_executor = executor_for(&record_options);
     let recorded = run_cli(
@@ -433,6 +434,7 @@ fn 录制后离线重放输出逐字节一致() {
             offline: true,
         },
         data_dir: None,
+        ..GlobalOptions::default()
     };
     let replay_executor = executor_for(&replay_options);
     let replayed = run_cli(
@@ -472,6 +474,7 @@ fn 离线重放未命中时报错而非静默空结果() {
         format: OutputFormat::Json,
         network: tome_cli::NetworkMode::Record(capture_dir.path().to_path_buf()),
         data_dir: None,
+        ..GlobalOptions::default()
     };
     let record_executor = executor_for(&record_options);
     let _ = run_cli(
@@ -488,6 +491,7 @@ fn 离线重放未命中时报错而非静默空结果() {
             offline: true,
         },
         data_dir: None,
+        ..GlobalOptions::default()
     };
     let replay_executor = executor_for(&replay_options);
     let outcome = run_cli(
@@ -521,6 +525,7 @@ fn record_once_模式只补空洞() {
         format: OutputFormat::Json,
         network: tome_cli::NetworkMode::Record(capture_dir.path().to_path_buf()),
         data_dir: None,
+        ..GlobalOptions::default()
     };
     let record_executor = executor_for(&record_options);
     let first = run_cli(
@@ -539,6 +544,7 @@ fn record_once_模式只补空洞() {
             offline: false,
         },
         data_dir: None,
+        ..GlobalOptions::default()
     };
     let once_executor = executor_for(&once_options);
     let second = run_cli(
@@ -586,6 +592,7 @@ fn 规则求值不发请求_纯化成立() {
         format: OutputFormat::Json,
         network: tome_cli::NetworkMode::Record(capture_dir.path().to_path_buf()),
         data_dir: None,
+        ..GlobalOptions::default()
     };
     let record_executor = executor_for(&record_options);
     let _ = run_cli(
@@ -603,6 +610,7 @@ fn 规则求值不发请求_纯化成立() {
             offline: true,
         },
         data_dir: None,
+        ..GlobalOptions::default()
     };
     let offline_executor = executor_for(&offline_options);
     let outcome = run_cli(
@@ -822,6 +830,7 @@ fn sc001_首个来源结果远快于30秒() {
         format: OutputFormat::Json,
         network: tome_cli::NetworkMode::Record(capture_dir.path().to_path_buf()),
         data_dir: None,
+        ..GlobalOptions::default()
     };
     let executor = executor_for(&options);
     let warmup = run_cli(
@@ -838,6 +847,7 @@ fn sc001_首个来源结果远快于30秒() {
             offline: true,
         },
         data_dir: None,
+        ..GlobalOptions::default()
     };
     let replay_executor = executor_for(&replay_options);
 

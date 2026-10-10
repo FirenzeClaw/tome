@@ -95,7 +95,9 @@ fn execute(options: &GlobalOptions, command: &tome_cli::Command) -> i32 {
     }
 
     // 组合根装配：读 config.toml、解析数据目录、建库、建网络、接线（T063）
-    let root = match tome_cli::root::AppRoot::assemble(options, None) {
+    // `--config <path>` 走这里（此前恒传 None，等于该 flag 没有效果——
+    // T093 的契约对照发现并修掉）
+    let root = match tome_cli::root::AppRoot::assemble(options, options.config.as_deref()) {
         Ok(root) => root,
         Err(kind) => {
             // FR-043：数据目录不可用等要在启动期明确报告（`AppRoot::assemble`

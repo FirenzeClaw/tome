@@ -35,6 +35,7 @@
 #![forbid(unsafe_code)]
 
 pub mod commands;
+pub mod data_commands;
 pub mod flags;
 pub mod i18n;
 pub mod js_host;

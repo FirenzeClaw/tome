@@ -710,10 +710,18 @@ fn run_的未知动作报用法错误() {
 }
 
 #[test]
-fn run_的后续切片动作报能力错误() {
-    // `info`/`toc`/`content` 在 `contracts/cli.md` 里有定义但属后续切片。
-    // 它们不该报"用法错误"（那会说"你调错了"），而该报能力错误
-    // （退出码 3：本产品将支持但当前做不到）。
+fn run_的抓取动作不再报能力错误() {
+    // ## 这条测试随 T093 的契约对照改了断言（原本断言"报能力错误 3"）
+    //
+    // 旧断言反映的是 S1-1 时期的状态：`info`/`toc`/`content` 在契约里
+    // 有定义但尚未实现，故 `run --action` 对它们报能力错误（3）。
+    //
+    // T093 对照 `contracts/cli.md` 时发现三者**早已落地**（T065-T067 在
+    // `pipeline_commands` 里实现了），只是 `run --action` 这条入口还停在
+    // 旧占位。报"不支持"会让脚本以为要等版本更新，而实际现在就能用。
+    //
+    // 故现在：它们会真的**尝试执行**（拿走假宿主，网络请求失败是预期的），
+    // 但**不再是退出码 3**——"能力不支持"这个信号已被误用。
     let host = FakeHost::new(vec![]);
     let data_dir = temp_data_dir("later");
     let source = r#"{"bookSourceName":"x","bookSourceUrl":"https://x.test"}"#.to_string();
@@ -725,13 +733,42 @@ fn run_的后续切片动作报能力错误() {
             Some(&source),
             &data_dir,
         );
-        assert_eq!(
+        assert_ne!(
             outcome.exit_code, 3,
-            "`{action}` 应报能力错误（退出码 3），实际 {outcome:?}"
+            "`{action}` 已实现，不该再报能力错误（3），实际 {outcome:?}"
+        );
+        // 假宿主没有预置响应，故业务层会失败——但那是**网络/内容**类失败
+        // （退出码 1），不是"本产品做不到"
+        assert_eq!(
+            outcome.exit_code, 1,
+            "`{action}` 应真的尝试执行并因假宿主而失败（1），实际 {outcome:?}"
+        );
+    }
+    std::fs::remove_dir_all(&data_dir).ok();
+}
+
+#[test]
+fn run_缺输入的动作是用法错误() {
+    // `info`/`toc`/`content` 都需要 `--input <地址>`。不给是**用法错误**
+    // （2 = 你调错了），与"产品做不到"（3）和"源坏了"（1）都不同。
+    let host = FakeHost::new(vec![]);
+    let data_dir = temp_data_dir("later-noinput");
+    let source = r#"{"bookSourceName":"x","bookSourceUrl":"https://x.test"}"#.to_string();
+    for action in ["info", "toc", "content"] {
+        let outcome = run_cli_passing_js_host(
+            &["run", "https://x.test", "--action", action],
+            host.clone(),
+            true,
+            Some(&source),
+            &data_dir,
+        );
+        assert_eq!(
+            outcome.exit_code, 2,
+            "`{action}` 缺 --input 应是用法错误（2），实际 {outcome:?}"
         );
         assert!(
-            outcome.stderr.contains("后续切片"),
-            "应说明原因：{}",
+            outcome.stderr.contains("--input"),
+            "应提示缺什么：{}",
             outcome.stderr
         );
     }

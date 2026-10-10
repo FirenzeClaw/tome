@@ -56,4 +56,5 @@ pub mod markup_host;
 pub mod pipeline;
 pub mod regex;
 pub mod replace;
+pub mod trace;
 pub mod xpath;

@@ -603,6 +603,289 @@ pub fn json_line(value: &serde_json::Value) -> String {
     }
 }
 
+// ---------------------------------------------------------------------------
+// 书源分组与启停（T093 / FR-001）
+// ---------------------------------------------------------------------------
+
+/// `source group <源id...> --name <分组|->`（FR-001）。
+///
+/// # `-` 表示移出分组
+///
+/// 见 `flags.rs` 的说明。移出的语义是 `group_id = None`——这与
+/// "分到一个名叫 `-` 的分组"完全不同，故 `-` 是**保留值**，不会真的
+/// 建出叫 `-` 的分组。
+///
+/// # 分组按名字寻址而不是 id
+///
+/// 用户从 CLI 操作时手里是分组名（`--group 玄幻`），不是数据库 id。
+/// 故这里先 `ensure_group` 拿到（或建出）id 再赋值——这也让 CLI 能**顺手
+/// 建新分组**，不必先有个"建分组"的独立命令。
+pub fn run_source_group(
+    options: &GlobalOptions,
+    source_ids: &[String],
+    name: &str,
+) -> CommandOutcome {
+    let source_store = match open_source_store(options) {
+        Ok(store) => store,
+        Err(outcome) => return outcome,
+    };
+
+    // 验证源都存在（比"改完了才发现 id 写错"好得多）
+    let known = match source_store.all() {
+        Ok(sources) => sources,
+        Err(error) => return CommandOutcome::failure(&error.to_error_kind(), &format!("{error}")),
+    };
+    let missing: Vec<&String> = source_ids
+        .iter()
+        .filter(|id| !known.iter().any(|source| &source.id == *id))
+        .collect();
+    if !missing.is_empty() {
+        return CommandOutcome::failure(
+            &ErrorKind::Rule,
+            &format!(
+                "error.rule.source.missing ids={}",
+                missing
+                    .iter()
+                    .map(|id| id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+        );
+    }
+
+    let group_id = if name == "-" {
+        None
+    } else {
+        match source_store.dao().ensure_group(name, 0) {
+            Ok(id) => Some(id),
+            Err(error) => {
+                return CommandOutcome::failure(&error.to_error_kind(), &format!("{error}"))
+            }
+        }
+    };
+
+    // 一次赋一组：`assign_group` 收的是**切片**，故批量赋值是单次调用
+    // （也让"要么全成要么全不成"的事务性更容易保证）
+    let updated = match source_store.dao().assign_group(source_ids, group_id) {
+        Ok(updated) => updated,
+        Err(error) => {
+            return CommandOutcome::failure(&error.to_error_kind(), &format!("{error}"));
+        }
+    };
+
+    let report = serde_json::json!({
+        "updated": updated,
+        "group": if name == "-" { serde_json::Value::Null } else { serde_json::json!(name) },
+    });
+    CommandOutcome::with_stdout(format!("{report}\n"))
+}
+
+/// `source enable|disable <源id...|--all>`（FR-001）。
+///
+/// # 为什么 `--all` 与显式 id 互斥
+///
+/// 同时给会让意图含糊（"只启用我列的那几个"还是"全都启用"？）。报用法
+/// 错误比静默选一个安全——静默选错会让用户以为批量操作成功了。
+pub fn run_source_enable(
+    options: &GlobalOptions,
+    source_ids: &[String],
+    all: bool,
+    enabled: bool,
+) -> CommandOutcome {
+    if all && !source_ids.is_empty() {
+        return CommandOutcome {
+            exit_code: 2,
+            stdout: String::new(),
+            stderr: "用法错误：`--all` 与显式书源 id 不能同时给\n".to_string(),
+        };
+    }
+
+    let source_store = match open_source_store(options) {
+        Ok(store) => store,
+        Err(outcome) => return outcome,
+    };
+
+    let targets: Vec<String> = if all {
+        match source_store.all() {
+            Ok(sources) => sources.into_iter().map(|source| source.id).collect(),
+            Err(error) => {
+                return CommandOutcome::failure(&error.to_error_kind(), &format!("{error}"));
+            }
+        }
+    } else {
+        if source_ids.is_empty() {
+            return CommandOutcome {
+                exit_code: 2,
+                stdout: String::new(),
+                stderr: "用法错误：需要至少一个书源 id，或用 `--all`\n".to_string(),
+            };
+        }
+        source_ids.to_vec()
+    };
+
+    let changed = match source_store.dao().set_enabled(&targets, enabled) {
+        Ok(changed) => changed,
+        Err(error) => return CommandOutcome::failure(&error.to_error_kind(), &format!("{error}")),
+    };
+
+    let report = serde_json::json!({
+        "enabled": enabled,
+        "matched": targets.len(),
+        "changed": changed,
+    });
+    CommandOutcome::with_stdout(format!("{report}\n"))
+}
+
+/// `source groups`（列出分组）。
+pub fn run_source_groups(options: &GlobalOptions) -> CommandOutcome {
+    let source_store = match open_source_store(options) {
+        Ok(store) => store,
+        Err(outcome) => return outcome,
+    };
+    let groups = match source_store.groups() {
+        Ok(groups) => groups,
+        Err(error) => return CommandOutcome::failure(&error.to_error_kind(), &format!("{error}")),
+    };
+    let payload: Vec<serde_json::Value> = groups
+        .iter()
+        .map(|group| {
+            serde_json::json!({
+                "id": group.id,
+                "name": group.name,
+                "sort_order": group.sort_order,
+                "enabled": group.enabled,
+            })
+        })
+        .collect();
+    match serde_json::to_string_pretty(&payload) {
+        Ok(text) => CommandOutcome::with_stdout(format!("{text}\n")),
+        Err(error) => CommandOutcome::failure(
+            &ErrorKind::Configuration,
+            &format!("error.configuration reason={error}"),
+        ),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 搜索关键词（T093 / FR-018）
+// ---------------------------------------------------------------------------
+
+/// 打开书源库的**同一份**数据库句柄（关键词与书源同库）。
+fn open_misc_dao(options: &GlobalOptions) -> Result<tome_store::dao::MiscDao, CommandOutcome> {
+    let data_dir = crate::data_commands::resolve_data_dir_for_keywords(options)?;
+    match tome_store::Db::open(&data_dir.database_path()) {
+        Ok(db) => Ok(tome_store::dao::MiscDao::new(db)),
+        Err(error) => Err(CommandOutcome::failure(
+            &error.to_error_kind(),
+            &format!("error.storage.sqlite reason={error}"),
+        )),
+    }
+}
+
+/// `keyword list`（FR-018：收藏的关键词）。
+pub fn run_keyword_list(options: &GlobalOptions) -> CommandOutcome {
+    let dao = match open_misc_dao(options) {
+        Ok(dao) => dao,
+        Err(outcome) => return outcome,
+    };
+    let keywords = match dao.search_keywords() {
+        Ok(keywords) => keywords,
+        Err(error) => return CommandOutcome::failure(&error.to_error_kind(), &format!("{error}")),
+    };
+    let payload: Vec<serde_json::Value> = keywords
+        .iter()
+        .map(|keyword| {
+            serde_json::json!({
+                "keyword": keyword.keyword,
+                "created_at": keyword.created_at,
+                "use_count": keyword.use_count,
+            })
+        })
+        .collect();
+    match serde_json::to_string_pretty(&payload) {
+        Ok(text) => CommandOutcome::with_stdout(format!("{text}\n")),
+        Err(error) => CommandOutcome::failure(
+            &ErrorKind::Configuration,
+            &format!("error.configuration reason={error}"),
+        ),
+    }
+}
+
+/// `keyword add <词>`（FR-018）。
+///
+/// # 重复收藏是"更新使用时间"而不是报错
+///
+/// 用户重复运行 `keyword add 斗破` 是常见操作（从历史里再选一次）。
+/// 报"已存在"会打断这个流程，而那是无害的。
+pub fn run_keyword_add(options: &GlobalOptions, keyword: &str) -> CommandOutcome {
+    let dao = match open_misc_dao(options) {
+        Ok(dao) => dao,
+        Err(outcome) => return outcome,
+    };
+    let outcome = match dao.add_search_keyword(keyword) {
+        Ok(id) => id,
+        Err(error) => return CommandOutcome::failure(&error.to_error_kind(), &format!("{error}")),
+    };
+    let report = serde_json::json!({ "keyword": keyword, "id": outcome });
+    CommandOutcome::with_stdout(format!("{report}\n"))
+}
+
+/// `keyword remove <词>`（FR-018）。
+pub fn run_keyword_remove(options: &GlobalOptions, keyword: &str) -> CommandOutcome {
+    let dao = match open_misc_dao(options) {
+        Ok(dao) => dao,
+        Err(outcome) => return outcome,
+    };
+    if let Err(error) = dao.remove_search_keyword(keyword) {
+        return CommandOutcome::failure(&error.to_error_kind(), &format!("{error}"));
+    }
+    let report = serde_json::json!({ "removed": keyword });
+    CommandOutcome::with_stdout(format!("{report}\n"))
+}
+
+// ---------------------------------------------------------------------------
+// 规则求值轨迹（T093 / FR-037）——`run --rule <规则> --input <文本> --trace`
+// ---------------------------------------------------------------------------
+
+/// 输出一条规则的求值轨迹（FR-037）。
+///
+/// # 输入形态：`--rule <规则> --input <文本> --trace`
+///
+/// 轨迹作用于"一条规则 + 一段输入"，故它需要**同时**拿到两者。契约里
+/// `run` 的形态是 `<source-id> --action <动作> --input <...>`，而轨迹要的是
+/// 规则原文——故用 `--rule` 区分两种模式：给了 `--rule` 走轨迹。
+///
+/// # `--json` 由调用方从 `Content-Type` 推断（此处是参数）
+///
+/// 轨迹的输入可能是 HTML 也可能是 JSON 文本。判据是规则本身：
+/// `@json:` 前缀说明作者认为输入是 JSON。故这里**由规则前缀推断**
+/// 而不额外要一个 flag——少一个要记的开关。
+pub fn run_rule_trace(rule: &str, input: &str) -> CommandOutcome {
+    let is_json = rule.trim().to_ascii_lowercase().starts_with("@json:");
+    let kind = if is_json {
+        tome_rule::trace::TraceInput::Json
+    } else {
+        tome_rule::trace::TraceInput::Html
+    };
+    let trace = tome_rule::trace::trace_rule(rule, kind, input);
+
+    match serde_json::to_string_pretty(&trace) {
+        Ok(text) => {
+            // 有失败步骤时给业务错误码（1）：轨迹本身算出来了，但规则没跑通。
+            // 用 1 而非 0 让脚本能据此判断"这条规则有问题"。
+            if trace.is_clean() {
+                CommandOutcome::with_stdout(format!("{text}\n"))
+            } else {
+                CommandOutcome::failure(&ErrorKind::Rule, format!("{text}\n").trim_end())
+            }
+        }
+        Err(error) => CommandOutcome::failure(
+            &ErrorKind::Configuration,
+            &format!("error.configuration reason={error}"),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

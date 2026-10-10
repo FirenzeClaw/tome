@@ -38,6 +38,7 @@
 #![forbid(unsafe_code)]
 
 pub mod action;
+pub mod content;
 pub mod error;
 pub mod info;
 pub mod js;

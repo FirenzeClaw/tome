@@ -59,6 +59,8 @@ pub use datadir::DataDir;
 pub use db::Db;
 pub use error::StoreError;
 pub use host::SqliteStoreHost;
+pub use image_cache::ImageCache;
+pub use pack::{EvictionReport, PackLocation, PackStore, PackWrite};
 pub use source_store::SourceStore;
 
 /// 当前 Unix 时间戳（秒）。

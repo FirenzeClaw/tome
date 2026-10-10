@@ -1342,3 +1342,46 @@ mod tests {
         bytes
     }
 }
+
+// ---------------------------------------------------------------------------
+// 书源查找的抽象
+// ---------------------------------------------------------------------------
+
+/// 按 id 取书源的抽象（`ContentProvider` adapter 的依赖）。
+///
+/// # 为什么是 trait 而不是直接收 `&[ParsedSource]`
+///
+/// 阅读器打开一本书时手里只有 `Book`（其 `origin_id` 里含书源 id），而
+/// 书源集合存在 `tome-store` 的 `source` 表里。收切片会把"书源从哪来"
+/// 钉死在内存里——那样生产路径就得先把全量源读进内存。
+///
+/// 用 trait 让两种来源都能接：
+///
+/// - [`SliceLookup`]：内存切片（测试、`--source-file` 场景）
+/// - 组合根提供的实现：从 `tome-store` 的 `SourceDao` 读（生产常态）
+pub trait SourceLookup: Send + Sync {
+    /// 按 id 查找；不存在返回 `None`。
+    fn find(&self, source_id: &str) -> Option<ParsedSource>;
+}
+
+/// 从内存切片查找（测试与 `--source-file` 场景）。
+#[derive(Debug, Clone)]
+pub struct SliceLookup {
+    sources: Vec<ParsedSource>,
+}
+
+impl SliceLookup {
+    /// 从源列表构造。
+    pub fn new(sources: Vec<ParsedSource>) -> Self {
+        Self { sources }
+    }
+}
+
+impl SourceLookup for SliceLookup {
+    fn find(&self, source_id: &str) -> Option<ParsedSource> {
+        self.sources
+            .iter()
+            .find(|parsed| parsed.source.id == source_id)
+            .cloned()
+    }
+}

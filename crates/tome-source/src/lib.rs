@@ -48,6 +48,7 @@ pub mod info;
 pub mod js;
 
 pub use error::SourceError;
+pub mod provider;
 pub mod purify;
 pub mod search;
 pub mod search_stream;

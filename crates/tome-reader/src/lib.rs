@@ -34,16 +34,31 @@
 //!
 //! | 模块 | 职责 | 状态 |
 //! |---|---|---|
-//! | [`error`] | 本层错误类型 + `→ErrorKind` 映射（FR-057/058） | \[DONE] T003 |
-//! | [`render`] | wgpu 自绘管线（仅 `render` feature） | \[WIP] S2-4 |
+//! | [`text`] | 文本模型（字符下标口径）+ 段落切分 | [DONE] T010/T011 |
+//! | [`rules`] | 中文禁则清单与断点判定 | [DONE] T012 |
+//! | [`layout`] | 排版引擎（禁则合并 + 行盒） | [DONE] T013 |
+//! | [`paginate`] | 参数集 / 页序列 / 单双页判据 / 书页语义 | [DONE] T017-T022 |
+//! | [`scroll`] | 滚动流 / 双向映射 / 形态切换 / 重排 / 占位 / 节流 | [DONE] T025-T030 |
+//! | [`precalc`] | 分页预计算 + 增量重排 | [DONE] T024 |
+//! | [`record`] | 阅读记录两量 + 跨形态去重 | [DONE] T031 |
+//! | [`corpus`] | 排版合成语料的装载与校验 | [DONE] T004 |
+//! | [`error`] | 本层错误类型 + `→ErrorKind` 映射（FR-057/058） | [DONE] T003 |
+//! | [`render`] | wgpu 自绘管线（仅 `render` feature） | [WIP] S2-4 |
 //!
-//! 后续切片的模块（`text` / `rules` / `layout` / `paginate` / `scroll` /
-//! `trace`）随 S2-1~S2-5 落地，见 `specs/002-typesetting-renderer/tasks.md`。
+//! 后续切片的模块（`trace` / `toolbar` / `footer` / `keys`）随 S2-5 落地，
+//! 见 `specs/002-typesetting-renderer/tasks.md`。
 
 #![forbid(unsafe_code)]
 
 pub mod corpus;
 pub mod error;
+pub mod layout;
+pub mod paginate;
+pub mod precalc;
+pub mod record;
+pub mod rules;
+pub mod scroll;
+pub mod text;
 
 #[cfg(feature = "render")]
 pub mod render;

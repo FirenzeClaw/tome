@@ -2993,6 +2993,7 @@ dependencies = [
  "tome-js",
  "tome-local",
  "tome-net",
+ "tome-reader",
  "tome-rule",
  "tome-source",
  "tome-store",
@@ -3055,6 +3056,7 @@ dependencies = [
 name = "tome-reader"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "cosmic-text",
  "etagere",
  "serde",

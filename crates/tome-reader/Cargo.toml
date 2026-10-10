@@ -24,8 +24,11 @@ tome-core = { workspace = true }
 # 的硬检查。关掉 default 会让 skrifa 既不 std 也不 libm，**整个栈编译不过**
 # （实测报 8 处 `no method named round/sin/... found for f32`）。
 # 这是 0.19.0 的打包形态，不是本层的选择——只排除 swash 与 fontconfig 两项。
-# 注：swash 仍会**经本 crate 自己的 `render` feature 单独引入**（R2），
-# 故这里排除的是 cosmic-text 自己那份可选的 swash 依赖。
+#
+# **`swash` 在 render feature 下被打开**（见下方 features 段的说明）：
+# 本层需要 `SwashCache` 做字形栅格化（research R2-1），而它在
+# `#[cfg(feature = "swash")]` 下导出。**让它随 render feature 一起开**，
+# 而不是在基础依赖里常开——这样 headless 构建的依赖树仍然零图形包。
 cosmic-text = { version = "0.19.0", default-features = false, features = ["std"] }
 
 # 字形簇边界判定（FR-003：对外位置一律字符下标，簇内不得断开）。
@@ -64,6 +67,10 @@ wgpu = { version = "30.0", optional = true, default-features = false, features =
 swash = { version = "0.2", optional = true }
 # atlas 打包（glyphon 同款 BucketedAtlasAllocator）
 etagere = { version = "0.3", optional = true }
+# 实例数据的字节视图（`[f32; 4]` → `&[u8]` 上传顶点缓冲）。
+# wgpu 自身依赖它，此处显式声明是因为本层**直接**在实例缓冲上用
+# （不显式声明就只能经传递依赖，而 Rust 不允许跨 crate 转发的 use）。
+bytemuck = { version = "1", features = ["derive"] }
 
 # 语料装载（`src/corpus.rs`，T004）。与 001 的 `tome_rule::corpus` 同构——
 # 装载与校验逻辑放在**库**里而非测试里，理由是：S2-1 起各切片的验收测试
@@ -79,7 +86,13 @@ tempfile = "3"
 [features]
 default = ["render"]
 # 渲染管线门控（见上方依赖注释）。关闭后依赖树零图形包。
-render = ["dep:wgpu", "dep:swash", "dep:etagere"]
+#
+# `cosmic-text/swash` 必须随 render 一起开：字形栅格化用的 `SwashCache`
+# 在 cosmic-text 里是 `#[cfg(feature = "swash")]` 导出的（research R2-1：
+# 复用 cosmic-text 自带的 swash 封装，不新增字体解析栈）。
+# 放在这里而不是常开，是为了让 headless 构建的依赖树真的零图形包——
+# `scripts/check-reader-features.sh` 对 `swash` 有断言。
+render = ["dep:wgpu", "dep:swash", "dep:etagere", "cosmic-text/swash"]
 
 [lints]
 workspace = true

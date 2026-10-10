@@ -37,8 +37,11 @@
 pub mod commands;
 pub mod data_commands;
 pub mod flags;
+// `render` 子命令的 PNG 编码（最小实现，零新依赖——见其模块文档）
 pub mod i18n;
 pub mod js_host;
+pub mod png;
+pub mod reader_commands;
 // `local` 是 T076-T083 的 CLI 面，全部实现收在这一个文件里（P7 合并）。
 pub mod local;
 pub mod pipeline_commands;

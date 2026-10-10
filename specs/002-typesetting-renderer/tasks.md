@@ -172,32 +172,33 @@
 
 **Independent Test**: `tome render --chapter <样本>#0 --page 1 --out <png>` 离屏产出图像；同页两次渲染指令序列逐条相同（SC-012）；快照差异 ≤0.1% 或诚实跳过报告（SC-011）；`tome fonts` 报告内嵌子集 3–5MB。
 
-- [ ] T032 [US3] wgpu 自绘管线骨架于 `crates/tome-reader/src/render/pipeline.rs`（FR-043；`render` feature 门控；FR-036 架构注释：阅读页内容由本层产出，不经外壳 UI 框架文本栈）
-  - [ ] feature off（headless）与 on 两种构建均通过；feature off 时依赖树零图形包
-  - [ ] **门控约定**：`render` feature **默认开启**（开发/发布构建含渲染栈）；headless CI job 显式 `--no-default-features`；feature off 时 `render` 子命令以 `UnsupportedCapability{capability:"offscreenRendering"}` + 退出码 3 回应（该路径即 T048 第三条验收的被测对象）
-  - [ ] 离屏初始化测试（无 surface 建 device/queue）
-- [ ] T033 [US3] 字形缓存 + atlas 于 `crates/tome-reader/src/render/glyph_cache.rs` + `atlas.rs`（research R2：SwashCache 栅格化；缓存键 = 字体+字号+字形+SubpixelBin（x 轴 4 分桶、y 对齐行基线）；etagere atlas；增长用 copy_texture_to_texture 搬迁；每帧聚合批量上传）
-  - [ ] 缓存命中/未命中路径测试；atlas 增长后既有字形仍可渲染
-  - [ ] US3 场景 2：缺字回退字形呈现且该行其余字符位置不变（不整行跳动）
-- [ ] T034 [US3] RenderBatch 绘制指令序列于 `crates/tome-reader/src/render/batch.rs`（背景/字形四边形/装饰（高亮/下划线/引用线）/图片四边形；FR-048 同输入同序列）
-  - [ ] SC-012：`crates/tome-reader/tests/render_deterministic.rs`——同页（或同滚动视口）同参数两次渲染指令逐条相同（预热后，100%）
-- [ ] T035 [P] [US5] 离屏渲染 + 读回于 `crates/tome-reader/src/render/offscreen.rs`（research R4：Rgba8Unorm；`RENDER_ATTACHMENT|COPY_SRC`；bytes_per_row 对齐 256 读回去 padding；map_async + `device.poll(wait)`；后端不可用报 `UnsupportedCapability{capability:"offscreenRendering"}`，不伪装成功）
-  - [ ] 离屏产出 PNG（读回像素非全零断言）
-  - [ ] 无后端环境（mock 注入）下结构化错误测试
-- [ ] T036 [US5] 像素快照 harness 于 `crates/tome-reader/tests/snapshot.rs`（research R4：hand-rolled pixelmatch-YIQ 双闸门 per-pixel 0.6 + 失败比例 ≤0.1%（初期 0.05% 从严，误报驱动放宽）；probe 探针落 `crates/tome-reader/examples/probe.rs`（`cargo run -p tome-reader --example probe` 打印后端名，CI 以该命令触发，失败则 job 红）；测试体内 adapter 缺失即 panic 诚实模式；CI 上传 actual/difference artifacts 约定写入注释）
-  - [ ] 自校验：造差异图断言检出、造相同图断言通过（两侧）
-  - [ ] 后端不可用时输出「SKIPPED: <原因>」显式报告，**不计为通过**
-- [ ] T037 [US3] 字体内嵌加载 + fontdb 回退链于 `crates/tome-reader/src/render/fonts.rs`（FR-050/051：`assets/fonts/TomeSerifCN-subset.otf` 经 fontdb `load_font_data` 注册为 reading-serif 首选；系统回退链平台表（Windows 宋体 / macOS Songti SC / Linux Noto Serif CJK）；字体获取零网络）
-  - [ ] 子集缺字时落回退链且行位不变（FR-047）
-  - [ ] `tome fonts` 数据可用：内嵌体积 3–5MB 断言 + `within_budget` 为 true
-- [ ] T038 [P] [US3] 翻页动效于 `crates/tome-reader/src/render/animate.rs`（FR-046：MASTER §4 `--ease-spring`/`--dur-slow` 档位；FR-032：reduced-motion 开启时降级瞬时切换且不改变分页结果与位置）
-  - [ ] 有动效/降级两路径测试；降级后分页结果逐字节相同断言
-- [ ] T039 [US6] 图文混排于 `crates/tome-reader/src/render/image.rs`（FR-049：图片行盒按显示尺寸参与布局、占位高度与最终一致、不被页边界切开、不可用占位不中断正文；消费 `ChapterContent.images`，001 契约已增补、P8 接线）
-  - [ ] US6 三场景：不被页边界切开 / 尺寸未定按声明或回退尺寸占位且重排不改锚点 / 与首段成组不孤立
-  - [ ] **若 001 P8 的 images 接线未就绪**：以占位行盒实现通过结构测试并标 [WIP]（接线就绪后补实），不阻塞本切片其余任务
+- [x] T032 [US3] wgpu 自绘管线骨架于 `crates/tome-reader/src/render/pipeline.rs`（FR-043；`render` feature 门控；FR-036 架构注释：阅读页内容由本层产出，不经外壳 UI 框架文本栈）
+  - [x] feature off（headless）与 on 两种构建均通过；feature off 时依赖树零图形包
+  - [x] **门控约定**：`render` feature **默认开启**（开发/发布构建含渲染栈）；headless CI job 显式 `--no-default-features`；feature off 时 `render` 子命令以 `UnsupportedCapability{capability:"offscreenRendering"}` + 退出码 3 回应（该路径即 T048 第三条验收的被测对象）
+  - [x] 离屏初始化测试（无 surface 建 device/queue）
+- [x] T033 [US3] 字形缓存 + atlas 于 `crates/tome-reader/src/render/glyph_cache.rs` + `atlas.rs`（research R2：SwashCache 栅格化；缓存键 = 字体+字号+字形+SubpixelBin（x 轴 4 分桶、y 对齐行基线）；etagere atlas；增长用 copy_texture_to_texture 搬迁；每帧聚合批量上传）
+  - [x] 缓存命中/未命中路径测试；atlas 增长后既有字形仍可渲染
+  - [x] US3 场景 2：缺字回退字形呈现且该行其余字符位置不变（不整行跳动）
+- [x] T034 [US3] RenderBatch 绘制指令序列于 `crates/tome-reader/src/render/batch.rs`（背景/字形四边形/装饰（高亮/下划线/引用线）/图片四边形；FR-048 同输入同序列）
+  - [x] SC-012：`crates/tome-reader/tests/render_deterministic.rs`——同页（或同滚动视口）同参数两次渲染指令逐条相同（预热后，100%）
+- [x] T035 [P] [US5] 离屏渲染 + 读回于 `crates/tome-reader/src/render/offscreen.rs`（research R4：Rgba8Unorm；`RENDER_ATTACHMENT|COPY_SRC`；bytes_per_row 对齐 256 读回去 padding；map_async + `device.poll(wait)`；后端不可用报 `UnsupportedCapability{capability:"offscreenRendering"}`，不伪装成功）
+  - [x] 离屏产出 PNG（读回像素非全零断言）
+  - [x] 无后端环境（mock 注入）下结构化错误测试
+- [x] T036 [US5] 像素快照 harness 于 `crates/tome-reader/tests/snapshot.rs`（research R4：hand-rolled pixelmatch-YIQ 双闸门 per-pixel 0.6 + 失败比例 ≤0.1%（初期 0.05% 从严，误报驱动放宽）；probe 探针落 `crates/tome-reader/examples/probe.rs`（`cargo run -p tome-reader --example probe` 打印后端名，CI 以该命令触发，失败则 job 红）；测试体内 adapter 缺失即 panic 诚实模式；CI 上传 actual/difference artifacts 约定写入注释）
+  - [x] 自校验：造差异图断言检出、造相同图断言通过（两侧）
+  - [x] 后端不可用时输出「SKIPPED: <原因>」显式报告，**不计为通过**
+- [x] T037 [US3] 字体内嵌加载 + fontdb 回退链于 `crates/tome-reader/src/render/fonts.rs`（FR-050/051：`assets/fonts/TomeSerifCN-subset.otf` 经 fontdb `load_font_data` 注册为 reading-serif 首选；系统回退链平台表（Windows 宋体 / macOS Songti SC / Linux Noto Serif CJK）；字体获取零网络）
+  - [x] 子集缺字时落回退链且行位不变（FR-047）
+  - [x] `tome fonts` 数据可用：内嵌体积 3–5MB 断言 + `within_budget` 为 true
+- [x] T038 [P] [US3] 翻页动效于 `crates/tome-reader/src/render/animate.rs`（FR-046：MASTER §4 `--ease-spring`/`--dur-slow` 档位；FR-032：reduced-motion 开启时降级瞬时切换且不改变分页结果与位置）
+  - [x] 有动效/降级两路径测试；降级后分页结果逐字节相同断言
+- [x] T039 [US6] 图文混排于 `crates/tome-reader/src/render/image.rs`（FR-049：图片行盒按显示尺寸参与布局、占位高度与最终一致、不被页边界切开、不可用占位不中断正文；消费 `ChapterContent.images`，001 契约已增补、P8 接线）
+  - [x] US6 三场景：不被页边界切开 / 尺寸未定按声明或回退尺寸占位且重排不改锚点 / 与首段成组不孤立
+  - [x] ~~**若 001 P8 的 images 接线未就绪**~~ **N/A**：001 P8 已接线 `ChapterContent.images`，本任务走**真实接线**（无占位降级）
 
 > **⛔ 检查点：S2-4 之后（渲染与快照门）**
-> - [ ] SC-011 快照 ≤0.1%（或诚实跳过报告）；SC-012 指令序列逐条相同；字体内嵌 3–5MB 实测
+> - [x] SC-011 快照 ≤0.1%（或诚实跳过报告）；SC-012 指令序列逐条相同；字体内嵌 3–5MB 实测
+>   - PM 注记（2026-10-11）：S2-4 门审查通过——三项裁决落地。① **`--page` 真实消费**（先分页再取第 N 页；越界报结构化错误且不产出文件；三页哈希互不相同实测在案）② **真实字形位图路径**（R2 既定方案：SwashCache → etagere → WGSL 点采样 + alpha 混合；移除 T035 的实心块 [WORKAROUND]；装置自检两条各带变异验证：'一' 912px vs '龘' 4960px 墨迹可分辨、抗锯齿 199–211 级）③ **字体体积 2.18 MiB 接受**（「3–5MB 预算」为上限语义，2.18 在限内且 GB2312 6763 字覆盖达标）。**关键发现**：实心块阶段（T035–T039）的 SC-011 快照是**内容盲**的——字数相同的两页产出逐字节相同的图像，即那条判据"能失败"但它失败的**原因集合不含"字形画错"**（BASELINE §13.2 记为本项目第四次同型问题、形态不同于 §10.1 的前三次）。历史数据保留在案，当前数据见 BASELINE §13。
 > - [ ] 人工审查后进入下一阶段
 
 ---

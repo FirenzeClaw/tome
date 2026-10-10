@@ -230,6 +230,13 @@ pub fn run_with_js(
             roots,
             _unused: _,
         } => crate::local::run_scan(options, directory, roots),
+        // S2 排版层（contracts/cli.md §2.1-§2.4）
+        Command::Layout(_) => crate::reader_commands::run_layout(options, command),
+        Command::LayoutAnchor(_) => crate::reader_commands::run_layout_anchor(options, command),
+        // §2.3：后端不可用时以能力错误 + 退出码 3 回应（不伪装成功）
+        Command::Render(_) => crate::reader_commands::run_render(options, command),
+        // §2.4：内嵌字体与回退链报告
+        Command::Fonts => crate::reader_commands::run_fonts(options),
         // T093：分组与启停（FR-001）
         Command::SourceGroup { source_ids, name } => {
             crate::pipeline_commands::run_source_group(options, source_ids, name)

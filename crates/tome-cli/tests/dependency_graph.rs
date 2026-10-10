@@ -38,7 +38,7 @@
 //! |---|---|
 //! | ① `tome-core` 独立 | 它的依赖表里**没有**任何 `tome-*`——core 是地基 |
 //! | ② 星型无环 | `tome-js`/`tome-net`/`tome-store` 互不依赖 |
-//! | ③ 引擎不依赖上层 | 引擎 crate 不依赖 `tome-reader`/`tome-app` |
+//! | ③ 引擎不依赖上层 | 实现 crate（不含组合根 `tome-cli`）不依赖 `tome-reader`/`tome-app` |
 //!
 //! ## 关于 `tome-store → tome-net` 这个例外
 //!
@@ -126,6 +126,21 @@ fn workspace_deps(crate_name: &str) -> Vec<String> {
 }
 
 /// 全部引擎 crate（SC-011/FR-039 的"引擎"范围）。
+///
+/// ## 为什么没有 `tome-cli`
+///
+/// `tome-cli` 是**组合根**，不是引擎：它按定义要装配全部实现 crate
+/// （001 的 `contracts/cli.md` §3 已声明"它是组合根，依赖全部 crate"）。
+/// 把它算进"不得依赖上层"的集合里，结论就恒定为"不可依赖任何东西"，
+/// 与它唯一的职责直接冲突。
+///
+/// S2 的 `tome layout` 把这条冲突摆到了明面上（`tome-cli → tome-reader`）：
+/// 排版层的可验证入口按 002 的 `contracts/cli.md` §2 就是 CLI 薄壳，
+/// 而 002 规格 §3 关系表同时写明这**不违反**架构铁律。
+///
+/// 故此处把边界画在真正该在的地方——**被判定的"引擎"是除组合根以外的
+/// 实现 crate**。组合根自身的约束仍被 `tome_reader_只依赖_core` 与
+/// `实现_crate_呈星型无环` 两条从侧面钉住。
 const ENGINE_CRATES: &[&str] = &[
     "tome-core",
     "tome-rule",
@@ -134,7 +149,6 @@ const ENGINE_CRATES: &[&str] = &[
     "tome-store",
     "tome-source",
     "tome-local",
-    "tome-cli",
 ];
 
 // ---------------------------------------------------------------------------
@@ -290,6 +304,8 @@ fn tome_rule_的依赖面受限() {
 ///
 /// 若引擎依赖了阅读器，"替换上层"就要改引擎——那条要求直接落空。
 /// 故这是结构性禁令，不是风格偏好。
+///
+/// **不含 `tome-cli`**（组合根按定义依赖全部 crate，理由见 [`ENGINE_CRATES`]）。
 #[test]
 fn 引擎不依赖阅读器与界面层() {
     /// 上层 crate（引擎绝不能依赖它们）

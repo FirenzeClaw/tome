@@ -92,14 +92,26 @@ pub fn check_drm(header: &MobiHeader) -> DrmVerdict {
     DrmVerdict::Clear
 }
 
-/// HUFF/CDIC 的解析可用性（阶段二之前不可用）。
+/// 压缩算法的支持度。
+///
+/// # 三个变体与它们的处置
+///
+/// | 变体 | 可以解压 | 调用方动作 |
+/// |---|---|---|
+/// | [`Self::Supported`] | 是（无压缩 / PalmDOC） | 直接解 |
+/// | [`Self::HuffCdic`] | 是（T079 已落地） | 走 `huffcdic` 分派 |
+/// | [`Self::Unknown`] | **否** | 明确报错 |
+///
+/// 注意 `HuffCdic` **不是**"不支持"——首版把它叫 `NeedsHuffCdic` 并在
+/// 解析流程里直接返回错误，使 `huffcdic::decompress_document` 成了死代码
+/// （实测发现：真实 `-c2` 文件走不到解压那一步）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompressionSupport {
-    /// 本实现可以直接解压
+    /// 无压缩或 PalmDOC——本实现直接解压
     Supported,
-    /// 需要 HUFF/CDIC 解码（T079 落地前不可用）
-    NeedsHuffCdic,
-    /// 未知的压缩算法
+    /// HUFF/CDIC——由 `mobi::huffcdic` 解压（T079）
+    HuffCdic,
+    /// 未知的压缩算法码
     Unknown(u16),
 }
 
@@ -108,18 +120,15 @@ impl CompressionSupport {
     pub fn of(compression: Compression) -> Self {
         match compression {
             Compression::None | Compression::PalmDoc => Self::Supported,
-            Compression::HuffCdic => Self::NeedsHuffCdic,
+            Compression::HuffCdic => Self::HuffCdic,
             Compression::Unknown(code) => Self::Unknown(code),
         }
     }
 
-    /// 转为可报告的错误（不可用时）。
+    /// 转为可报告的错误（**仅未知算法**时给出；见枚举文档）。
     pub fn into_error(self) -> Option<LocalError> {
         match self {
-            Self::Supported => None,
-            Self::NeedsHuffCdic => Some(LocalError::Damaged {
-                reason: "compression=17480（HUFF/CDIC）解压失败".to_string(),
-            }),
+            Self::Supported | Self::HuffCdic => None,
             Self::Unknown(code) => Some(LocalError::Damaged {
                 reason: format!("未知的压缩算法码 {code}"),
             }),
@@ -246,19 +255,31 @@ mod tests {
         // 而它的**可读性**由压缩支持度表达，与 DRM 是两个独立的轴。
         assert_eq!(
             CompressionSupport::of(header.compression),
-            CompressionSupport::NeedsHuffCdic
+            CompressionSupport::HuffCdic
         );
     }
 
     #[test]
-    fn huffcdic_error_message_never_mentions_drm() {
+    fn huffcdic_is_treated_as_supported() {
+        // T079 已落地，故 HUFF/CDIC **不是**"不支持"——首版把它当成错误
+        // 直接返回，使 `huffcdic::decompress_document` 成了死代码。
+        assert!(
+            CompressionSupport::of(Compression::HuffCdic)
+                .into_error()
+                .is_none(),
+            "HUFF/CDIC 应被分派给解压器，而不是在此报错"
+        );
+    }
+
+    #[test]
+    fn unknown_compression_error_message_never_mentions_drm() {
         // 错误文案里不能出现 DRM——那会把用户引向完全错误的方向。
-        let error = CompressionSupport::of(Compression::HuffCdic)
+        let error = CompressionSupport::of(Compression::Unknown(17481))
             .into_error()
-            .expect("应报错");
+            .expect("未知算法应报错");
         let text = error.to_string().to_lowercase();
         assert!(!text.contains("drm"), "实际 {text}");
-        assert!(text.contains("huff"), "应指明是 HUFF/CDIC，实际 {text}");
+        assert!(text.contains("17481"), "应指明码位，实际 {text}");
     }
 
     #[test]

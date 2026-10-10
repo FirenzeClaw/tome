@@ -365,3 +365,132 @@ fn real_epub_yields_metadata_toc_and_resources() {
         text.chars().count()
     );
 }
+
+// ---------------------------------------------------------------------------
+// T079：HUFF/CDIC 的真实文件验证（**当前缺语料，测试会明确报告**）
+// ---------------------------------------------------------------------------
+
+/// HUFF/CDIC（`compression = 17480`）的真实文件验证。
+///
+/// # 这条测试**故意**在缺语料时失败（与其它测试的"跳过"不同）
+///
+/// T079 的验收项原文是"真实 `kindlegen -c2` 文件验证；与 oracle
+/// （kindling dump）diff 一致"。那是一件**尚未完成**的事——本仓当前
+/// **没有**可用的 `-c2` 语料：
+///
+/// - Project Gutenberg 的 Kindle 格式（`kf8.images` / `kindle.noimages` /
+///   `kindle.images`）实测**全部**是 `compression = 2`（PalmDOC）
+/// - 本机无 `kindlegen`，也无 Calibre（`ebook-convert`）可以生成 `-c2`
+/// - Calibre 源码树里没有 `.mobi` 测试夹具（`.gitignore` 排除了）
+///
+/// 故 HUFF/CDIC 目前只有**按 `mobi-rs/huff.md` 规范实现的单元测试**覆盖，
+/// 尚未经真实文件端到端验证。把这条测试写成"缺语料即失败"是**刻意的**：
+/// 它让这个缺口在每次 `cargo test` 里都可见，而不是伪装成"跳过=通过"。
+///
+/// 语料就位后（把任意 `kindlegen -c2` 产物命名 `huffcdic.mobi` 放进
+/// `testdata/captures/local-books/`），用下面这条命令跑它：
+///
+/// ```text
+/// cargo test -p tome-local --test mobi_real_files -- --ignored huffcdic
+/// ```
+///
+/// ## 为什么用 `#[ignore]` 而不是直接失败
+///
+/// 直接失败会让四道质量门（build/clippy/fmt/test）全红——那不是"暴露缺口"，
+/// 而是"让缺口挡住其余全部工作"。`#[ignore]` + `--nocapture` 的输出是
+/// Rust 里表达"需要外部夹具"的标准做法：测试计数里显示为 `ignored`
+/// （而不是 `passed`），且 `report_which_compression_paths_the_corpus_covers`
+/// 每次运行都会打印 `HUFF/CDIC=false` 让缺口**持续可见**。
+#[test]
+#[ignore = "T079 真实文件验证缺语料：需要一个 kindlegen -c2（compression=17480）的 MOBI；本机与 Gutenberg 语料均无法提供，见本测试的文档"]
+fn real_huffcdic_file_verifies_the_phase_two_path() {
+    let Some(bytes) = corpus("huffcdic.mobi") else {
+        panic!(
+            "T079 的真实文件验证**尚未完成**：{} 下没有 `huffcdic.mobi`\
+             （compression=17480 的 kindlegen -c2 产物）。\
+             本仓当前的 Gutenberg 语料全部是 PalmDOC，无法覆盖 HUFF/CDIC 路径。\
+             把一份 `-c2` 文件放到该目录即可让本测试开始验证。",
+            corpus_dir().display()
+        );
+    };
+
+    // 语料就位时的真正断言。
+    let parsed = mobi::parse(&bytes).expect("真实 HUFF/CDIC 文件应能解析");
+    assert!(
+        parsed.text.len() > 10_000,
+        "HUFF/CDIC 正文应有实际长度，实际 {}",
+        parsed.text.len()
+    );
+    let replacement_count = parsed.text.matches('\u{FFFD}').count();
+    assert!(
+        replacement_count < 10,
+        "解压结果不该有大量替换字符（那是解压错误的信号），实际 {replacement_count} 个"
+    );
+    assert!(!parsed.toc.is_empty(), "应识别出章节");
+    eprintln!(
+        "huffcdic.mobi: 书名={:?} 章节={} 正文字符={}",
+        parsed.book.name,
+        parsed.toc.len(),
+        parsed.text.chars().count()
+    );
+}
+
+/// 报告当前语料里各文件的压缩算法（诊断用，始终通过）。
+///
+/// 这条测试的价值在于把"哪些压缩路径被真实覆盖了"变成**可读的输出**，
+/// 而不是要人去逐个文件手工检查。
+#[test]
+fn report_which_compression_paths_the_corpus_covers() {
+    let names = [
+        "368.kf8.mobi",
+        "2701.kf8.mobi",
+        "1342.kf8.mobi",
+        "580.kf8.mobi",
+        "2701.epub",
+        "huffcdic.mobi",
+    ];
+    let mut covered_palmdoc = false;
+    let mut covered_huffcdic = false;
+
+    for name in names {
+        let Some(bytes) = corpus(name) else {
+            eprintln!("  {name}: （无）");
+            continue;
+        };
+        if name.ends_with(".epub") {
+            eprintln!("  {name}: EPUB");
+            continue;
+        }
+        // PalmDOC 头的前 2 字节是压缩算法（大端）。
+        let record0 = u32::from_be_bytes([
+            bytes.get(78).copied().unwrap_or(0),
+            bytes.get(79).copied().unwrap_or(0),
+            bytes.get(80).copied().unwrap_or(0),
+            bytes.get(81).copied().unwrap_or(0),
+        ]) as usize;
+        let compression = bytes
+            .get(record0..record0 + 2)
+            .map(|slice| u16::from_be_bytes([slice[0], slice[1]]))
+            .unwrap_or(0);
+        match compression {
+            2 => covered_palmdoc = true,
+            17480 => covered_huffcdic = true,
+            _ => {}
+        }
+        let label = match compression {
+            2 => "（PalmDOC）",
+            17480 => "（HUFF/CDIC）",
+            _ => "",
+        };
+        eprintln!("  {name}: compression={compression}{label}");
+    }
+
+    eprintln!("真实语料覆盖：PalmDOC={covered_palmdoc} HUFF/CDIC={covered_huffcdic}");
+    assert!(covered_palmdoc, "至少要覆盖 PalmDOC（当前语料应满足）");
+    if !covered_huffcdic {
+        eprintln!(
+            "⚠ HUFF/CDIC 路径**未**被真实文件覆盖——见 \
+             `real_huffcdic_file_verifies_the_phase_two_path` 的说明"
+        );
+    }
+}

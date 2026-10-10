@@ -239,18 +239,15 @@ pub fn parse(bytes: &[u8]) -> LocalResult<ParsedMobi> {
         }
     };
 
-    // ⑤ 压缩支持度（T079）。HUFF/CDIC 与 DRM 是**两个独立的轴**。
-    match CompressionSupport::of(header.compression) {
-        CompressionSupport::Supported => {}
-        CompressionSupport::NeedsHuffCdic => {
-            // HUFF/CDIC 需要文件里的 huff/cdic 记录（通常在第一条非文本记录之后）。
-            return Err(LocalError::damaged(
-                "compression=17480（HUFF/CDIC）的 huff/cdic 记录无法定位".to_string(),
-            ));
-        }
-        CompressionSupport::Unknown(code) => {
-            return Err(LocalError::damaged(format!("未知的压缩算法码 {code}")));
-        }
+    // ⑤ 压缩支持度（T079）。HUFF/CDIC 与 DRM 是**两个独立的轴**——
+    // 前者是"能不能解压"，后者是"该不该解压"（加密的文件解出来是乱码）。
+    //
+    // 这里**只拦未知算法**：HUFF/CDIC 由 ⑥ 的 `decompress_text` 分派到
+    // `huffcdic::decompress_document`。首版在这里对 HUFF/CDIC 直接报错，
+    // 使那条路径成了**死代码**（实测发现的缺陷：真实 `-c2` 文件会走到
+    // 这里就返回错误，永远到不了 ⑥）。
+    if let CompressionSupport::Unknown(code) = CompressionSupport::of(header.compression) {
+        return Err(LocalError::damaged(format!("未知的压缩算法码 {code}")));
     }
 
     // ⑥ 解压文本。

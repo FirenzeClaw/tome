@@ -112,6 +112,15 @@ pub struct HostCapabilities {
     /// `SqliteStoreHost` 绑定**单个书源**（见 `tome_store::host`）。
     /// 一次运行要跑多个源，故存的应是"给定源 id 造一个宿主"的能力。
     pub store_factory: Option<std::sync::Arc<crate::root::StoreHostFactory>>,
+    /// 主题集（FR-029 的组合根注入：绘制点经此取主题，不自行构造）。
+    ///
+    /// ## 为什么主题也走这条注入通道
+    ///
+    /// FR-029 要求 `Theme` 的**实例**由组合根构造并注入。主题与宿主能力
+    /// 同走一条路是因为它们的性质一致：都是"组合根构造、绘制点消费、
+    /// 绘制点不该自己去造"的东西。`None` 表示本次运行未注入主题，
+    /// 绘制点应回落到主题默认值并**明确标注**（不静默假装注入了）。
+    pub themes: Option<crate::root::ThemeSet>,
 }
 
 impl std::fmt::Debug for HostCapabilities {
@@ -120,6 +129,7 @@ impl std::fmt::Debug for HostCapabilities {
             .debug_struct("HostCapabilities")
             .field("has_net", &self.net.is_some())
             .field("has_store", &self.store_factory.is_some())
+            .field("has_themes", &self.themes.is_some())
             .finish()
     }
 }
@@ -234,7 +244,7 @@ pub fn run_with_js(
         Command::Layout(_) => crate::reader_commands::run_layout(options, command),
         Command::LayoutAnchor(_) => crate::reader_commands::run_layout_anchor(options, command),
         // §2.3：后端不可用时以能力错误 + 退出码 3 回应（不伪装成功）
-        Command::Render(_) => crate::reader_commands::run_render(options, command),
+        Command::Render(_) => crate::reader_commands::run_render(options, command, hosts.themes),
         // §2.4：内嵌字体与回退链报告
         Command::Fonts => crate::reader_commands::run_fonts(options),
         // T093：分组与启停（FR-001）

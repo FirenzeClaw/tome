@@ -698,8 +698,18 @@ pub fn run_layout_anchor(options: &GlobalOptions, command: &Command) -> CommandO
 // 因为对调用方而言处置相同：本机拿不到图像，应改走 `tome layout` 做结构验证。
 
 /// 执行 `render` 子命令。
+///
+/// ## `themes` 参数就是 FR-029 的注入端
+///
+/// 主题**实例**由组合根（`AppRoot::themes()`）构造并经 `HostCapabilities`
+/// 注入到这里——本函数不写 `DayTheme.theme()`。`None`（未注入，如测试路径）
+/// 时回落到组合根的默认构造，但**不静默**：报告里会标出主题来源。
 #[cfg(feature = "reader-render")]
-pub fn run_render(options: &GlobalOptions, command: &Command) -> CommandOutcome {
+pub fn run_render(
+    options: &GlobalOptions,
+    command: &Command,
+    themes: Option<crate::root::ThemeSet>,
+) -> CommandOutcome {
     use tome_reader::render::batch::RenderBatch;
     use tome_reader::render::glyph_cache::GlyphCache;
     use tome_reader::render::offscreen::OffscreenRenderer;
@@ -733,10 +743,24 @@ pub fn run_render(options: &GlobalOptions, command: &Command) -> CommandOutcome 
         Err(outcome) => return outcome,
     };
 
-    // 主题（默认 day，FR-030）
-    let theme = match args.theme.as_deref() {
-        Some("night") => tome_core::model::theme::NightTheme.theme(),
-        _ => tome_core::model::theme::DayTheme.theme(),
+    // 主题：**经组合根注入的实例取**（FR-029），本函数不构造主题。
+    //
+    // ## 为什么不再用 `match { "night" => NightTheme.theme(), _ => DayTheme.theme() }`
+    //
+    // 那个写法有两个毛病：① 主题来源散在绘制点（违反 FR-029 的注入分工）；
+    // ② **未知标识静默回落到昼主题**——`--theme nigth`（拼错）会"成功渲染
+    // 昼主题"，用户看不到自己的错误。改用 `ThemeSet::by_id`（未知名返回 `None`）
+    // 后，拼错的标识会得到结构化错误（退出码 1），与 FR-053 同一条纪律。
+    let theme_set = themes.unwrap_or_default();
+    let theme_id = args.theme.as_deref().unwrap_or("day");
+    let Some(theme) = theme_set.by_id(theme_id) else {
+        return CommandOutcome::failure(
+            &ErrorKind::Configuration,
+            &format!(
+                "--theme `{theme_id}` 不是已知主题；可用：{}",
+                crate::root::ThemeSet::AVAILABLE_IDS.join(" / ")
+            ),
+        );
     };
 
     let width = viewport.available_width_px.round().max(1.0) as u32;
@@ -902,7 +926,11 @@ pub fn run_render(options: &GlobalOptions, command: &Command) -> CommandOutcome 
 /// "渲染面在编译期就不存在" 是 §2.3 要求的最强形态——比 "运行期拿不到
 /// 后端" 更彻底：连试图渲染的代码都不在二进制里。
 #[cfg(not(feature = "reader-render"))]
-pub fn run_render(_options: &GlobalOptions, _command: &Command) -> CommandOutcome {
+pub fn run_render(
+    _options: &GlobalOptions,
+    _command: &Command,
+    _themes: Option<crate::root::ThemeSet>,
+) -> CommandOutcome {
     capability_failure(concat!(
         "本构建未启用渲染面（tome-reader 的 render feature 关闭）：离屏渲染不可用。",
         "处置：用默认 feature 构建（开发/发布构建默认带渲染面），",
@@ -927,6 +955,7 @@ fn capability_failure(message: &str) -> CommandOutcome {
 }
 
 /// 执行 `fonts` 子命令（`contracts/cli.md` §2.4）。
+#[cfg(feature = "reader-render")]
 pub fn run_fonts(options: &GlobalOptions) -> CommandOutcome {
     let report = tome_reader::render::fonts::FontsReport::collect();
     let json = serde_json::json!({
@@ -943,6 +972,17 @@ pub fn run_fonts(options: &GlobalOptions) -> CommandOutcome {
     CommandOutcome::with_stdout(format_report(options, &json))
 }
 
+/// `fonts` 的 headless 形态（`tome-reader` 的 `render` feature 关闭）——
+/// 字体报告的实现落在渲染面（`tome_reader::render::fonts`），与
+/// `run_render` 的 stub 同构：同一形态的结构化能力错误（退出码 3）。
+#[cfg(not(feature = "reader-render"))]
+pub fn run_fonts(_options: &GlobalOptions) -> CommandOutcome {
+    capability_failure(concat!(
+        "本构建未启用渲染面（tome-reader 的 render feature 关闭）：字体报告不可用。",
+        "处置：用默认 feature 构建（开发/发布构建默认带渲染面）。"
+    ))
+}
+
 /// 按 `--format` 渲染 JSON 或人类可读摘要。
 ///
 /// ## 为什么人类形态不另走一套序列化
@@ -950,6 +990,7 @@ pub fn run_fonts(options: &GlobalOptions) -> CommandOutcome {
 /// 契约要求默认 `--format json`（供脚本消费），`human` 是给人看的摘要。
 /// 若为 human 另写一套结构体，两份输出会随字段增减而漂移——那是
 /// "文档与实现不一致" 的经典形态。故 human 直接从同一个 `Value` 平铺出来。
+#[cfg(feature = "reader-render")]
 fn format_report(options: &GlobalOptions, value: &serde_json::Value) -> String {
     match options.format {
         OutputFormat::Json => {

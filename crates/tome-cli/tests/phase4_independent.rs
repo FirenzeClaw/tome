@@ -142,6 +142,7 @@ fn run_cli_passing_js_host(
         HostCapabilities {
             net: Some(host.clone() as Arc<dyn NetHost>),
             store_factory: None,
+            themes: None,
         }
     } else {
         HostCapabilities::none()

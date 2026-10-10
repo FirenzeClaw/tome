@@ -119,6 +119,7 @@ fn execute(options: &GlobalOptions, command: &tome_cli::Command) -> i32 {
     let hosts = HostCapabilities {
         net: Some(root.net()),
         store_factory: Some(root.store_factory()),
+        themes: Some(*root.themes()),
     };
 
     let net = root.net();

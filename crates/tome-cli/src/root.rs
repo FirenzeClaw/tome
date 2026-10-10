@@ -86,8 +86,79 @@ pub struct AppRoot {
     store_factory: Arc<StoreHostFactory>,
     /// 书源存储（SQLite + `sources.json` 投影）
     source_store: SourceStore,
+    /// 主题集（FR-029 的组合根注入：昼/夜两套实例由此处构造并下发）
+    themes: ThemeSet,
     /// 启动期告警（磁盘空间偏低等）。上层负责展示——引擎不产自然语言（FR-044）。
     warnings: Vec<String>,
+}
+
+/// 组合根构造的主题集（FR-029）。
+///
+/// ## 为什么要有这个类型，而不是让调用方写 `DayTheme.theme()`
+///
+/// FR-029 的分工是：`Theme` 的**值类型**在 `tome-core`，昼/夜**实例**由
+/// 组合根构造并注入。若每个绘制点各写一遍 `DayTheme.theme()`，主题的
+/// **来源**就散落在各处——S3 想支持"跟随系统"或"用户自定义主题"时，
+/// 要改的不是一处而是每一处。本类型把"当前有哪些主题、怎么按标识取"
+/// 收在组合根，绘制点只表达"我要夜主题"这件事。
+///
+/// ## 为什么是 `Copy` 且按标识取
+///
+/// 主题是纯值（`Theme: Copy`），存两份实例没有成本；按标识取让调用点的
+/// 输入是**数据**（来自配置 / 命令行 / 用户选择）而不是编译期的类型名——
+/// 那正是"从配置读主题"能成立的前提。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ThemeSet {
+    day: tome_core::model::theme::Theme,
+    night: tome_core::model::theme::Theme,
+}
+
+impl ThemeSet {
+    /// 构造昼/夜两套实例（组合根的唯一构造点）。
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            day: tome_core::model::theme::DayTheme.theme(),
+            night: tome_core::model::theme::NightTheme.theme(),
+        }
+    }
+
+    /// 昼主题。
+    #[must_use]
+    pub const fn day(&self) -> tome_core::model::theme::Theme {
+        self.day
+    }
+
+    /// 夜主题。
+    #[must_use]
+    pub const fn night(&self) -> tome_core::model::theme::Theme {
+        self.night
+    }
+
+    /// 按**稳定标识**取主题（`"day"` / `"night"`）。
+    ///
+    /// ## 为什么未知标识返回 `None` 而不是回落到昼主题
+    ///
+    /// 静默回落会让 `--theme nigth`（拼错）变成"成功渲染了昼主题"——
+    /// 用户看不到自己的错误。返回 `None` 让调用方给出结构化错误
+    /// （CLI 退出码 1，FR-053 的同一条纪律：不伪装成功）。
+    #[must_use]
+    pub fn by_id(&self, id: &str) -> Option<tome_core::model::theme::Theme> {
+        match id {
+            "day" => Some(self.day),
+            "night" => Some(self.night),
+            _ => None,
+        }
+    }
+
+    /// 全部可用主题标识（供帮助文本与校验列举）。
+    pub const AVAILABLE_IDS: [&'static str; 2] = ["day", "night"];
+}
+
+impl Default for ThemeSet {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// `StoreHost` 的构造器（按书源建实例）。
@@ -299,6 +370,7 @@ impl AppRoot {
             db,
             net,
             source_store,
+            themes: ThemeSet::new(),
             warnings,
         })
     }
@@ -348,6 +420,14 @@ impl AppRoot {
     /// 书源存储。
     pub fn sources(&self) -> &SourceStore {
         &self.source_store
+    }
+
+    /// 主题集（FR-029 的组合根注入点）。
+    ///
+    /// 绘制点（`render` 子命令等）经此取主题，而不是自己写
+    /// `DayTheme.theme()`——主题的来源只有组合根一处。
+    pub fn themes(&self) -> &ThemeSet {
+        &self.themes
     }
 
     /// HTTP 日志子集（注入给日志管线，T064）。

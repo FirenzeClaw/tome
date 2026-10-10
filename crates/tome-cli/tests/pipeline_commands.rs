@@ -156,6 +156,7 @@ fn run_cli(args: &[&str], tag: &str) -> (i32, String, String, std::path::PathBuf
     let hosts = HostCapabilities {
         net: Some(host.clone() as Arc<dyn NetHost>),
         store_factory: None,
+        themes: None,
     };
     // `--format` 等全局选项由解析器带出，必须以**解析结果**为准驱动
     // ——手搓一个 `GlobalOptions` 会让"选项到底有没有被认出来"这件事

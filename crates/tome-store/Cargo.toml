@@ -7,7 +7,16 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+libc = "0.2"
 tome-core = { workspace = true }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2.0.21"
+toml = "0.8.23"
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true

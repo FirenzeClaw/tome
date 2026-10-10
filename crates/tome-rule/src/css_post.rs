@@ -808,7 +808,8 @@ impl<'a> RuleEngine<'a> {
 
         let dispatched = dispatch_prefix(rule);
         match dispatched.kind {
-            RuleKind::Css | RuleKind::Default | RuleKind::ExplicitDefault => {
+            // `@css:` 走 CSS 引擎；`Default`/`@@` 走 Default 语法解析器
+            RuleKind::Css => {
                 let body = if dispatched.reversed {
                     format!("-{}", dispatched.body)
                 } else {
@@ -817,6 +818,27 @@ impl<'a> RuleEngine<'a> {
                 match root {
                     Some(root) => evaluate_css_body_in(root, &body),
                     None => evaluate_css_body(self.document, &body),
+                }
+            }
+            // ## Default 与 `@@` 走 Default 语法解析器（PM 补漏裁决）
+            //
+            // 此前两者与 `@css:` 共用 `evaluate_css_body`，于是
+            // `class.odd.0@tag.a.0@text` 这类多段规则被整段交给 CSS
+            // 解析器，必然语法错。现在交给 [`crate::default`]——
+            // 它把每段翻成等价 CSS，但**分段**在各自子树内下钻。
+            //
+            // `@@` 的语义见 `dispatch_prefix` 的文档：它是"Default 规则的
+            // 显式标记"（公开文档：「Default 规则需要以 @@ 开头」），
+            // 故与 Default 同类，走同一个解析器。
+            RuleKind::Default | RuleKind::ExplicitDefault => {
+                let body = if dispatched.reversed {
+                    format!("-{}", dispatched.body)
+                } else {
+                    dispatched.body.clone()
+                };
+                match root {
+                    Some(root) => crate::default::evaluate_in(root, &body),
+                    None => crate::default::evaluate(self.document, &body),
                 }
             }
             RuleKind::JsonPath => self.evaluate_json_path(&dispatched.body),

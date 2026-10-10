@@ -42,6 +42,7 @@ pub mod corpus;
 pub mod css;
 pub mod css_post;
 pub mod css_pseudo;
+pub mod default;
 pub mod dispatch;
 pub mod dom;
 pub mod error;

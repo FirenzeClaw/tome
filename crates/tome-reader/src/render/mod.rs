@@ -16,6 +16,7 @@
 //! | [`pixel_diff`] | pixelmatch-YIQ 双闸门（快照比对算法） | SC-011 | [DONE] T036 |
 //! | [`fonts`] | 内嵌子集注册 + 平台回退链（零网络） | FR-050/051/047 | [DONE] T037 |
 //! | [`animate`] | 翻页动效档位 + reduced-motion 降级 | FR-046 / FR-032 | [DONE] T038 |
+//! | [`image`] | 图文混排（图片行盒 / 不被切开 / 占位） | FR-049 | [DONE] T039 |
 //!
 //! 后续落点（见 `specs/002-typesetting-renderer/plan.md` Project Structure）：
 //! `animate.rs`（T038）· `image.rs`（T039）· `fonts.rs`（T037）。
@@ -25,6 +26,7 @@ pub mod atlas;
 pub mod batch;
 pub mod fonts;
 pub mod glyph_cache;
+pub mod image;
 pub mod offscreen;
 pub mod pipeline;
 pub mod pixel_diff;

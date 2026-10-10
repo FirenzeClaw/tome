@@ -403,26 +403,34 @@ mod tests {
     /// 交错请求两个源：总耗时应由"各自次数"决定，而不是"总次数"。
     #[test]
     fn interleaved_keys_scale_independently() {
-        // 两个源各自 3 次请求，各需 (3-1)×100=200ms；若被错误地串成一列，
-        // 会需要 (6-1)×100=500ms。取 350ms 为界可把两种情况分开。
-        // 区间取值放大的原因：共享 CI runner（尤其 macOS arm64）的睡眠调度
-        // 噪声单次可达数十 ms，40ms 区间的判定 margin 会被噪声吞掉（CI 实测
-        // macOS 上 150ms 阈值 flaky）；放大区间让 margin 远大于噪声。
+        // 以**预约时隙**而非墙钟睡眠断言（2026-10-11 重写）：macOS CI runner 上
+        // 睡眠调度噪声两次击穿阈值（150ms 与放大后的 350ms/500ms）——墙钟法在
+        // 共享 runner 上没有可用的判定区间。本测试的目的量是「两源的时隙序列
+        // 互不牵制」，而时隙是锁内纯算术（`plan` 不睡眠），直接断言它既确定
+        // 又更贴近目的：睡眠只是「等待到时刻」的执行细节，不是被测对象。
         let interval = Duration::from_millis(100);
         let limiter = RateLimiter::new();
         limiter.set_interval("source-a", interval);
         limiter.set_interval("source-b", interval);
 
-        let started = Instant::now();
+        let mut slots_a = Vec::new();
+        let mut slots_b = Vec::new();
         for _ in 0..3 {
-            send_at_slot(&limiter, "source-a");
-            send_at_slot(&limiter, "source-b");
+            slots_a.push(limiter.plan("source-a"));
+            slots_b.push(limiter.plan("source-b"));
         }
-        let elapsed = started.elapsed();
 
-        assert!(
-            elapsed < Duration::from_millis(350),
-            "交错耗时 {elapsed:?} 表明两个源被串成了一列"
+        // 各自三次的时隙严格按间隔排开……
+        for slots in [&slots_a, &slots_b] {
+            assert_eq!(slots[1] - slots[0], interval, "同源相邻时隙应恰为一个间隔");
+            assert_eq!(slots[2] - slots[1], interval, "同源相邻时隙应恰为一个间隔");
+        }
+        // ……且交错 b 不把 a 的时隙往后推（串行错误形态下 a 的第三格会排到
+        // 第 5 个间隔之外）。
+        assert_eq!(
+            slots_a[2] - slots_a[0],
+            2 * interval,
+            "a 的第三格被 b 挤后了：两源被串成了一列"
         );
     }
 

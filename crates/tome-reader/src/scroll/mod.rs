@@ -4,6 +4,7 @@
 //! |---|---|---|
 //! | [`flow`] | 滚动流排布（连续流 → 视口序列） | FR-020 / FR-021 |
 //! | [`map`] | 滚动偏移 ⇄ 字符位置双向映射 | FR-022 / FR-040 |
+//! | [`relayout`] | 重排 + resize 合并 | FR-024 / FR-027 |
 //! | [`switch`] | 阅读形态切换（过渡态不复写进度） | FR-023 |
 //!
 //! ## 依赖方向
@@ -30,4 +31,5 @@
 
 pub mod flow;
 pub mod map;
+pub mod relayout;
 pub mod switch;

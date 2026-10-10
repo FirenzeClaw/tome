@@ -660,3 +660,297 @@ fn layout_pages_are_deterministic() {
         );
     }
 }
+
+// ===========================================================================
+// T025-T027：滚动形态与位置换算经 CLI 的真实产出
+// ===========================================================================
+
+/// **`--mode scroll` 的视口区间并集与正文逐字符相等**（SC-006b 经 CLI）。
+#[test]
+fn scroll_viewports_tile_chapter_exactly() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let path = dir.path().join("scroll.txt");
+    let text = "他的手指在书页边缘停了很久。那一行字写的是「山有木兮木有枝」，\
+                后面跟着一个逗号，逗号之后是半句话。\n\
+                书页翻开的时候，光线正好落在那一行字上，把墨色照得发亮。\n\
+                她说：「真的吗？」我说：「当然，」然后他笑了。";
+    std::fs::write(&path, text).expect("写临时正文");
+
+    let characters: Vec<char> = text.chars().collect();
+    let mut checked = 0usize;
+
+    for (width, height, font_size) in [
+        ("342", "150", "19"),
+        ("342", "400", "19"),
+        ("228", "200", "14"),
+        ("684", "600", "24"),
+    ] {
+        let (code, stdout, stderr) = run_layout(&[
+            "layout",
+            "--text",
+            path.to_str().unwrap(),
+            "--mode",
+            "scroll",
+            "--width",
+            width,
+            "--height",
+            height,
+            "--font-size",
+            font_size,
+        ]);
+        assert_eq!(code, 0, "{width}x{height}/{font_size}px stderr: {stderr}");
+
+        let value: serde_json::Value = serde_json::from_str(&stdout).expect("应输出 JSON");
+        let viewports = value["scroll"]["viewports"]
+            .as_array()
+            .expect("viewports 是数组");
+        assert!(
+            !viewports.is_empty(),
+            "scroll 的 viewports 不得为空（T025 后应产出真实视口）"
+        );
+
+        // 区间并集 == 正文
+        let mut reconstructed = String::new();
+        for viewport in viewports {
+            let start = viewport["char_start"].as_u64().expect("char_start") as usize;
+            let len = viewport["char_len"].as_u64().expect("char_len") as usize;
+            reconstructed.extend(characters[start..start + len].iter());
+        }
+        assert_eq!(
+            reconstructed, text,
+            "{width}x{height}/{font_size}px：视口区间并集与正文不符"
+        );
+
+        // 相邻视口连续无缺口无重叠
+        let mut expected_start = 0usize;
+        for (index, viewport) in viewports.iter().enumerate() {
+            let start = viewport["char_start"].as_u64().unwrap() as usize;
+            assert_eq!(
+                start, expected_start,
+                "第 {index} 屏起点应为上一屏终点（无缺口无重叠）"
+            );
+            expected_start = start + viewport["char_len"].as_u64().unwrap() as usize;
+        }
+        assert_eq!(expected_start, text.chars().count(), "末屏终点应为正文末尾");
+
+        // `top` 单调递增
+        let tops: Vec<f64> = viewports
+            .iter()
+            .map(|viewport| viewport["top"].as_f64().unwrap())
+            .collect();
+        for pair in tops.windows(2) {
+            assert!(pair[1] > pair[0], "top 必须递增");
+        }
+
+        checked += 1;
+    }
+    assert_eq!(checked, 4);
+}
+
+/// **`scroll.content_height` 真实产出**（FR-020 经 CLI）。
+#[test]
+fn scroll_content_height_is_reported() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let text = write_sample(dir.path());
+
+    let (code, stdout, _) = run_layout(&[
+        "layout",
+        "--text",
+        text.to_str().unwrap(),
+        "--mode",
+        "scroll",
+        "--width",
+        "342",
+        "--height",
+        "150",
+    ]);
+    assert_eq!(code, 0);
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    let height = value["scroll"]["content_height"]
+        .as_f64()
+        .expect("应有总高");
+    assert!(height > 0.0, "滚动流总高应为正，实测 {height}");
+
+    // 分页模式下 `content_height` 是 null（本次没算滚动流——不是"未实现"）
+    let (_, paginated_stdout, _) = run_layout(&[
+        "layout",
+        "--text",
+        text.to_str().unwrap(),
+        "--width",
+        "342",
+        "--height",
+        "150",
+    ]);
+    let paginated: serde_json::Value = serde_json::from_str(&paginated_stdout).unwrap();
+    assert!(
+        paginated["scroll"]["content_height"].is_null(),
+        "翻页模式下 content_height 应为 null"
+    );
+    assert_eq!(
+        paginated["scroll"]["viewport_count"], 0,
+        "翻页模式下视口数应为 0"
+    );
+}
+
+/// **`--anchor` 在滚动形态下报视口位置**（FR-021 的同构，经 CLI）。
+#[test]
+fn layout_anchor_reports_viewport_in_scroll_mode() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let text = write_sample(dir.path());
+
+    let (code, stdout, stderr) = run_layout(&[
+        "layout",
+        "--text",
+        text.to_str().unwrap(),
+        "--mode",
+        "scroll",
+        "--width",
+        "342",
+        "--height",
+        "150",
+        "--anchor",
+        "20",
+    ]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    let hit = &value["anchor_hit"];
+    assert_eq!(hit["char_offset"], 20);
+    assert_eq!(hit["visible"], true);
+    assert!(
+        hit["viewport_index"].as_u64().is_some(),
+        "滚动形态下应报视口序号，实测 {hit}"
+    );
+
+    // 该视口的区间确实包含锚点
+    let index = hit["viewport_index"].as_u64().unwrap() as usize;
+    let viewports = value["scroll"]["viewports"].as_array().unwrap();
+    let start = viewports[index]["char_start"].as_u64().unwrap() as usize;
+    let len = viewports[index]["char_len"].as_u64().unwrap() as usize;
+    assert!(
+        (start..start + len).contains(&20),
+        "anchor_hit 的 viewport_index={index} 区间 {start}..{} 不含锚点 20",
+        start + len
+    );
+}
+
+/// **`layout-anchor` 两方向都报锚点值不变**（SC-005b 经 CLI）。
+#[test]
+fn layout_anchor_command_preserves_anchor_both_directions() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let text = write_sample(dir.path());
+    let path = text.to_str().unwrap();
+
+    for (from_mode, to_mode) in [
+        ("paginated", "scroll"),
+        ("scroll", "paginated"),
+        ("paginated", "paginated"),
+    ] {
+        let (code, stdout, stderr) = run_layout(&[
+            "layout-anchor",
+            "--text",
+            path,
+            "--char",
+            "40",
+            "--width",
+            "342",
+            "--height",
+            "150",
+            "--mode",
+            from_mode,
+            "--target-mode",
+            to_mode,
+        ]);
+        assert_eq!(code, 0, "{from_mode}→{to_mode} stderr: {stderr}");
+
+        let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(
+            value["anchor_value_unchanged"], true,
+            "{from_mode}→{to_mode}：锚点值必须不变（SC-005b）"
+        );
+        assert_eq!(value["char_offset"], 40, "锚点值应原样回显");
+        assert_eq!(
+            value["from"]["char_offset"], 40,
+            "来源侧的 char_offset 应等于锚点"
+        );
+        assert_eq!(
+            value["to"]["char_offset"], 40,
+            "目标侧的 char_offset 应等于锚点"
+        );
+        assert_eq!(
+            value["to_visible"], true,
+            "{from_mode}→{to_mode}：目标形态下锚点必须可见"
+        );
+    }
+}
+
+/// `layout-anchor` 缺 `--char` → 用法错误（退出码 2）。
+#[test]
+fn layout_anchor_requires_char_option() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let text = write_sample(dir.path());
+
+    let (code, _, stderr) = run_layout(&[
+        "layout-anchor",
+        "--text",
+        text.to_str().unwrap(),
+        "--width",
+        "342",
+    ]);
+    assert_eq!(code, 2, "缺 --char 应判用法错误，stderr: {stderr}");
+    assert!(
+        stderr.contains("--char"),
+        "错误须指出缺哪个选项，实测：{stderr}"
+    );
+}
+
+/// 越界锚点在 `layout-anchor` 里被钳制且两形态一致。
+#[test]
+fn layout_anchor_clamps_consistently() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let text = write_sample(dir.path());
+
+    let (code, stdout, _) = run_layout(&[
+        "layout-anchor",
+        "--text",
+        text.to_str().unwrap(),
+        "--char",
+        "999999",
+        "--width",
+        "342",
+        "--height",
+        "150",
+    ]);
+    assert_eq!(code, 0);
+    let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+
+    assert_eq!(
+        value["from"]["char_offset"], value["to"]["char_offset"],
+        "两形态的钳制结果必须一致"
+    );
+    assert_eq!(
+        value["anchor_value_unchanged"], true,
+        "钳制后两侧仍应一致（钳制是确定性的）"
+    );
+}
+
+/// **滚动形态的确定性**（FR-048 的形态扩展，经 CLI）。
+#[test]
+fn scroll_output_is_deterministic() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let text = write_sample(dir.path());
+    let path = text.to_str().unwrap();
+
+    for height in ["150", "300"] {
+        let args = [
+            "layout", "--text", path, "--mode", "scroll", "--width", "342", "--height", height,
+        ];
+        let (_, first, _) = run_layout(&args);
+        let (_, second, _) = run_layout(&args);
+        assert_eq!(
+            first, second,
+            "滚动形态 {height}px 下两次运行必须逐字节相同"
+        );
+    }
+}

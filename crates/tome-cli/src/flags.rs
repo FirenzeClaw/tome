@@ -120,6 +120,10 @@ pub struct LayoutArgs {
     pub spread: Option<String>,
     /// `--anchor <char_offset>`
     pub anchor: Option<usize>,
+    /// `--char <offset>`（`layout-anchor` 的必需选项，`contracts/cli.md` §2.2）
+    pub anchor_char: Option<usize>,
+    /// `--target-mode paginated|scroll`（`layout-anchor` 的目标形态，§2.2）
+    pub target_mode: Option<String>,
 }
 
 /// 解析出的命令。
@@ -226,6 +230,11 @@ pub enum Command {
     ///
     /// 排版与分页/滚动流计算。**不渲染**（纯计算，无需图形环境）。
     Layout(LayoutArgs),
+    /// `layout-anchor --text <file> --char <offset>`（`contracts/cli.md` §2.2）
+    ///
+    /// 位置换算与阅读形态切换：输出指定字符在给定几何下**两种形态**各自的
+    /// 定位，并报告锚点值是否不变（验证 SC-004 / SC-005b / FR-022 / FR-023）。
+    LayoutAnchor(LayoutArgs),
     /// `verify --corpus <dir> [--report <file>]`（`contracts/cli.md`）
     ///
     /// 跑合成语料差分：逐条比对引擎输出与期望，输出一致率与逐条 diff。
@@ -332,6 +341,8 @@ pub fn parse(args: &[String]) -> ParseOutcome {
     let mut gutter: Option<f32> = None;
     let mut spread: Option<String> = None;
     let mut anchor_offset: Option<usize> = None;
+    let mut anchor_char: Option<usize> = None;
+    let mut target_mode: Option<String> = None;
     let mut group: Option<String> = None;
     let mut enabled_only = false;
     let mut check_all = false;
@@ -488,6 +499,35 @@ pub fn parse(args: &[String]) -> ParseOutcome {
                     ));
                 }
                 layout_mode = Some(value.to_string());
+                2
+            }
+            "--char" => {
+                // `layout-anchor` 的必需选项（contracts/cli.md §2.2）
+                let value = match args.get(index + 1) {
+                    Some(value) => value,
+                    None => return ParseOutcome::Usage("--char 需要一个数值".to_string()),
+                };
+                match value.parse::<usize>() {
+                    Ok(parsed) => anchor_char = Some(parsed),
+                    Err(_) => {
+                        return ParseOutcome::Usage(format!(
+                            "--char 需要一个非负整数，实际 `{value}`"
+                        ))
+                    }
+                }
+                2
+            }
+            "--target-mode" => {
+                let value = match args.get(index + 1) {
+                    Some(value) => value.as_str(),
+                    None => return ParseOutcome::Usage("--target-mode 需要一个值".to_string()),
+                };
+                if value != "paginated" && value != "scroll" {
+                    return ParseOutcome::Usage(format!(
+                        "--target-mode 只接受 paginated 或 scroll，实际 `{value}`"
+                    ));
+                }
+                target_mode = Some(value.to_string());
                 2
             }
             "--width" => {
@@ -894,7 +934,33 @@ pub fn parse(args: &[String]) -> ParseOutcome {
             gutter,
             spread,
             anchor: anchor_offset,
+            anchor_char,
+            target_mode: target_mode.clone(),
         }),
+        // `layout-anchor`（contracts/cli.md §2.2）
+        "layout-anchor" => {
+            let Some(char_offset) = anchor_char.or(anchor_offset) else {
+                return ParseOutcome::Usage(
+                    "layout-anchor 需要 --char <offset>（要换算的章内字符位置）".to_string(),
+                );
+            };
+            Command::LayoutAnchor(LayoutArgs {
+                chapter,
+                text_file,
+                mode: layout_mode,
+                width,
+                height,
+                font_size,
+                line_height,
+                paragraph_mode,
+                measure_em,
+                gutter,
+                spread,
+                anchor: Some(char_offset),
+                anchor_char: Some(char_offset),
+                target_mode,
+            })
+        }
         "local" => {
             let Some(action) = rest.first().map(String::as_str) else {
                 return ParseOutcome::Usage(
@@ -1002,6 +1068,8 @@ pub fn help_text() -> String {
         "  tome run <source-id> --action <a> [--input <s>]     通用执行（--action search）",
         "  tome layout --text <file> [几何选项]                排版一章（不渲染）",
         "  tome layout --chapter <book>#<n> [几何选项]         同上（书架形式，WIP）",
+        "  tome layout-anchor --text <f> --char <n>           位置换算与形态切换（SC-005b）",
+        "                   [--mode p|scroll] [--target-mode p|scroll] [几何选项]",
         "  tome verify --corpus <dir> [--report <file>]       跑合成语料差分（SC-002a）",
         "  tome verify --real-sources <dir> --golden <dir>     真实书源对照基线（SC-002b）",
         "              [--write-baseline] [--report <file>]",
@@ -1029,7 +1097,9 @@ pub fn help_text() -> String {
         "  --measure-em <n>       版心目标 em（默认 36，上限 42）",
         "  --gutter <px>          双页中缝（默认 64）",
         "  --spread auto|single|double  单双页模式（默认 auto）",
-        "  --anchor <offset>      报告该锚点落在哪一行",
+        "  --anchor <offset>      报告该锚点落在哪一行/哪一屏",
+        "  --char <offset>        layout-anchor 的目标字符位置（§2.2）",
+        "  --target-mode paginated|scroll  layout-anchor 的目标形态（§2.2）",
         "  -h, --help             显示本帮助",
         "",
         "退出码：0 成功 / 1 业务错误 / 2 用法错误 / 3 不支持能力",

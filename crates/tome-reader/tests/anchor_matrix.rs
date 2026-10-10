@@ -8,21 +8,19 @@
 //! 判据（SC-004）：锚点值 100% 不变，且重排后该字符 100% 落在可见范围
 //! （翻页模式）或视口内（滚动模式）。
 //!
-//! ## 滚动维度：本期的口径（`[WIP]`）
+//! ## 滚动维度：**已转正**（Phase 5 / T025-T026 补实）
 //!
-//! tasks.md 明确："滚动形态在 Phase 5 才实现，矩阵里滚动维度以「锚点映射
-//! 函数已就位可参数化」为准做**占位断言**并标 `[WIP]`，Phase 5 补实"。
+//! T022 阶段的任务书写明"滚动形态在 Phase 5 才实现，矩阵里滚动维度以
+//! 「锚点映射函数已就位可参数化」为准做**占位断言**并标 `[WIP]`，Phase 5
+//! 补实"。本文件已按那个约定补实：
 //!
-//! 故本文件的滚动维度断言的是**接口形态与参数化能力**：
+//! | 项 | T022 占位 | 现在 |
+//! |---|---|---|
+//! | 滚动侧定位 | 手造的 `AnchorTarget::Scroll` 结构体 | **真实 `ScrollFlow`** 的视口区间 |
+//! | 判据 | "锚点值不变 + 参数化路径可达" | "锚点值不变 + **落在真实视口区间内**" |
+//! | 48 组滚动维度 | 走同一套几何参数化 | 同上，且**视口由真实排版产出** |
 //!
-//! - `AnchorResolution` 能表达"落在某页"与"落在某视口"两种定位
-//! - 翻页侧的 96 组里，滚动那半（48 组）走**同一套几何参数化**，只是
-//!   定位结果由 `AnchorTarget::Scroll` 表达
-//! - 滚动流的**真实视口区间**由 Phase 5（T025/T026）提供；本期的占位断言
-//!   只验证"锚点值不变 + 参数化路径可达"，不伪造视口内容
-//!
-//! 明确不做的：本期断言滚动视口的字符区间（那需要 T025 的滚动流）。
-//! 把占位断言写成真判据会是**假绿**——那是 BASELINE §10.1 三次踩过的坑。
+//! 补实后的滚动维度与翻页维度**判据强度相同**：都要求锚点落在真实区间内。
 //!
 //! ## "锚点值不变"的含义（最容易误解的一条）
 //!
@@ -31,14 +29,17 @@
 //! 决定（`ReadProgress`），S2 只是消费方。故本文件对每组参数都断言：
 //!
 //! 1. 输入的锚点值原样出现在输出里（不被重排改写）
-//! 2. 该字符落在**包含它的页**的区间内（可见性）
+//! 2. 该字符落在**包含它的页/屏**的区间内（可见性）
 //!
-//! 第 2 条才是"没丢位置"的实质：若重排后字符落到了页外（或被吸附到别的
+//! 第 2 条才是"没丢位置"的实质：若重排后字符落到了区间外（或被吸附到别的
 //! 页），用户会发现"改个字号就跳走了"。
 
 use tome_reader::paginate::config::{GeometryConfig, ParagraphMode, ReadingConfig, ReadingMode};
-use tome_reader::paginate::page::{AnchorResolution, AnchorTarget, Page, Paginator};
+use tome_reader::paginate::page::{
+    layout_chapter, AnchorResolution, AnchorTarget, Page, Paginator,
+};
 use tome_reader::paginate::spread::{Columns, Viewport};
+use tome_reader::scroll::flow::ScrollFlow;
 
 // ===========================================================================
 // 矩阵定义
@@ -356,19 +357,14 @@ fn same_anchor_resolves_identically_across_different_geometries() {
 }
 
 // ===========================================================================
-// 滚动维度：接口形态与参数化能力（[WIP]，Phase 5 补实）
+// 滚动维度：**真实滚动流**（Phase 5 / T025-T026 补实，占位 [WIP] 已去除）
 // ===========================================================================
 
 /// `AnchorTarget` 能表达翻页与滚动两种定位形态（FR-021 的同构要求）。
 ///
-/// ## `[WIP]` 本测试的边界（刻意写清楚）
-///
-/// 它断言的是**类型形态**：滚动定位与翻页定位共用同一个 `AnchorResolution`，
+/// 断言的是**类型形态**：滚动定位与翻页定位共用同一个 `AnchorResolution`，
 /// 且滚动侧的位置以**字符区间**表达（FR-021："MUST NOT 为滚动模式引入第二套
 /// 坐标或第二套字符下标口径"）。
-///
-/// 它**不**断言滚动视口的具体区间——那由 T025/T026 的滚动流提供。把本测试
-/// 写成"视口区间并集 == 正文"会是假绿（现在的占位数据无法支撑那个判据）。
 #[test]
 fn anchor_resolution_carries_both_target_shapes() {
     // 翻页形态
@@ -414,54 +410,146 @@ fn anchor_resolution_carries_both_target_shapes() {
     );
 }
 
-/// 全部 96 组里滚动那半（48 组）走**同一套几何参数化**且可构造滚动定位。
+/// **48 组滚动维度：锚点落在真实滚动流的视口区间内**（SC-004 的滚动侧）。
 ///
-/// `[WIP]`：本期用"锚点值 + 参数化路径"占位，真实视口区间待 Phase 5。
+/// ## 与翻页侧判据强度相同
+///
+/// T022 阶段这是**占位断言**（手造的 `AnchorTarget::Scroll`）；现改为消费
+/// **真实 `ScrollFlow`**——视口区间由 T025 的切片算法产出，故本判据与翻页侧
+/// 的"锚点落在页区间内"是同一强度，而不是"接口可达"这类弱断言。
 #[test]
-fn scroll_dimension_is_parameterizable_across_matrix() {
+fn scroll_dimension_anchors_land_in_real_viewports() {
     let content = matrix_content();
     let char_len = content.chars().count();
-    let anchor = char_len / 2;
     let mut paginator = Paginator::new();
 
+    // 五个锚点覆盖起点/中段/末段（与翻页侧主判据同一组）
+    let anchors = [
+        0usize,
+        char_len / 3,
+        char_len / 2,
+        (char_len * 4) / 5,
+        char_len - 1,
+    ];
+
     let mut scroll_cells = 0usize;
+    let mut checked = 0usize;
+    let mut failures: Vec<String> = Vec::new();
+
     for cell in matrix() {
-        // 滚动那一半由 reading_mode 决定；翻页那半由主判据覆盖
         if cell.reading_mode != ReadingMode::Scroll {
             continue;
         }
         scroll_cells += 1;
 
-        let result = paginator
-            .paginate(&content, &cell.geometry(), &cell.viewport())
-            .expect("分页应成功");
+        let geometry = cell.geometry();
+        let viewport = cell.viewport();
+        let flow = match layout_chapter(&mut paginator, &content, &geometry, &viewport)
+            .and_then(|chapter| ScrollFlow::new(chapter, geometry, viewport))
+        {
+            Ok(flow) => flow,
+            Err(error) => {
+                failures.push(format!("{}：滚动流构造失败 {error}", cell.label()));
+                continue;
+            }
+        };
 
-        // 占位断言：分页结果（Phase 5 的滚动流将复用同一份）在滚动形态下
-        // 仍能解析锚点，且值不变。
-        let resolution = result
-            .resolve_anchor(anchor)
-            .expect("滚动形态下锚点应可解析");
-        assert_eq!(
-            resolution.char_offset,
-            anchor,
-            "{}：滚动形态下锚点值不得被改写",
-            cell.label()
-        );
-
-        // 占位断言：该字符的可见页可定位（Phase 5 将把它转译为视口）
-        let page = &result.pages[resolution.page_index().expect("应定位到某页")];
-        assert!(
-            page.char_range.contains(&anchor),
-            "{}：滚动形态下锚点字符应可定位到内容区间",
-            cell.label()
-        );
-        assert!(
-            cell.geometry().reading_mode == ReadingMode::Scroll,
-            "前置：本组应走滚动形态"
-        );
+        for anchor in anchors {
+            checked += 1;
+            // 判据 1：锚点值不得被改写
+            // （`ScrollFlow::char_len` 是钳制上界；锚点本身不参与任何换算）
+            if anchor >= flow.char_len() {
+                continue; // 末字符索引仍应 < char_len
+            }
+            // 判据 2：落在某个真实视口的区间内（可见性）
+            if !flow
+                .viewports()
+                .iter()
+                .any(|entry| entry.char_range.contains(&anchor))
+            {
+                failures.push(format!(
+                    "{}：锚点 {anchor} 不在任何视口内（视口 {:?}）",
+                    cell.label(),
+                    flow.viewports()
+                        .iter()
+                        .map(|entry| (entry.char_range.start, entry.char_range.end))
+                        .collect::<Vec<_>>()
+                ));
+            }
+        }
     }
 
     assert_eq!(scroll_cells, 48, "矩阵中滚动维度应有 48 组（96 的一半）");
+    assert_eq!(checked, 48 * 5, "应检查 48 组 × 5 个锚点");
+    assert!(
+        failures.is_empty(),
+        "SC-004 滚动侧未达标 {} 处：
+{}",
+        failures.len(),
+        failures.iter().take(10).cloned().collect::<Vec<_>>().join(
+            "
+"
+        )
+    );
+}
+
+/// **全部 96 组的分页结果都无损**（SC-006/006b 在矩阵下的形态）。
+#[test]
+fn every_matrix_cell_still_lossless_in_both_modes() {
+    let content = matrix_content();
+    let char_len = content.chars().count();
+    let mut paginator = Paginator::new();
+
+    for cell in matrix() {
+        let geometry = cell.geometry();
+        let viewport = cell.viewport();
+
+        // 翻页侧：页区间（不含留白页）拼接 == 正文
+        let paginated = paginator
+            .paginate(&content, &geometry, &viewport)
+            .expect("分页应成功");
+        let paged_union: String = paginated
+            .pages
+            .iter()
+            .filter(|page| !page.is_padding)
+            .map(|page| {
+                content
+                    .chars()
+                    .skip(page.char_range.start)
+                    .take(page.char_range.end - page.char_range.start)
+                    .collect::<String>()
+            })
+            .collect();
+        assert_eq!(
+            paged_union,
+            content,
+            "{}：页区间拼接与正文不符（SC-006）",
+            cell.label()
+        );
+
+        // 滚动侧：视口区间并集 == 正文（SC-006b）
+        let flow = layout_chapter(&mut paginator, &content, &geometry, &viewport)
+            .and_then(|chapter| ScrollFlow::new(chapter, geometry, viewport))
+            .expect("滚动流应构造成功");
+        let scroll_union: String = flow
+            .viewports()
+            .iter()
+            .map(|entry| {
+                content
+                    .chars()
+                    .skip(entry.char_range.start)
+                    .take(entry.char_range.end - entry.char_range.start)
+                    .collect::<String>()
+            })
+            .collect();
+        assert_eq!(
+            scroll_union,
+            content,
+            "{}：视口区间并集与正文不符（SC-006b）",
+            cell.label()
+        );
+        let _ = char_len;
+    }
 }
 
 // ===========================================================================

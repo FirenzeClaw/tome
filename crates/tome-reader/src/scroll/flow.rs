@@ -456,17 +456,18 @@ fn slice_into_viewports(
         }
     }
 
-    // 收尾：串接的区间若未覆盖到正文末尾，补一屏（覆盖尾部被丢弃的空白）
-    if cursor < char_len {
-        viewports.push(ScrollViewport {
-            viewport_index: viewports.len(),
-            top_px,
-            height_px,
-            char_range: cursor..char_len,
-            line_range: 0..0,
-        });
-    }
-
+    // ## 不需要"收尾补一屏"（曾经有过，已删）
+    //
+    // 初版在此处加了一个"若 `cursor < char_len` 则补一屏"的兜底。它**不可达**：
+    // 主循环在 `index` 走到 `lines.len()` 时，`end` 取 `None` 分支 = `char_len`，
+    // 故 `cursor` 必然到达 `char_len`。
+    //
+    // 实测五类"尾部被段落切分丢弃"的输入（`"正文\n\n\n"`、`"正文\n   \n"`、
+    // `"   \n正文"`、含全角空行的变体、`"a\n\n\nb\n\n"`）末屏终点都恰好等于
+    // `char_len`（探针实测）。删掉后全套测试逐项不变。
+    //
+    // 这与 T019 的 `fill_page_ranges` 第三步是**同类**清理：兜底分支若不可达，
+    // 它只会让读者以为存在某种需要兜底的情形。
     viewports
 }
 

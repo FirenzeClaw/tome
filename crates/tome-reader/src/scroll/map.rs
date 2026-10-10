@@ -301,6 +301,9 @@ mod tests {
                 x_px: index as f32 * advance,
                 advance_px: advance,
                 squeeze_px: 0.0,
+                font_id: cosmic_text::fontdb::ID::dummy(),
+                glyph_id: 0,
+                font_weight: cosmic_text::fontdb::Weight::NORMAL,
             })
             .collect();
         PageLine {

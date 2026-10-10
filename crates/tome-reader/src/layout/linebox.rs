@@ -47,6 +47,21 @@ pub struct GlyphBox {
     /// 单字形级别的压缩量，与 [`LineBox::squeeze_px`]（行级总量）是
     /// "明细与汇总"的关系——两者必须一致（有测试断言）。
     pub squeeze_px: f32,
+    /// 字形所属字体（渲染层据此取位图）
+    ///
+    /// ## 为什么排版层要带这个
+    ///
+    /// "画哪个字形的哪张位图"只有**整形阶段**知道：同一个字符在不同上下文
+    /// 里可能由不同字体渲染（cosmic-text 的回退链按上下文选择）。渲染层
+    /// 若按字符重查字形，拿到的是**另一个**字形——回退场景下会画错。
+    ///
+    /// 故身份随排版结果一路带下来。这与 FR-003 的"对外一律字符下标"不冲突：
+    /// 字体与字形 ID 不是**位置**，而是绘制所需的属性。
+    pub font_id: cosmic_text::fontdb::ID,
+    /// 字体内部字形索引
+    pub glyph_id: u16,
+    /// 字重（可变字体参与栅格化）
+    pub font_weight: cosmic_text::fontdb::Weight,
 }
 
 /// 硬序第 ④ 步（放弃禁则）的例外记录（FR-008）。
@@ -181,6 +196,9 @@ mod tests {
             x_px: 0.0,
             advance_px: advance,
             squeeze_px: squeeze,
+            font_id: cosmic_text::fontdb::ID::dummy(),
+            glyph_id: 0,
+            font_weight: cosmic_text::fontdb::Weight::NORMAL,
         }
     }
 

@@ -260,6 +260,9 @@ mod tests {
             x_px: 0.0,
             advance_px: advance,
             squeeze_px: 0.0,
+            font_id: cosmic_text::fontdb::ID::dummy(),
+            glyph_id: 0,
+            font_weight: cosmic_text::fontdb::Weight::NORMAL,
         }
     }
 

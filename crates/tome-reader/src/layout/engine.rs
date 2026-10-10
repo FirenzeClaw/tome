@@ -362,6 +362,10 @@ impl LayoutEngine {
                     x_px: glyph.x,
                     advance_px: glyph.w,
                     squeeze_px: 0.0,
+                    // 字形身份随排版结果带下去（渲染层据此取位图，见 GlyphBox 文档）
+                    font_id: glyph.font_id,
+                    glyph_id: glyph.glyph_id,
+                    font_weight: glyph.font_weight,
                 });
             }
 

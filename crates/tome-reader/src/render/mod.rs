@@ -11,12 +11,14 @@
 //! | [`pipeline`] | device/queue + 后端探测（无 surface） | FR-043 / FR-053 | [DONE] T032 |
 //! | [`atlas`] | 字形图集区域分配 + 增长簿记 | research R2-2/R2-4 | [DONE] T033 |
 //! | [`glyph_cache`] | 字形缓存键 + swash 栅格化 + 聚合上传 | FR-043 / FR-047 | [DONE] T033 |
+//! | [`batch`] | 绘制指令序列（顺序固定 + 确定性） | FR-048 / SC-012 | [DONE] T034 |
 //!
 //! 后续落点（见 `specs/002-typesetting-renderer/plan.md` Project Structure）：
-//! `batch.rs`（T034）· `offscreen.rs`（T035）· `animate.rs`（T038）·
-//! `image.rs`（T039）· `fonts.rs`（T037）。
+//! `offscreen.rs`（T035）· `animate.rs`（T038）· `image.rs`（T039）·
+//! `fonts.rs`（T037）。
 
 pub mod atlas;
+pub mod batch;
 pub mod glyph_cache;
 pub mod pipeline;
 

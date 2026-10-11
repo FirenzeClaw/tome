@@ -627,3 +627,163 @@ fn the_stored_path_is_portable() {
 fn path_type_probe(path: &Path) -> bool {
     path.is_absolute()
 }
+
+// ===========================================================================
+// T016 走查抓到的两处缺陷（回归测试）
+// ===========================================================================
+
+/// **缺陷 1**：导入成功后书架条目的进度必须反映真实位置。
+///
+/// ## 走查是怎么抓到它的
+///
+/// 导入一本 TXT、读到第 3 章、`Esc` 回书架——书卡上仍写着 `0%`，而库里
+/// `read_progress` 明明有值（章 1 / 偏移 0）。原因是 `flush_progress` 落盘后
+/// **没有发任何事件**，UI 无从知道"进度变了、该刷新书卡了"。
+///
+/// ## 这条断言守什么
+///
+/// 进度落盘必须伴随一次书架条目刷新（`ShelfEntryChanged`）。判据是
+/// **书卡的百分比与库里的进度一致**——而不是"收到了某个事件"（后者是手段）。
+#[test]
+fn progress_flush_refreshes_the_shelf_card() {
+    use tome_app::app::ViewState;
+
+    let fixture = Fixture::new();
+    let path = fixture.write_book("card.txt", 5);
+    fixture.request(EngineRequest::ShelfImportLocal {
+        path: path.display().to_string(),
+    });
+    let book_id = shelf_of(&fixture.request(EngineRequest::ShelfLoad))
+        .first()
+        .map(|entry| entry.book_id.clone())
+        .expect("书架应有书");
+
+    let mut state = ViewState::new();
+    // **每一个请求产生的事件都要落到状态上**——这是真实外壳的行为（每帧
+    // `drain_events` 后全部 `apply_event`）。只应用"某个请求"的事件会让
+    // 定时器驱动的落盘（进度节流窗口到点）产生的刷新被丢掉，而那正是本测试
+    // 第一版失败的原因：翻页循环耗时十几秒，窗口早就到点、进度早就落盘、
+    // 书卡刷新早就发出去了，只是被循环丢掉了。
+    fn pump(fixture: &Fixture, state: &mut ViewState, request: EngineRequest) {
+        for event in fixture.request(request) {
+            state.apply_event(event);
+        }
+    }
+
+    pump(&fixture, &mut state, EngineRequest::ShelfLoad);
+    let initial = state
+        .shelf_entry(&book_id)
+        .map(|entry| entry.progress_percent)
+        .unwrap_or(-1.0);
+    assert!(initial.abs() < f32::EPSILON, "刚导入时应是 0%");
+
+    // 打开、翻到后面的章（翻足够多次以跨章）
+    pump(
+        &fixture,
+        &mut state,
+        EngineRequest::ReadingOpen {
+            book_id: book_id.clone(),
+        },
+    );
+    pump(
+        &fixture,
+        &mut state,
+        EngineRequest::ReadingViewport {
+            width_px: 800.0,
+            height_px: 1000.0,
+        },
+    );
+    for _ in 0..20 {
+        pump(
+            &fixture,
+            &mut state,
+            EngineRequest::ReadingTurnPage { delta: 1 },
+        );
+    }
+    // 退出前的冲刷（正常退出路径）
+    pump(
+        &fixture,
+        &mut state,
+        EngineRequest::ProgressFlush {
+            book_id: book_id.clone(),
+        },
+    );
+
+    let saved = fixture
+        .repository
+        .get_progress(book_id.parse().expect("书 id 是数字"))
+        .expect("进度可读")
+        .expect("冲刷后应有进度");
+    assert!(
+        saved.chapter_index > 0,
+        "翻 20 页后应已进入后面的章，实测章 {}",
+        saved.chapter_index
+    );
+
+    let card = state
+        .shelf_entry(&book_id)
+        .map(|entry| entry.progress_percent)
+        .unwrap_or(-1.0);
+    let expected = f32::from(saved.chapter_index as i16) / 5.0 * 100.0;
+    assert!(
+        (card - expected).abs() < 1.0,
+        "书卡进度 {card:.1}% 与库里的章进度 {expected:.1}%（第 {} 章 / 共 5 章）不符——         进度落盘后没有刷新书卡（T016 走查抓到的缺陷）",
+        saved.chapter_index
+    );
+}
+
+/// **缺陷 2**：导入成功后 `importing` 标志必须清除。
+///
+/// ## 走查是怎么抓到它的
+///
+/// 导入完成、书卡已经出现在书架上，但导入对话框仍停在「正在导入…」——
+/// 因为它只由 `ImportFailed` 清除，成功路径上没人清。
+#[test]
+fn a_successful_import_clears_the_busy_flag() {
+    use tome_app::app::ViewState;
+
+    let fixture = Fixture::new();
+    let path = fixture.write_book("busy.txt", 2);
+
+    let mut state = ViewState::new();
+    state.begin_import();
+    assert!(state.is_importing(), "置位后应处于导入中");
+
+    for event in fixture.request(EngineRequest::ShelfImportLocal {
+        path: path.display().to_string(),
+    }) {
+        state.apply_event(event);
+    }
+
+    assert!(
+        !state.is_importing(),
+        "导入成功后必须清除导入中标志（否则对话框一直停在「正在导入…」）"
+    );
+}
+
+/// 进度落盘后的书卡刷新**不得**把导入中的标志误置位（两个状态互不干扰）。
+#[test]
+fn a_progress_refresh_does_not_look_like_an_import() {
+    use tome_app::app::ViewState;
+
+    let mut state = ViewState::new();
+    assert!(!state.is_importing());
+
+    state.apply_event(EngineEvent::ShelfEntryChanged {
+        entry: ShelfEntry {
+            book_id: "1".to_owned(),
+            title: "书".to_owned(),
+            author: String::new(),
+            origin_label: "local".to_owned(),
+            cover: None,
+            progress_percent: 40.0,
+            last_read_at: Some(1_760_000_000),
+        },
+    });
+
+    assert!(
+        !state.is_importing(),
+        "非导入来源的条目变化不该把导入标志置位"
+    );
+    assert_eq!(state.shelf_len(), 1);
+}

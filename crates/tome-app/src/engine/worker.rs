@@ -784,6 +784,10 @@ impl AppEngine {
             .filter(|session| session.anchor == anchor)
             .and_then(|session| anchor_text_at(&session.content, anchor.char_offset));
 
+        // 进度事件要带书卡（见下方 `ShelfEntryChanged` 的说明），故先取一份书
+        // 的副本——`flush_progress` 后面还要可变借 `self.progress`。
+        let book_snapshot = self.session.as_ref().map(|session| session.book.clone());
+
         let progress = ReadProgress {
             book_id: id,
             chapter_index: anchor.chapter_index,
@@ -798,7 +802,24 @@ impl AppEngine {
                 if let Some(tracker) = &mut self.progress {
                     tracker.mark_flushed(self.clock.now_ms());
                 }
-                Vec::new()
+                // 进度变了 → 书卡上的进度也要变（FR-001 的"封面卡片：进度"）。
+                //
+                // ## 为什么由引擎发这个事件（而不是让 UI 自己重查书架）
+                //
+                // 落盘的时刻只有引擎知道（节流窗口的状态在它那儿）。UI 若
+                // 自己重查，就得再猜一个"什么时候该查"的节奏——那正是节流
+                // 窗口存在的意义被绕过的形态。落盘成功即发事件，UI 只管收。
+                //
+                // 发不出去（如书已被移除）不算错误：进度已经落盘了，那才是
+                // 本函数的目的。
+                match book_snapshot {
+                    Some(book) => self.shelf_entry_of(&book).map_or_else(
+                        |_| Vec::new(),
+                        |entry| vec![EngineEvent::ShelfEntryChanged { entry }],
+                    ),
+                    // 会话已关（如退出前的冲刷）：进度已落盘，但没有书卡可更新
+                    None => Vec::new(),
+                }
             }
             Err(error) => {
                 // 写失败：保持"脏"（下次重试）但**推后一整个窗口**——否则

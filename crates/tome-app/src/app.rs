@@ -747,6 +747,14 @@ impl ViewState {
             }
             EngineEvent::ShelfEntryChanged { entry } => {
                 self.shelf.upsert(entry);
+                // 导入**成功**的终点。不清的话导入对话框会一直停在
+                // 「正在导入…」上——而导入其实早已完成（T016 走查实测抓到：
+                // 书卡已经出现，对话框却还在转）。
+                //
+                // 这个标志只由导入动作置位（见 `begin_import`），故在此清除
+                // 是安全的：别的来源的 `ShelfEntryChanged`（如进度落盘后的
+                // 书卡刷新）到达时它本来就是 `false`。
+                self.importing = false;
             }
             EngineEvent::ImportFailed { error } => {
                 self.importing = false;

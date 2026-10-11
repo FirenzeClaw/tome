@@ -32,12 +32,16 @@ fn geometry(measure_px: f32) -> Geometry {
 }
 
 /// 排一段带样式的文本，回传（行盒的字符区间, 行数）。
+#[expect(
+    clippy::expect_used,
+    reason = "测试夹具无法就绪时应让所属测试立即失败，错误传播只会加噪音（与 .clippy.toml 的 allow-expect-in-tests 同一意图；该配置不覆盖 #[test] 之外的辅助函数）"
+)]
 fn layout_with_styles(
     text: &str,
     measure_px: f32,
     styles: &[StyleSpan],
 ) -> (Vec<std::ops::Range<usize>>, usize) {
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let model = TextModel::new(text);
     let result = engine.layout_styled_paragraph(&model, 0, &geometry(measure_px), styles);
     (
@@ -175,7 +179,7 @@ fn fr010_heading_line_height_scales_with_reading_font_size() {
 
     let mut heights = Vec::new();
     for reading_size in [14.0f32, 19.0, 24.0, 30.0] {
-        let mut engine = LayoutEngine::new();
+        let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
         let model = TextModel::new(text);
         let base = Geometry {
             measure_px: 400.0,
@@ -216,7 +220,7 @@ fn fr011_heading_and_quote_are_centered() {
         let char_len = text.chars().count();
         let styles = [StyleSpan::new(style, 0..char_len)];
 
-        let mut engine = LayoutEngine::new();
+        let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
         let model = TextModel::new(text);
         let result = engine.layout_styled_paragraph(&model, 0, &geometry(400.0), &styles);
 
@@ -244,7 +248,7 @@ fn fr011_body_is_not_centered() {
     use tome_reader::layout::paragraph_mode::ParagraphMode;
 
     let text = "正文不该居中。";
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let model = TextModel::new(text);
     let result = engine.layout_styled_paragraph(&model, 0, &geometry(400.0), &[]);
 
@@ -277,8 +281,8 @@ fn fr011_body_is_not_centered() {
 fn styled_entry_matches_plain_entry_when_no_styles() {
     let text = "书页翻开的时候，光线正好落在那一行字上，把墨色照得发亮。";
 
-    let mut engine_a = LayoutEngine::new();
-    let mut engine_b = LayoutEngine::new();
+    let mut engine_a = LayoutEngine::new().expect("内嵌字体栈应可装载");
+    let mut engine_b = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let model = TextModel::new(text);
     let geometry = geometry(228.0);
 

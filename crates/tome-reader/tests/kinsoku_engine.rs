@@ -123,6 +123,10 @@ fn independently_count_violations(
 }
 
 /// 排版一段文本，返回 (行盒, 例外)。
+#[expect(
+    clippy::expect_used,
+    reason = "测试夹具无法就绪时应让所属测试立即失败，错误传播只会加噪音（与 .clippy.toml 的 allow-expect-in-tests 同一意图；该配置不覆盖 #[test] 之外的辅助函数）"
+)]
 fn layout(
     text: &str,
     measure_px: f32,
@@ -130,7 +134,7 @@ fn layout(
     Vec<tome_reader::layout::linebox::LineBox>,
     Vec<tome_reader::layout::linebox::RuleExceptionRecord>,
 ) {
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let model = TextModel::new(text);
     let geometry = Geometry {
         measure_px,
@@ -413,7 +417,7 @@ fn no_line_ends_with_opening_punctuation() {
 /// 多段文本：每段的禁则独立成立（段边界不应引入违规）。
 #[test]
 fn multi_paragraph_kinsoku_holds_per_paragraph() {
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let split = paragraph::split(
         "他说：「真的吗？」我说：「当然。」\n《红楼梦》里（据说）有四百多个人物。\n什么？怎么会这样！",
     );

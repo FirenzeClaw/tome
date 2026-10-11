@@ -126,7 +126,7 @@ fn sc003_no_line_exceeds_measure() {
 
     for text in mixed_corpus() {
         for measure_px in [228.0f32, 247.0, 285.0, 323.0, 342.0, 361.0, 399.0, 418.0] {
-            let mut engine = LayoutEngine::new();
+            let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
             let model = TextModel::new(&text);
             let result = engine.layout_paragraph(&model, 0, &geometry(measure_px));
 
@@ -176,7 +176,7 @@ fn sc003_no_line_exceeds_measure() {
 fn fr006_squeeze_preserves_char_attribution() {
     for text in mixed_corpus() {
         for measure_px in [228.0f32, 285.0, 342.0, 399.0] {
-            let mut engine = LayoutEngine::new();
+            let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
             let model = TextModel::new(&text);
             let result = engine.layout_paragraph(&model, 0, &geometry(measure_px));
 
@@ -233,7 +233,7 @@ fn fr006_compression_respects_named_limit() {
 
     for text in mixed_corpus() {
         for measure_px in [228.0f32, 247.0, 285.0, 342.0] {
-            let mut engine = LayoutEngine::new();
+            let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
             let model = TextModel::new(&text);
             let result = engine.layout_paragraph(&model, 0, &geometry(measure_px));
 
@@ -295,7 +295,7 @@ fn us1_scenario_1_line_width_within_one_squeeze_unit() {
 
     for text in &all_texts {
         for measure_px in [342.0f32, 361.0, 380.0, 399.0, 418.0, 437.0] {
-            let mut engine = LayoutEngine::new();
+            let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
             let model = TextModel::new(text);
             let result = engine.layout_paragraph(&model, 0, &geometry(measure_px));
 
@@ -612,7 +612,7 @@ fn squeeze_actually_pulls_lines_back_within_measure() {
 
     let mut verified = 0usize;
     for measure_px in [33.25f32, 28.50] {
-        let mut engine = LayoutEngine::new();
+        let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
         let model = TextModel::new(text);
         let result = engine.layout_paragraph(&model, 0, &geometry(measure_px));
 
@@ -649,7 +649,7 @@ fn overflow_is_legal_when_measure_is_smaller_than_indivisible_unit() {
     let text = "甲乙丙。丁戊己。";
     let measure_px = 23.75f32;
 
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let model = TextModel::new(text);
     let result = engine.layout_paragraph(&model, 0, &geometry(measure_px));
 
@@ -687,7 +687,7 @@ fn fr009_boundary_gap_widens_the_step() {
     let text = "中a";
     let measure_px = 342.0;
 
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let model = TextModel::new(text);
     let result = engine.layout_paragraph(&model, 0, &geometry(measure_px));
 
@@ -772,7 +772,7 @@ fn fr009_overlong_word_degradation_is_available() {
     }
 
     // --- 引擎接线（T015 补齐，此前的"不断言"已改为真断言）---
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let model = TextModel::new(&text);
     let result = engine.layout_paragraph(&model, 0, &geometry(measure_px));
 

@@ -141,6 +141,15 @@ fn workspace_deps(crate_name: &str) -> Vec<String> {
 /// 故此处把边界画在真正该在的地方——**被判定的"引擎"是除组合根以外的
 /// 实现 crate**。组合根自身的约束仍被 `tome_reader_只依赖_core` 与
 /// `实现_crate_呈星型无环` 两条从侧面钉住。
+///
+/// ## 组合根不止一个（S3 起）
+///
+/// S3 的 `tome-app` 是**第二个组合根**：它按 plan.md 的依赖图装配
+/// `tome-reader` 的排版渲染面（阅读视图是它的全部存在理由），
+/// 与 `tome-cli` 同一授权、同一条理由。故它同样不在此表里——
+/// 「哪些 crate 算组合根」由 [`COMPOSITION_ROOTS`] 显式登记，
+/// 并由 `依赖_tome_reader_的_crate_必须登记为组合根` 那条守住：
+/// 新出现的 `→ tome-reader` 依赖**不能**靠"忘记加进本表"蒙混过关。
 const ENGINE_CRATES: &[&str] = &[
     "tome-core",
     "tome-rule",
@@ -150,6 +159,28 @@ const ENGINE_CRATES: &[&str] = &[
     "tome-source",
     "tome-local",
 ];
+
+/// 组合根登记表：**合法**依赖 `tome-reader` 的 crate。
+///
+/// ## 为什么要有这张显式的表
+///
+/// 「引擎不得依赖上层」这条断言（`引擎不依赖阅读器与界面层`）的成立，
+/// 一半靠引擎的自觉，另一半靠**组合根没有被误算进引擎名单**。后者此前
+/// 是隐式的：`ENGINE_CRATES` 里没有 `tome-cli`，于是它不被检查——
+/// 但"没写进去"既可能是**有意的授权**（组合根），也可能是**忘记加**。
+/// 两者在代码上长得一模一样，而后果相反：前者正确，后者是守卫的盲区。
+///
+/// 这张表把它变成可判定的：**凡依赖 `tome-reader` 的 crate，必须在此登记**；
+/// 未登记的会由 `依赖_tome_reader_的_crate_必须登记为组合根` 抓出来，
+/// 而不是悄悄从引擎名单里溜过去。
+///
+/// ## 为什么登记表本身也要被反向检查
+///
+/// 一张可以随意填写而无人核对的表会退化成空转：把某个引擎 crate 写进来，
+/// 它立刻就不再受「不得依赖上层」的约束。故那条测试同时断言：
+/// 表里每一项**真的存在**、**真的依赖 `tome-reader`**、且**不在**
+/// [`ENGINE_CRATES`] 里——三个条件一起，才让"登记"这件事有代价。
+const COMPOSITION_ROOTS: &[&str] = &["tome-cli", "tome-app"];
 
 // ---------------------------------------------------------------------------
 // ① `tome-core` 独立
@@ -345,6 +376,167 @@ fn tome_reader_只依赖_core() {
     assert!(
         extra.is_empty(),
         "tome-reader 只该依赖 tome-core（宪法 IV），实际多出：{extra:?}"
+    );
+}
+
+/// 依赖 `tome-reader` 的 crate **必须**登记为组合根（S3 T002）。
+///
+/// # 这条补的是什么漏洞
+///
+/// `引擎不依赖阅读器与界面层` 的判据是「`ENGINE_CRATES` 里的 crate 不得依赖
+/// 上层」。它默认 `ENGINE_CRATES` 是**完备**的——可这张表是手写的。
+/// 于是一个新 crate 若既依赖 `tome-reader`、又忘了（或刻意不）写进引擎名单，
+/// 就同时躲开了这条断言与星型无环断言，架构在无人察觉中破掉。
+///
+/// 本测试把「依赖 `tome-reader`」与「登记为组合根」绑成充要关系：
+///
+/// - **正向**：凡依赖 `tome-reader` 的 crate，必须在 [`COMPOSITION_ROOTS`] 里
+/// - **反向**：登记表里每一项都必须**真的**依赖 `tome-reader`
+///   （防"填进表里就豁免"的滥用），且不得同时出现在 [`ENGINE_CRATES`] 里
+///   （防一个 crate 两边都算，把约束稀释成空转）
+///
+/// 组合根的**成员资格**因此是显式且有代价的，而不是"没被写进引擎名单"。
+///
+/// # 为什么扫整个 workspace 而不是固定名单
+///
+/// 固定名单会重蹈本测试要防的那个错：新 crate 不在名单里就查不到。
+/// 故从根 `Cargo.toml` 的 `[workspace] members` 取全集——**新成员自动进入
+/// 检查范围**，"忘记登记"于是变成一条会红的测试而不是一个静默的盲区。
+#[test]
+fn 依赖_tome_reader_的_crate_必须登记为组合根() {
+    let mut violations: Vec<String> = Vec::new();
+
+    for crate_name in workspace_members() {
+        let depends_on_reader = workspace_deps(&crate_name)
+            .iter()
+            .any(|dep| dep == "tome-reader");
+        let registered = COMPOSITION_ROOTS.contains(&crate_name.as_str());
+
+        if depends_on_reader && !registered {
+            violations.push(format!(
+                "{crate_name} 依赖 tome-reader 却未登记为组合根——\
+                 若它确是组合根请加入 COMPOSITION_ROOTS，否则这是架构破口"
+            ));
+        }
+        if registered && !depends_on_reader {
+            violations.push(format!(
+                "{crate_name} 登记为组合根却并不依赖 tome-reader——\
+                 登记表不该收录无此项职责的 crate"
+            ));
+        }
+        if registered && ENGINE_CRATES.contains(&crate_name.as_str()) {
+            violations.push(format!(
+                "{crate_name} 同时在 COMPOSITION_ROOTS 与 ENGINE_CRATES 里——\
+                 一个 crate 只能是其中一种，两边都算等于把约束稀释掉"
+            ));
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "组合根登记表与实际依赖不一致（S3 T002）：{violations:?}\n\
+         当前登记：{COMPOSITION_ROOTS:?}"
+    );
+}
+
+/// 读根 `Cargo.toml` 的 `[workspace] members`，返回 crate 名（末段目录名）。
+///
+/// # 为什么从根清单取而不是硬编码
+///
+/// 见 `依赖_tome_reader_的_crate_必须登记为组合根` 的说明：硬编码名单会让
+/// 新成员成为守卫盲区，而那正是该测试要消除的东西。
+///
+/// # 为什么用目录末段而不是 `[package] name`
+///
+/// `members` 里写的是路径（`crates/tome-app`），而本文件其余部分的
+/// [`workspace_deps`] 也按**目录名**拼 `Cargo.toml` 路径。取末段让两者
+/// 用同一套命名，不必再解析每个 crate 的 `[package] name`
+/// （当前 workspace 里两者一致，且有 `workspace_成员解析器有效` 兜底）。
+///
+/// # 为什么不能"进了 `[workspace]` 就开始收"
+///
+/// 该段里 `members` 之前还有 `resolver = "2"`——把它当成成员路径会拼出
+/// `crates/resolver = "2/Cargo.toml` 这种路径（首轮实现实测报 os error 123）。
+/// 故收集必须**由 `members = [` 显式开启**，而不是由段名隐含。
+fn workspace_members() -> Vec<String> {
+    let manifest = repo_root().join("Cargo.toml");
+    let text = std::fs::read_to_string(&manifest)
+        .unwrap_or_else(|error| panic!("应能读 {}：{error}", manifest.display()));
+
+    let mut members = Vec::new();
+    let mut in_workspace = false;
+    let mut collecting = false;
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+
+        if trimmed.starts_with('[') {
+            in_workspace = trimmed == "[workspace]";
+            collecting = false;
+            continue;
+        }
+        if !in_workspace {
+            continue;
+        }
+
+        // `members = [` 开启清单；`]` 收尾。单行形式 `members = ["a", "b"]`
+        // 一并支持（同一行的方括号成对出现时直接就地解析）。
+        if trimmed.starts_with("members") {
+            let (_, rest) = trimmed.split_once('=').unwrap_or(("", ""));
+            if rest.contains('[') && rest.contains(']') {
+                members.extend(quoted_paths(rest));
+                collecting = false;
+            } else {
+                collecting = rest.contains('[');
+            }
+            continue;
+        }
+        if collecting {
+            if trimmed.starts_with(']') {
+                collecting = false;
+                continue;
+            }
+            members.extend(quoted_paths(trimmed));
+        }
+    }
+
+    members.sort();
+    members.dedup();
+    members
+}
+
+/// 从一段文本里取出所有被引号包住的路径的**末段**。
+fn quoted_paths(text: &str) -> Vec<String> {
+    text.split('"')
+        .skip(1)
+        .step_by(2)
+        .filter_map(|quoted| quoted.rsplit('/').next())
+        .map(str::to_string)
+        .collect()
+}
+
+/// workspace 成员解析器有效（否则上一条断言是空转）。
+///
+/// # 为什么这条不能省
+///
+/// 与 `依赖表解析器有效` 同一理由：`workspace_members` 若因格式变化永远返回
+/// 空表，`依赖_tome_reader_的_crate_必须登记为组合根` 会**静默全绿**——
+/// 一个永远绿的守卫比没有守卫更糟。故此处用已知成员做正向断言，
+/// 并断言 `tome-app`（S3 新增成员）在列。
+#[test]
+fn workspace_成员解析器有效() {
+    let members = workspace_members();
+
+    for expected in ["tome-core", "tome-reader", "tome-cli", "tome-app"] {
+        assert!(
+            members.contains(&expected.to_string()),
+            "workspace members 应含 {expected}（实际：{members:?}）"
+        );
+    }
+    assert!(
+        members.len() >= 10,
+        "workspace 至少有 10 个成员（S3 后），实际 {}：{members:?}",
+        members.len()
     );
 }
 

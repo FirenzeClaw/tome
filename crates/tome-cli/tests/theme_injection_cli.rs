@@ -27,8 +27,14 @@ use std::process::Command;
 
 /// 跑一次 CLI，返回 `(退出码, stdout, stderr)`。
 fn run_cli(args: &[&str]) -> (i32, String, String) {
+    // 独立 `--data-dir`：不传时并行的 tome-cli 子进程共享默认可移植
+    // 数据目录（exe 同级 data/），CI 时序下并发打开同一 SQLite 库会报
+    // `error.storage`（与 layout_cli.rs / render_cli.rs 同一约定）。
+    let data_dir = tempfile::tempdir().expect("临时数据目录");
     let binary = env!("CARGO_BIN_EXE_tome-cli");
     let output = Command::new(binary)
+        .arg("--data-dir")
+        .arg(data_dir.path())
         .args(args)
         .output()
         .expect("应能启动 tome-cli");

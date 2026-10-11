@@ -40,9 +40,20 @@ use std::path::Path;
 use std::process::Command;
 
 /// 跑一次 CLI，返回 `(退出码, stdout, stderr)`。
+///
+/// ## 为什么每次调用都带独立 `--data-dir`
+///
+/// 不传时数据目录落到可移植默认（exe 同级 `data/`），套件内**并行**的
+/// 子进程会并发打开同一个 SQLite 库——CI 上时序碰撞时 `Db::open` 报
+/// `error.storage`（windows-gnu / macos 实测）。与其余 CLI 套件
+/// （command_surface 等）同一约定：显式 `--data-dir` 到临时目录，
+/// 本 helper 把它内置为每次调用一个独立目录，进程间零共享。
 fn run_cli(args: &[&str]) -> (i32, String, String) {
     let binary = env!("CARGO_BIN_EXE_tome-cli");
+    let data_dir = tempfile::tempdir().expect("临时数据目录");
     let output = Command::new(binary)
+        .arg("--data-dir")
+        .arg(data_dir.path())
         .args(args)
         .output()
         .expect("应能启动 tome-cli");

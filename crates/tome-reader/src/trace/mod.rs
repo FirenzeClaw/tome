@@ -8,7 +8,7 @@
 //! | 子模块 | 职责 | 需求 | 状态 |
 //! |---|---|---|---|
 //! | [`render`] | 区间 → 可绘制片段 + 样式词表 | FR-037 / FR-033 | [DONE] T042 |
-//! | [`hit`] | 命中测试与反查（互逆）+ 文字选择 | FR-040 / FR-038 | [WIP] T043 |
+//! | [`hit`] | 命中测试与反查（互逆）+ 文字选择 | FR-040 / FR-038 | [DONE] T043 |
 //! | [`dict`] | 词典查词桥（复用 001 §FR-016） | FR-041 | [WIP] T044 |
 //!
 //! ## 一条贯穿本模块的口径
@@ -24,8 +24,10 @@
 //! 故本模块在 `--no-default-features` 的构建里完整存在——只有"变成像素"
 //! 那一步在 `render` 里。这让 SC-011（无图形环境全能力可调用）覆盖到痕迹。
 
+pub mod hit;
 pub mod render;
 
+pub use hit::{hit_test_page, hit_test_scroll, select_range, HitPoint, HitResult, Selection};
 pub use render::{
     covered_chars, render_traces, render_traces_scroll, render_traces_to_lines, resolve_style,
     DecorationKind, SemanticStyle, StyleEffect, StyleLevel, StyleResolution, TraceRange,

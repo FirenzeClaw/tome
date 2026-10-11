@@ -10,6 +10,7 @@ members = [
     "crates/tome-local",
     "crates/tome-reader",
     "crates/tome-cli",
+    "crates/tome-app",
 ]
 
 [workspace.package]
@@ -32,6 +33,11 @@ tome-source = { path = "crates/tome-source" }
 tome-local = { path = "crates/tome-local" }
 tome-reader = { path = "crates/tome-reader", default-features = false }
 tome-cli = { path = "crates/tome-cli" }
+# S3 应用外壳（第二个组合根）。注意它依赖的 `tome-reader` 同样经上面那条
+# `default-features = false` 生效——`render` 面须由 tome-app 自己的
+# `reader-render` feature 显式转发开启（成员使用点写 `default-features`
+# 会被 cargo 忽略，2026-10-11 CI 依赖图断言实测）。
+tome-app = { path = "crates/tome-app" }
 
 [profile.release]
 # 体积纪律（宪法「附加约束 · 体积纪律」）：<20MB 是目标基线，故 release 按体积最优配置。

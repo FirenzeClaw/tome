@@ -1,0 +1,65 @@
+[package]
+name = "tome-app"
+description = "tome 应用外壳：egui/eframe 桌面窗口、书架视图与阅读视图（S3）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+# --- 接缝与 DTO（唯一允许的引擎依赖面，架构铁律）---
+tome-core = { workspace = true }
+
+# --- 组合根：外壳是第二个组合根 ---
+#
+# 与 tome-cli 同一授权：`crates/tome-cli/tests/dependency_graph.rs` 的
+# `ENGINE_CRATES` 排除名单把组合根排除在外（T002 把 tome-app 一并加入），
+# 因为组合根按定义要装配实现 crate 并注入接缝。
+#
+# `render` feature 经 `reader-render` 透传（见文件尾的 `[features]`）：
+# 关掉它时 tome-reader 的渲染面在**编译期**消失，于是外壳的渲染入口
+# 以结构化能力错误回应。关键形态：tome-reader 的 `default-features = false`
+# 声明在**根 Cargo.toml 的 [workspace.dependencies] 表**——写在成员使用点
+# 会被 cargo 忽略（2026-10-11 CI 依赖图断言实测抓出）。
+tome-reader = { workspace = true }
+
+# --- GUI 栈 ---
+#
+# eframe 钉 0.36.2（2026-09-08，当前最新稳定）：其 egui-wgpu 依赖 wgpu "30.0"，
+# 与 tome-reader 实解的 wgpu 30.0.1 semver 相容，cargo 合并为**单份** wgpu 构建
+# ——这是「S2 渲染管线在 egui 的 device 上直绘」（路径 A）的前提。
+# 见 specs/003-app-shell/research-eframe.md Q1。
+#
+# 用 default features（含 wgpu 渲染器 / accesskit / default_fonts / wayland /
+# x11）：wgpu 自 eframe 0.34 起即默认渲染器，走它不需要额外开关；
+# `persistence` **不在** default 里（外壳不落 egui 自有的持久化文件，
+# 书架/进度/设置一律走 tome-store）。
+eframe = "0.36.2"
+# 外壳直接引用 egui 类型（Visuals/Style/ViewportBuilder），不经 eframe 转发路径
+# ——两 crate 版本必须一致，故钉同一版本线。
+egui = "0.36.2"
+# DataTable 等复合组件（书架网格与目录表）
+egui_extras = "0.36.2"
+# 单实例（spec 边缘情况：「第二个实例 MUST 激活已有实例」）。
+# 选它的理由：三平台分支与 Wayland 抢焦降级已封装（research-eframe.md Q3）。
+app-single-instance = "0.1.0"
+# 跟随系统主题的 OS 探测（R7：设计系统无此机制，由外壳探测后映射 Day/Night token）
+dark-light = "3.0.0"
+
+# 消息协议与设置的序列化（data-model.md §1 的值类型）
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 外壳自有错误类型（AGENTS.md：每个 crate 拥有自己的错误类型）
+thiserror = "2.0.21"
+
+[features]
+# 默认带渲染面（与 tome-cli 同形）。
+#
+# headless 形态 `cargo build -p tome-app --no-default-features` 必须**编译通过**
+# 且渲染入口返回 UnsupportedCapability{capability:"offscreenRendering"}
+# ——因为 `cargo test --workspace --no-default-features` 是既有的 workspace 级门。
+default = ["reader-render"]
+reader-render = ["tome-reader/render"]
+
+[lints]
+workspace = true

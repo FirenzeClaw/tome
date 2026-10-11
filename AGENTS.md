@@ -129,10 +129,10 @@ crates/
 - `source list|check|group|enable|disable|groups`、`keyword list|add|remove` —— 书源与关键词管理
 - `verify --corpus <dir> [--report <file>]` —— 合成语料差分（SC-002a，≥95%）
 
-S2 排版渲染子命令（`layout` 选项见 `contracts/cli.md` §2.1，`specs/002-typesetting-renderer/contracts/cli.md`）：
+S2 排版渲染子命令（选项与契约见 `specs/002-typesetting-renderer/contracts/cli.md`）：
 
 - `layout --text <file> [--mode paginated|scroll]` —— 排版单章正文（本阶段入口是 `--text`）
-- `layout --chapter <book>#<n>` —— 书架取章形式（**WIP**，需 S3 接线，当前返回能力错误）
+- `layout --chapter <book>#<n>` —— 书架取章形式（**WIP**，需 S3 书架接线；当前退出码 3）
 - `layout-anchor --char <offset> [--target-mode …]` —— 报告某字符锚点落在哪一行/哪一屏
 - `render --out <png> --page <n>|--viewport <n> [--theme day|night]` —— 渲染一页/一屏到 PNG
 - `verify-layout --corpus <dir> [--report <file>]` —— 排版合成语料差分（无硬门槛，如实报告）
@@ -157,7 +157,7 @@ S2 排版渲染子命令（`layout` 选项见 `contracts/cli.md` §2.1，`specs/
 
 **工具链现状（2026-10-10 P9 复核）**：`cargo 1.99.0` / `rustc 1.99.0`（stable-x86_64-pc-windows-gnu，由 `rust-toolchain.toml` 钉版 channel=stable）。MSRV 声明 `rust-version = "1.98"` 尚未经 1.98 实测。
 
-**测试规模（2026-10-11 S2 Phase 9 实测，含 S2 排版层）**：`cargo test --workspace -j 2` **2850 passed / 0 failed / 16 ignored**（95 个测试二进制合计）。S2 前的基线为 2320 passed——增量即 `tome-reader` 与其 CLI 集成测试。默认形态与 headless（`--no-default-features`）双形态均需绿。
+**测试规模（2026-10-11 S2 Phase 9 实测，含 S2 排版层）**：`cargo test --workspace -j 2` **3110 passed / 0 failed / 17 ignored**（108 个测试二进制合计）；headless 形态 `cargo test --workspace --no-default-features -j 2` **2958 passed / 0 failed / 9 ignored**（差值即 `render` feature 及其测试）。S2 前的基线为 2320 passed——增量即 `tome-reader` 与其 CLI 集成测试。默认形态与 headless 双形态均须绿。
 
 **性能基线**：SC-003/SC-004/SC-005 实测数据见 `specs/001-pc-engine-core/perf-baseline.md`；S2 体积报告见 `specs/002-typesetting-renderer/size-report.md`。
 <!-- /AUTO:BUILD -->

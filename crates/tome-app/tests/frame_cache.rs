@@ -222,3 +222,94 @@ fn the_cached_batch_still_carries_the_glyphs() {
     assert_eq!(first.background().width, 800);
     assert_eq!(first.background().height, 1000);
 }
+
+// ===========================================================================
+// SC-005 的帧时间分布统计（`timing::FrameSampler`）
+// ===========================================================================
+
+use tome_app::timing::{FrameSampler, FRAME_BUDGET_MS};
+
+/// 空采样器的分位数是 `None`（**不是 0.0**——那会让"还没测"与"零耗时"混同）。
+#[test]
+fn an_empty_sampler_reports_nothing() {
+    let sampler = FrameSampler::new(100);
+    assert!(sampler.is_empty());
+    assert_eq!(sampler.percentile(0.5), None);
+    assert_eq!(sampler.max(), None);
+    assert_eq!(sampler.over_budget_ratio(FRAME_BUDGET_MS), 0.0);
+}
+
+/// 分位数取自**排序后**的样本（而不是"某个位置的样本"）。
+#[test]
+fn percentiles_come_from_the_sorted_samples() {
+    let mut sampler = FrameSampler::new(100);
+    for value in 1..=100 {
+        sampler.record(f64::from(value));
+    }
+    assert_eq!(sampler.percentile(0.50), Some(50.0));
+    assert_eq!(sampler.percentile(0.95), Some(95.0));
+    assert_eq!(sampler.percentile(1.0), Some(100.0));
+    assert_eq!(sampler.percentile(0.0), Some(1.0));
+    assert_eq!(sampler.max(), Some(100.0));
+}
+
+/// 掉帧率按"超过一帧预算"的**占比**计（SC-005 的字面口径）。
+///
+/// ## 为什么用分布而不是平均值
+///
+/// 平均值会把"99 帧 8ms + 1 帧 500ms"报成"平均 13ms，看起来还行"，而用户
+/// 感受到的正是那 1 帧的卡顿。SC-005 明写"按帧时间分布计"。
+#[test]
+fn the_dropped_ratio_counts_frames_over_budget() {
+    let mut sampler = FrameSampler::new(1000);
+    for _ in 0..99 {
+        sampler.record(8.0);
+    }
+    sampler.record(500.0);
+
+    let ratio = sampler.over_budget_ratio(FRAME_BUDGET_MS);
+    assert!(
+        (ratio - 0.01).abs() < 1e-9,
+        "100 帧里 1 帧超标应得 1%，实测 {ratio}"
+    );
+    // 平均值会把它藏起来——这正是本判据不用平均值的原因
+    let average: f64 = (99.0 * 8.0 + 500.0) / 100.0;
+    assert!(
+        average < FRAME_BUDGET_MS * 2.0,
+        "平均值 {average:.2}ms 看起来还行，而分布里有一帧 500ms"
+    );
+}
+
+/// 窗口满时丢**最旧的一半**（摊还 O(1)，且分布对窗口长度不敏感）。
+#[test]
+fn the_window_drops_the_oldest_half_when_full() {
+    let mut sampler = FrameSampler::new(10);
+    for value in 1..=10 {
+        sampler.record(f64::from(value));
+    }
+    assert_eq!(sampler.len(), 10);
+
+    // 第 11 帧：窗口满，丢掉最旧的一半（1..=5），再压入 11
+    sampler.record(11.0);
+    assert_eq!(sampler.len(), 6, "丢一半后应是 5 + 1 帧");
+    assert_eq!(
+        sampler.percentile(0.0),
+        Some(6.0),
+        "最旧的样本（1.0）应已被丢掉"
+    );
+    assert_eq!(sampler.max(), Some(11.0));
+}
+
+/// 分布摘要是一行机器可读文本（供走查回执直接引用）。
+#[test]
+fn the_summary_is_one_machine_readable_line() {
+    let mut sampler = FrameSampler::new(100);
+    for value in 1..=60 {
+        sampler.record(f64::from(value));
+    }
+    let line = sampler.summary("shelf_scroll");
+    assert!(line.starts_with("shelf_scroll "), "实测 {line}");
+    for field in ["frames=60", "p50=", "p95=", "p99=", "max=", "dropped="] {
+        assert!(line.contains(field), "摘要缺 {field}，实测 {line}");
+    }
+}

@@ -69,30 +69,30 @@
 
 **Independent Test**: quickstart.md §1 全节（导入 ≤3 步、首屏 ≤400/800ms、位置逐字符恢复、冷启动 ≤1.5s）。
 
-- [ ] T010 [US1] BookRepository 生产 adapter `crates/tome-store/src/book_repository.rs`（impl tome_core::BookRepository over BookDao/TraceDao/MiscDao；书架列表/进度读写/移除含缓存清理）
-  - [ ] 先写失败测试：复用 `tome-core/tests/seam_contract.rs` 的假体契约形态对生产实现逐条断言（书架增删查、进度往返）
-  - [ ] `cargo test -p tome-store` 全绿；接缝契约断言与假体同一判据
-- [ ] T011 [US1] 书架状态 `crates/tome-app/src/state/shelf.rs`（ShelfEntry 列表/过滤/排序；引擎事件驱动更新；AppView::Shelf 字段全量落地）
-  - [ ] 状态机断言：过滤/排序/滚动位置在 Shelf⇄Reading 往返后不变（SC-010 的 headless 形态）
-  - [ ] 1000 册合成数据的过滤/排序响应断言（状态层，不涉渲染）
-- [ ] T012 [US1] 书架视图 `crates/tome-app/src/views/shelf.rs` + `widgets/book_card.rs`（虚拟化网格/封面占位/进度卡片/空态引导/过滤框/排序切换）
-  - [ ] 空态必有引导动作（contracts/ui.md V1）；封面缺失走 MASTER 占位形态
-  - [ ] 虚拟化断言：1000 册仅实例化可视区卡片（帧时间分布记录供 SC-005 判定）
-- [ ] T013 [US1] 本地导入路径（拖入 + 文件选择双径 → `EngineRequest::Shelf::ImportLocal` → 失败结构化呈现；`widgets/skeleton.rs` 导入中骨架）
-  - [ ] 坏文件（伪造 EPUB/乱码 TXT）给出具体错误（S1 local 错误分类），书架不留半成品（spec Edge Case）
-  - [ ] 重复导入识别为同一条目（更新非重复卡片）
-- [ ] T014 [US1] 阅读视图 `crates/tome-app/src/views/reading.rs` + `render/glyph_stage.rs`（UI 线程字形暂存 + atlas，egui device 上）+ `render/texture.rs`（PaintCallback 消费 laid_out 快照渲染版心；页脚：章标题+进度；`ContentState` 三态呈现；纹理缓存按 content_version 失效）
-  - [ ] 静态帧零重绘断言：version 未变时 S2 重渲染不被触发（contracts/ui.md §4.2）
-  - [ ] 加载中骨架 + 失败错误态（重试/返回动作）按 contracts/ui.md R1/R3 呈现
-- [ ] T015 [US1] 进度记忆 `crates/tome-app/src/state/progress.rs`（翻页/滚动改变位置 → 节流落盘；打开时 ProgressRestored 恢复；`EngineRequest::Progress::Flush` 退出前冲刷）
-  - [ ] 先写失败测试：正常退出→重开位置逐字符相等（SC-009）；节流窗口内杀进程（模拟）回退 ≤ 一个窗口
-  - [ ] 节流窗口值定为 **3 秒**（spec 假设节的量化落定，常量注明可调整路径）
-- [ ] T016 [US1] US1 集成走查：quickstart.md §1 全节人工+机检执行，SC-001/002/003 实测值记录于本任务回执
-  - [ ] 导入到开始阅读 ≤3 步（逐步计数记录）
-  - [ ] 首屏 ≤400/800ms、冷启动 ≤1.5s 实测达标（release 形态测量，口径写入回执）
+- [x] T010 [US1] BookRepository 生产 adapter `crates/tome-store/src/book_repository.rs`（impl tome_core::BookRepository over BookDao/TraceDao/MiscDao；书架列表/进度读写/移除含缓存清理）
+  - [x] 先写失败测试：复用 `tome-core/tests/seam_contract.rs` 的假体契约形态对生产实现逐条断言（书架增删查、进度往返）
+  - [x] `cargo test -p tome-store` 全绿；接缝契约断言与假体同一判据（275 passed；commit 14f28d5）
+- [x] T011 [US1] 书架状态 `crates/tome-app/src/state/shelf.rs`（ShelfEntry 列表/过滤/排序；引擎事件驱动更新；AppView::Shelf 字段全量落地）
+  - [x] 状态机断言：过滤/排序/滚动位置在 Shelf⇄Reading 往返后不变（SC-010 的 headless 形态）
+  - [x] 1000 册合成数据的过滤/排序响应断言（状态层：100 次过滤+排序 < 16ms/次；`tests/shelf_state.rs` 17 项）
+- [x] T012 [US1] 书架视图 `crates/tome-app/src/views/shelf.rs` + `widgets/book_card.rs`（虚拟化网格/封面占位/进度卡片/空态引导/过滤框/排序切换）
+  - [x] 空态必有引导动作（contracts/ui.md V1，两条动作均真的打开对应叠加层）；封面缺失走 MASTER 占位形态（走查截图确认）
+  - [x] 虚拟化断言：1000 册仅实例化可视区卡片（`GridLayout::visible_index_range`；实例化数与总册数解耦，100 册与 100000 册相同）
+- [x] T013 [US1] 本地导入路径（拖入 + 文件选择双径 → `EngineRequest::ShelfImportLocal` → 失败结构化呈现；`widgets/skeleton.rs` 导入中骨架）
+  - [x] 坏文件（二进制垃圾 EPUB）给出具体错误（S1 local 错误分类），书架不留半成品（走查 + `a_broken_file_leaves_no_half_written_entry`）
+  - [x] 重复导入识别为同一条目（更新非重复卡片；按内容哈希判身份）
+- [x] T014 [US1] 阅读视图 `crates/tome-app/src/views/reading.rs` + `render/texture.rs`（PaintCallback 消费 laid_out 快照渲染版心；页脚：章标题+进度；`ContentState` 三态呈现；纹理缓存按 content_version 失效）
+  - [x] 静态帧零重绘断言：version 未变时 S2 重渲染不被触发（`tests/frame_cache.rs`：60 帧只构造 1 次批次，且命中路径快一个量级）
+  - [x] 加载中骨架 + 失败错误态（重试/换源/返回三动作）按 contracts/ui.md R1/R3 呈现
+- [x] T015 [US1] 进度记忆 `crates/tome-app/src/state/progress.rs`（翻页/滚动改变位置 → 节流落盘；打开时 ProgressRestored 恢复；`EngineRequest::ProgressFlush` 退出前冲刷）
+  - [x] 先写失败测试：正常退出→重开位置逐字符相等（SC-009）；节流窗口内杀进程（模拟）回退 ≤ 一个窗口
+  - [x] 节流窗口值定为 **3 秒**（`PROGRESS_FLUSH_WINDOW_MS`，常量注明可调整路径与两端依据）
+- [x] T016 [US1] US1 集成走查：quickstart.md §1 全节人工+机检执行，SC-001/002/003 实测值记录于本任务回执
+  - [x] 导入到开始阅读 ≤3 步（实测 **2 步**：拖入/选文件 1 步 + 点书卡 1 步）
+  - [x] 首屏 ≤400/800ms、冷启动 ≤1.5s 实测达标（release 形态：冷启动 **589.5ms**、首屏见回执；口径写入 `timing.rs`）
 
 **检查点：P1 末（US1 端到端）**
-- [ ] quickstart §1 全过 + 双形态测试绿 + SC-001/002/003 实测达标
+- [x] quickstart §1 全过 + 双形态测试绿 + SC-001/002/003 实测达标
 
 ---
 

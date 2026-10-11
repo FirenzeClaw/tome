@@ -92,3 +92,21 @@ STEPS
 echo
 echo "=== 计时原始输出（供回执引用）==="
 cat "$DATA_DIR/timing-cold.txt" 2>/dev/null | grep -E '^\[timing\]' || true
+
+# ---------------------------------------------------------------------------
+# SC-005 帧时间分布（1000 册）
+# ---------------------------------------------------------------------------
+#
+# 口径见 spec §SC-005：「书架 1000 册下滚动与标题过滤保持 60 fps（掉帧率
+# < 1%，按帧时间分布计）」。分布由外壳的 `timing::FrameSampler` 采集
+# （在 `logic()` 起、`ui()` 结，覆盖一帧的完整工作），每 300 帧打一行。
+#
+# 前置：数据目录里已有 1000 册（本脚本不代劳——预置方式是测试夹具的事）。
+echo "--- SC-005 帧时间分布（需数据目录已有 1000 册）---"
+TOME_TIMING=1 timeout 40 "$BIN" >/dev/null 2>"$DATA_DIR/timing-frames.txt" &
+FRAME_PID=$!
+sleep 25
+kill "$FRAME_PID" 2>/dev/null
+wait "$FRAME_PID" 2>/dev/null
+grep -E '^\[timing\] shelf_scroll' "$DATA_DIR/timing-frames.txt" \
+  || echo "（未捕获到帧分布；滚动该窗口 10 秒以上再重跑）"

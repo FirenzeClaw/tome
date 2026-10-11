@@ -106,3 +106,131 @@ impl Span {
         self.started.elapsed().as_secs_f64() * 1000.0
     }
 }
+
+// ---------------------------------------------------------------------------
+// 帧时间分布（SC-005 的口径）
+// ---------------------------------------------------------------------------
+
+/// 帧时间采样器（**滑动窗口**，不在内存里攒无限多的样本）。
+///
+/// ## 为什么需要它（而不是"看着流畅"）
+///
+/// SC-005 说的是"1000 册下滚动与标题过滤保持 60 fps（掉帧率 < 1%，
+/// 按帧时间分布计）"。那个口径要求的是**分布**而不是平均值——平均值会把
+/// "99 帧 8ms + 1 帧 500ms" 报成"平均 13ms，看起来还行"，而用户感受到的
+/// 正是那 1 帧的卡顿。
+///
+/// 故本类型收的是分位数：p50 / p95 / p99 / 最大值 + 超 16.67ms 的帧占比。
+/// 掉帧率的判据是"帧时间 > 一帧预算（16.67ms）"的占比。
+#[derive(Debug)]
+pub struct FrameSampler {
+    /// 最近 N 帧的耗时（毫秒；环形缓冲的简化形态——满了就丢掉最旧的一半）
+    samples: Vec<f64>,
+    /// 窗口容量
+    capacity: usize,
+}
+
+impl FrameSampler {
+    /// 新建采样器（默认窗口 600 帧 ≈ 10 秒的 60fps）。
+    #[must_use]
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            samples: Vec::with_capacity(capacity),
+            capacity: capacity.max(1),
+        }
+    }
+
+    /// 记一帧。
+    ///
+    /// 窗口满时丢掉**最旧的一半**而不是逐个丢弃：逐个丢弃会让 `samples`
+    /// 每次都要搬移全部元素（O(n) 的 memmove 每帧一次）。丢一半是摊还 O(1)
+    /// 的，且分布统计对"窗口里是最近 300 帧还是 600 帧"不敏感。
+    pub fn record(&mut self, frame_ms: f64) {
+        if self.samples.len() >= self.capacity {
+            self.samples.drain(..self.capacity / 2);
+        }
+        self.samples.push(frame_ms);
+    }
+
+    /// 样本数。
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.samples.len()
+    }
+
+    /// 是否还没采到样本。
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.samples.is_empty()
+    }
+
+    /// 分位数（`q` 取 0.0–1.0），用**最近秩**法（nearest rank）。
+    ///
+    /// 空样本返回 `None`——**不返回 0.0**：那会让"还没测"与"零耗时"混为一谈。
+    ///
+    /// ## 为什么是最近秩而不是插值
+    ///
+    /// 插值（如 `(n-1)*q` 后线性内插）会产出**样本里不存在的值**——对帧时间
+    /// 而言那是编造出来的数字（"p50 = 12.37ms" 而实际没有任何一帧是 12.37ms）。
+    /// 最近秩只从真实样本里挑一个，代价是分辨率受样本数限制，而对"掉帧率
+    /// < 1%"这类判据来说，样本真实比分辨率精细重要得多。
+    ///
+    /// 秩的取法：`ceil(q * n) - 1`（`q = 0` 时饱和到 0）。这是该方法的
+    /// 标准定义，故 `p50`（n=100）取第 50 个样本而不是第 51 个。
+    #[must_use]
+    pub fn percentile(&self, q: f64) -> Option<f64> {
+        if self.samples.is_empty() {
+            return None;
+        }
+        let mut sorted = self.samples.clone();
+        sorted.sort_by(f64::total_cmp);
+        let n = sorted.len() as f64;
+        let rank = (q.clamp(0.0, 1.0) * n).ceil() as usize;
+        let index = rank.saturating_sub(1).min(sorted.len() - 1);
+        sorted.get(index).copied()
+    }
+
+    /// 最大值。
+    #[must_use]
+    pub fn max(&self) -> Option<f64> {
+        self.samples.iter().copied().max_by(f64::total_cmp)
+    }
+
+    /// 超过 `budget_ms` 的帧占比（SC-005 的"掉帧率"口径）。
+    #[must_use]
+    pub fn over_budget_ratio(&self, budget_ms: f64) -> f64 {
+        if self.samples.is_empty() {
+            return 0.0;
+        }
+        let over = self
+            .samples
+            .iter()
+            .filter(|sample| **sample > budget_ms)
+            .count();
+        over as f64 / self.samples.len() as f64
+    }
+
+    /// 一行机器可读的分布摘要。
+    #[must_use]
+    pub fn summary(&self, label: &str) -> String {
+        let p50 = self.percentile(0.50).unwrap_or(0.0);
+        let p95 = self.percentile(0.95).unwrap_or(0.0);
+        let p99 = self.percentile(0.99).unwrap_or(0.0);
+        let max = self.max().unwrap_or(0.0);
+        let dropped = self.over_budget_ratio(FRAME_BUDGET_MS) * 100.0;
+        format!(
+            "{label} frames={} p50={p50:.2}ms p95={p95:.2}ms p99={p99:.2}ms max={max:.2}ms dropped={dropped:.2}%",
+            self.len()
+        )
+    }
+}
+
+/// 60fps 的一帧预算（毫秒）。
+pub const FRAME_BUDGET_MS: f64 = 1000.0 / 60.0;
+
+/// 报告一次帧时间分布（未启用探针时什么都不做）。
+pub fn report_frames(sampler: &FrameSampler, label: &str) {
+    if is_enabled() && !sampler.is_empty() {
+        eprintln!("[timing] {}", sampler.summary(label));
+    }
+}

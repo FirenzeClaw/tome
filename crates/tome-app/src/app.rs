@@ -979,6 +979,18 @@ pub struct TomeApp {
     bring_to_front: bool,
     /// 引擎句柄（T010 起接入真实 worker）
     engine: Option<crate::engine::thread::EngineHandle>,
+    /// 帧时间采样器（SC-005 的口径；`TOME_TIMING=1` 时报告分布）
+    ///
+    /// 采样在 `logic()` 里做（那一帧的开始），耗时算到 `ui()` 结束——
+    /// 即"一帧的完整工作"。这是 60fps 判据该看的东西：用户感受到的卡顿
+    /// 由**整帧**决定，不是由某一段决定。
+    ///
+    /// 名字带 `_sampler` 后缀以区别于 `frames`（版心帧缓存）——两者是不同
+    /// 的东西（一个是计时，一个是绘制批次），同名会让阅读代码的人误以为
+    /// 它们相关。
+    frame_sampler: crate::timing::FrameSampler,
+    /// 本帧开始时刻
+    frame_started: std::time::Instant,
     /// 版心帧缓存（T014；`content_version` 未变时复用已构造的绘制批次）
     #[cfg(feature = "reader-render")]
     frames: crate::render::texture::PageFrameCache,
@@ -1005,6 +1017,8 @@ impl TomeApp {
             single_instance: None,
             bring_to_front: false,
             engine: None,
+            frame_sampler: crate::timing::FrameSampler::new(600),
+            frame_started: std::time::Instant::now(),
             #[cfg(feature = "reader-render")]
             frames: crate::render::texture::PageFrameCache::new(),
             #[cfg(feature = "reader-render")]
@@ -1119,6 +1133,10 @@ impl eframe::App for TomeApp {
     /// 放在 `logic()` 的理由是它更早：UI pass 可能因为别的原因跳过（如
     /// 窗口刚被最小化），而事件不该因为"这帧没画"而丢失。
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // 帧计时起点（SC-005）。放在 `logic` 的最开头、在 `ui` 的结尾结算，
+        // 覆盖"这一帧的全部工作"——用户感受到的卡顿由整帧决定。
+        self.frame_started = std::time::Instant::now();
+
         // 单实例：第二实例发来唤醒信号 → 立即把窗口带到前台
         if let Some(handle) = &self.single_instance {
             if handle.check_show() {
@@ -1252,6 +1270,13 @@ impl eframe::App for TomeApp {
         requests.extend(self.state.take_requests());
         for request in requests {
             self.send(request);
+        }
+
+        // 帧计时结算 + 定期报告分布（SC-005）
+        self.frame_sampler
+            .record(self.frame_started.elapsed().as_secs_f64() * 1000.0);
+        if self.frame_sampler.len().is_multiple_of(300) {
+            crate::timing::report_frames(&self.frame_sampler, "shelf_scroll");
         }
     }
 }

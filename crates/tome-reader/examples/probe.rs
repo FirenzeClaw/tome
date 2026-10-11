@@ -42,7 +42,7 @@ fn main() -> std::process::ExitCode {
             match RenderPipeline::new(backend, 64, 64) {
                 Ok(pipeline) => {
                     println!(
-                        "PROBE OK offscreen device ready {}x{}",
+                        "PROBE OK offscreen device ready {:?}x{:?}",
                         pipeline.width(),
                         pipeline.height()
                     );

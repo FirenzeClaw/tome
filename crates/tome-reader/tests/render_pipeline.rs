@@ -75,8 +75,15 @@ fn offscreen_device_initializes_without_surface() {
     let pipeline =
         RenderPipeline::new(backend.clone(), 512, 384).expect("有后端时按给定尺寸建管线应成功");
 
-    assert_eq!(pipeline.width(), 512);
-    assert_eq!(pipeline.height(), 384);
+    // 离屏形态携带固定尺寸（共享 device 形态返回 `None`，见 S3 T004）
+    assert_eq!(pipeline.extent(), Some((512, 384)));
+    assert_eq!(pipeline.width(), Some(512));
+    assert_eq!(pipeline.height(), Some(384));
+    assert_eq!(
+        pipeline.target_format(),
+        tome_reader::render::offscreen::OFFSCREEN_FORMAT,
+        "离屏管线的目标格式即离屏常量（共享 device 形态由调用方给出）"
+    );
     assert_eq!(pipeline.backend(), &backend);
 }
 

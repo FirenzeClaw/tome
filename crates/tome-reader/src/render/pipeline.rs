@@ -29,6 +29,8 @@
 //! 存在的理由即此：外壳只提供"贴在哪儿"的纹理句柄，正文内容由本层绘制。
 
 use crate::error::ReaderError;
+use crate::render::batch::RenderBatch;
+use crate::render::glyph_cache::GlyphCache;
 
 /// 管线层错误。
 ///
@@ -168,12 +170,25 @@ impl std::fmt::Display for GraphicsBackend {
 }
 
 /// 离屏渲染管线（device + queue，无 surface）。
+///
+/// ## 两种构造：自有 device 与共享 device（S3 T004）
+///
+/// | 构造 | device 归属 | 渲染目标 | 尺寸 |
+/// |---|---|---|---|
+/// | [`Self::new`] | 本层自建（`Instance` → adapter → device） | 本层自建纹理 | 建管线时**定死** |
+/// | [`Self::from_shared_device`] | **外部注入**（egui/eframe 的 device） | 由调用方给出 | **每帧可变**（故不携带） |
+///
+/// 前者是 S2 的离屏路径（快照、CLI `render`），后者是 S3 阅读视图走
+/// `egui_wgpu` PaintCallback 的地基——路径 A 的要点正是"**同一个 device**，
+/// 零拷贝直绘"，故它必须能接受一个不是自己建的 device。
 pub struct RenderPipeline {
     device: wgpu::Device,
     queue: wgpu::Queue,
     backend: GraphicsBackend,
-    width: u32,
-    height: u32,
+    /// 目标纹理格式（字形管线的 color target 必须与它一致）。
+    target_format: wgpu::TextureFormat,
+    /// 固定输出尺寸；`None` = 由每帧的渲染目标决定（共享 device 形态）。
+    extent: Option<(u32, u32)>,
 }
 
 impl std::fmt::Debug for RenderPipeline {
@@ -181,8 +196,8 @@ impl std::fmt::Debug for RenderPipeline {
         formatter
             .debug_struct("RenderPipeline")
             .field("backend", &self.backend)
-            .field("width", &self.width)
-            .field("height", &self.height)
+            .field("target_format", &self.target_format)
+            .field("extent", &self.extent)
             .finish_non_exhaustive()
     }
 }
@@ -296,21 +311,160 @@ impl RenderPipeline {
             device,
             queue,
             backend,
-            width,
-            height,
+            target_format: super::offscreen::OFFSCREEN_FORMAT,
+            extent: Some((width, height)),
         })
     }
 
-    /// 输出宽度（px）。
+    /// 在**外部注入**的 device/queue 上建管线（S3 T004，路径 A 的地基）。
+    ///
+    /// ## 为什么不自建 Instance
+    ///
+    /// S3 的阅读视图要把 S2 的绘制直接提交到 **egui 的 render pass** 上
+    /// （`egui_wgpu` PaintCallback，零拷贝）。那要求两边的 wgpu 资源在**同一个
+    /// device** 上——自建 Instance 会得到第二台 device，跨 device 的资源根本
+    /// 不能互通（wgpu 直接以校验错误拒绝）。故本构造只**接受**device，不探测、
+    /// 不创建。
+    ///
+    /// 直接后果：它**没有失败路径**（没有 adapter 可探测），也不需要
+    /// [`Self::probe_backend`] 那套诚实跳过逻辑——"有没有后端"这件事在调用方
+    /// 拿到 device 时就已经有答案了。
+    ///
+    /// ## 为什么没有尺寸参数
+    ///
+    /// 离屏管线的尺寸在建管线时定死（它自建纹理）；这里的渲染目标是调用方的
+    /// 纹理/视口，**每帧可变**（窗口缩放）。故 [`Self::extent`] 为 `None`，
+    /// 尺寸由每次绘制的目标决定——把尺寸塞进来的话，迟早有人拿它去尺寸化纹理。
+    ///
+    /// ## `target_format` 的作用
+    ///
+    /// 字形管线的 color target 必须与目标纹理的格式一致（egui 的 surface 通常
+    /// 是 `Bgra8Unorm`/`Bgra8UnormSrgb`，离屏路径是 `Rgba8Unorm`）。wgpu 会校验
+    /// 这个一致性——不一致时报的是校验错误，不是悄悄画错。
     #[must_use]
-    pub fn width(&self) -> u32 {
-        self.width
+    pub fn from_shared_device(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        target_format: wgpu::TextureFormat,
+    ) -> Self {
+        // 后端信息从 device 自身取——这正是"没有第二次探测"的证据。
+        let info = device.adapter_info();
+        let backend = GraphicsBackend {
+            kind: format!("{:?}", info.backend),
+            adapter_name: info.name,
+            is_software: matches!(info.device_type, wgpu::DeviceType::Cpu),
+        };
+
+        Self {
+            device,
+            queue,
+            backend,
+            target_format,
+            extent: None,
+        }
     }
 
-    /// 输出高度（px）。
+    /// 固定输出尺寸；`None` = 由每帧的渲染目标决定（共享 device 形态）。
     #[must_use]
-    pub fn height(&self) -> u32 {
-        self.height
+    pub fn extent(&self) -> Option<(u32, u32)> {
+        self.extent
+    }
+
+    /// 输出宽度（px）；共享 device 形态返回 `None`。
+    #[must_use]
+    pub fn width(&self) -> Option<u32> {
+        self.extent.map(|(width, _)| width)
+    }
+
+    /// 输出高度（px）；共享 device 形态返回 `None`。
+    #[must_use]
+    pub fn height(&self) -> Option<u32> {
+        self.extent.map(|(_, height)| height)
+    }
+
+    /// 目标纹理格式（字形管线的 color target 与它一致）。
+    #[must_use]
+    pub fn target_format(&self) -> wgpu::TextureFormat {
+        self.target_format
+    }
+
+    /// 把一个批次绘制到**外部**目标纹理视图上（不建纹理、不读回、不建 surface）。
+    ///
+    /// ## 这条入口为什么存在
+    ///
+    /// 离屏路径（[`super::offscreen::OffscreenRenderer::render`]）自建纹理并读回；
+    /// S3 的 PaintCallback 则要画进**别人给的** render pass。两者共用的正是
+    /// "清底 + 画字形"这一段——把它抽成一条入口，两条路径才是**同一份绘制代码**
+    /// （而不是"看起来一样的两份"）。
+    ///
+    /// ## 调用方的前置条件
+    ///
+    /// - `target` 必须是**本管线 device 上**的纹理视图（跨 device 会被 wgpu 拒绝）
+    /// - 其格式必须等于 [`Self::target_format`]（同上，由 wgpu 校验）
+    /// - 其尺寸应等于 `batch.background()` 的宽高（裁剪空间换算以它为画布）
+    ///
+    /// ## 为什么清底用 `LoadOp::Clear` 而不是先画一个矩形
+    ///
+    /// 阅读区底色是一整页（`batch.background()`），用清值表达比多画一个 quad
+    /// 更省且无边缘采样问题。代价是**目标纹理的既有内容会被抹掉**——这在
+    /// 离屏路径与"独立中间纹理"用法下成立；若将来要往 egui 的主 pass 里直绘，
+    /// 底色应交给 egui 画，此处只提交字形（见 S3 T005 的 spike）。
+    pub fn draw_batch_into(
+        &self,
+        target: &wgpu::TextureView,
+        batch: &RenderBatch,
+        cache: &mut GlyphCache,
+    ) -> Result<(), PipelineError> {
+        let background = batch.background();
+        let clear = wgpu::Color {
+            r: f64::from(background.color.red) / 255.0,
+            g: f64::from(background.color.green) / 255.0,
+            b: f64::from(background.color.blue) / 255.0,
+            a: 1.0,
+        };
+
+        // 字形资源先备好（栅格化 + 图集上传 + 管线创建）。
+        // 顺序上放在 render pass **之前**：`prepare` 会 `queue.write_texture`
+        // 上传图集，而 wgpu 保证 `write_texture` 先于其后提交的命令生效。
+        let glyphs = super::glyph_atlas::GlyphRenderer::prepare(
+            &self.device,
+            &self.queue,
+            self.target_format,
+            batch,
+            cache,
+        )?;
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("tome-batch-encoder"),
+            });
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("tome-batch-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(clear),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+
+            if let Some(glyphs) = glyphs {
+                glyphs.draw(&mut pass);
+            }
+        }
+
+        self.queue.submit(Some(encoder.finish()));
+        Ok(())
     }
 
     /// 所用后端。

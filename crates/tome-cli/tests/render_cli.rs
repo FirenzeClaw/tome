@@ -18,7 +18,19 @@
 //!
 //! FR-053 的原文是"MUST NOT 产出空文件或伪造成功"。只断退出码会让
 //! "先写空文件再报错" 的实现通过——那正是伪装的一种形态。
-
+//!
+//! ## 为什么整份文件门控在 `reader-render` 上
+//!
+//! 本文件断言的**全部**行为都以渲染面存在为前提：`fonts` 报告来自
+//! `tome_reader::render::fonts`，`render` 的"出 PNG"与"无后端退 3"都以
+//! 渲染面在编译产物里为前提。headless 构建（`--no-default-features`）下
+//! 这些命令的正确行为是**退出码 3 + 能力标识**——那条由 CI 的 headless job
+//! 直接对二进制断言（见 `.github/workflows/ci.yml` 的 `headless` job），
+//! 不挤在这里靠 `if code == 3 { return }` 混过去。
+//!
+//! 不门控的后果是实测出来的：`cargo test --workspace --no-default-features`
+//! 会跑这些用例并因"渲染面不存在"而失败——那不是缺陷，是**门控漏了**。
+#![cfg(feature = "reader-render")]
 #![expect(
     clippy::expect_used,
     reason = "测试辅助函数无法就绪时应让所属测试立即失败，错误传播只会加噪音（与 layout_cli.rs 同一约定）"

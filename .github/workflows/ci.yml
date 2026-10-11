@@ -440,12 +440,24 @@ jobs:
           cargo test -p tome-reader --test snapshot -- --nocapture 2>&1 | tee snapshot.log
           # 关键判据：本次**至少有一条快照真的比对了**。全跳过说明后端没用上，
           # 而"全跳过"在退出码上表现为成功——必须显式拦。
-          if grep -q 'SKIPPED' snapshot.log; then
-            echo "--- 检测到 SKIPPED 行 ---"
-            grep 'SKIPPED' snapshot.log || true
-            echo "::error::快照测试出现 SKIPPED——后端未生效（快照未实际比对，FR-053 的诚实跳过不得在 CI 上出现）"
+          #
+          # 例外：`no_backend_reports_skipped_not_passed` 是**刻意的负例**，它用
+          # `Backends::empty()` 主动造出"无后端"以验证 SKIPPED 的报告形态。
+          # 故只统计**该用例之外**的 SKIPPED 行。
+          skipped=$(grep -c 'SKIPPED' snapshot.log || true)
+          # 从日志里剔除那条负例的输出（它的 SKIPPED 由设计产生）
+          incidental=$(grep 'SKIPPED' snapshot.log | grep -vc 'noop not requested' || true)
+          echo "SKIPPED 行总数：$skipped；其中非负例：$incidental"
+          if [ "$incidental" -gt 0 ]; then
+            grep 'SKIPPED' snapshot.log | grep -v 'noop not requested' || true
+            echo "::error::快照出现非负例的 SKIPPED——后端未生效（快照未实际比对，FR-053 的诚实跳过不得在 CI 上出现）"
             exit 1
           fi
+          # 正面证据：必须看到真实比对的结果（通过条数 > 0）
+          grep -qE 'test result: ok\. [1-9]' snapshot.log || {
+            echo "::error::快照测试一条都没跑（或全部跳过）"
+            exit 1
+          }
 
       # --- 三平台一致性指纹（SC-015）--------------------------------------
       - name: 三平台分页/滚动一致性（SC-015）

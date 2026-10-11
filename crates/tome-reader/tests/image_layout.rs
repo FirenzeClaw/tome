@@ -24,6 +24,11 @@
 //! | 不被页边界切开 | `pack` 阶段把图片行盒当作**不可分割单位** | 图盒完整落在某一页内 |
 //! | 不可用占位不中断正文 | 不可用时不产出图盒，改产**占位块**并继续排正文 | 正文区间仍完整（SC-006） |
 
+// 本文件依赖渲染面（`tome_reader::render::image`），故必须与 `snapshot.rs` /
+// `render_pipeline.rs` 同样门控——否则 `cargo test --workspace
+// --no-default-features`（headless CI job）会因找不到 `render` 模块而编译失败。
+#![cfg(feature = "render")]
+
 use tome_core::seam::ImageRef;
 use tome_reader::paginate::config::ReadingConfig;
 use tome_reader::paginate::page::{layout_chapter, Paginator};

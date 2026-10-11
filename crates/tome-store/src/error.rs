@@ -169,6 +169,23 @@ impl StoreError {
             Self::Config { .. } => ErrorKind::Configuration,
         }
     }
+
+    /// 同 [`Self::to_error_kind`]，但**保留诊断细节**。
+    ///
+    /// # 为什么需要它（而不是让调用方丢细节）
+    ///
+    /// `to_error_kind` 按 FR-044 只给分类，那对"按类分支"的调用方是对的。
+    /// 但**装配期**的失败要直接说给用户听（FR-043：明确报告 + 指引），
+    /// 丢细节会让 stderr 只剩一行裸 `error.storage`——用户无从判断是权限、
+    /// 磁盘满还是路径不存在。本方法的 `Display` 产出
+    /// `error.storage: <本 crate 的详细诊断>`，标识前缀不变（按标识检索不受影响），
+    /// 细节可用。
+    ///
+    /// 分类与细节的分离仍成立：`kind()` 给分类，`detail()` 给诊断，
+    /// 只是这一次两者一起往上传。
+    pub fn to_classified(&self) -> tome_core::error::ClassifiedError {
+        self.to_error_kind().with_detail(self.to_string())
+    }
 }
 
 /// 把 [`rusqlite::Error`] 转成 [`StoreError`]，并在**转换点**判别磁盘满。

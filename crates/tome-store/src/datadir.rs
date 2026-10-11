@@ -438,19 +438,77 @@ fn probe(dir: &Path) -> Result<(), StoreError> {
     ));
     // 先删一次：上一次异常退出可能留下探测文件（用户看到会疑惑）。
     // 容忍 not-found——那说明本来就没有，不是错误。
-    match std::fs::remove_file(&marker) {
+    //
+    // 这一步也走重试：残留文件正被杀软扫描时，删除同样会被拒（共享冲突）。
+    match retry_io(|| std::fs::remove_file(&marker)) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(from_io(&marker, error)),
     }
 
-    std::fs::write(&marker, b"probe").map_err(|error| from_io(&marker, error))?;
-    std::fs::remove_file(&marker).map_err(|error| from_io(&marker, error))?;
+    retry_io(|| std::fs::write(&marker, b"probe")).map_err(|error| from_io(&marker, error))?;
+    retry_io(|| std::fs::remove_file(&marker)).map_err(|error| from_io(&marker, error))?;
 
     // 目录项清点：目录存在且可写，但**读**不了（如只给了写权限）时，
     // 后续的目录扫描会失败。这里一并挡住。
-    std::fs::read_dir(dir).map_err(|error| from_io(dir, error))?;
+    retry_io(|| std::fs::read_dir(dir).map(|_| ())).map_err(|error| from_io(dir, error))?;
     Ok(())
+}
+
+/// 写探测的最大尝试次数（首次 + [`PROBE_RETRY_COUNT`] 次重试）。
+const PROBE_ATTEMPTS: u32 = 3;
+
+/// 两次尝试之间的间隔。
+///
+/// # 为什么是 50ms（而不是 0 或更久）
+///
+/// 本重试针对的是**杀毒软件/索引器对刚创建的文件的瞬时占用**——那是
+/// Windows 上的已知平台行为：文件刚 `write` 出来，AV 的实时扫描会短暂
+/// 持有它，此时 `remove_file` / `read_dir` 会以一个**共享冲突**类错误失败。
+/// 那个窗口通常是毫秒级。
+///
+/// - 取 0（紧循环重试）：AV 还没放手，三次会一起失败——重试等于没做。
+/// - 取几百毫秒：对"目录真的不可写"（只读挂载、权限不足）这种**确定性**
+///   失败，用户要多等同样久才看到错误，白白拖慢启动。
+///
+/// 50ms × 2 次 = 最多多等 100ms，既越过瞬时窗口，又不让确定性失败明显变慢。
+const PROBE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// 对一次 IO 操作做有限重试，返回最后一次的错误（若有）。
+///
+/// # 为什么这是产品级加固，不是测试化妆
+///
+/// 真实用户机器上同样跑着杀软（Defender / 360 / 火绒）与索引器，它们对
+/// **新建文件**的瞬时占用不受本程序控制。不加重试时，用户会随机看到
+/// "启动报 error.storage" ——而数据目录其实完全正常。这类失败**不可从
+/// 错误信息自证**（看起来与真的不可写一模一样），故必须在源头吸收。
+///
+/// # 为什么重试所有错误、不做 kinds 白名单
+///
+/// 瞬时占用在不同平台/文件系统上映射到不同的 `ErrorKind`（Windows 是
+/// `PermissionDenied`，某些网络卷会报别的）。按 kind 白名单会让"该重试的
+/// 没重试"，而放宽的代价仅为：对**确定性**失败多试 2 次（共 +100ms）。
+/// 后者换取的确定性收益更大——故不做白名单。
+///
+/// # 为什么仍要有限
+///
+/// 目录真不可用（只读挂载）时无限重试等于挂死。耗尽 `PROBE_ATTEMPTS` 次后
+/// 如实把最后一次的错误交出去，由调用方判为 `Unusable`（FR-043 的明确报告）。
+///
+/// 取 `FnMut` 而非 `Fn`：调用方可能需要在闭包里记账（如统计尝试次数），
+/// 而"能改自己的状态"正是 `FnMut` 相对 `Fn` 多出来的能力。
+fn retry_io<T>(mut operation: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    let mut attempt = 1;
+    loop {
+        match operation() {
+            Ok(value) => return Ok(value),
+            Err(error) if attempt >= PROBE_ATTEMPTS => return Err(error),
+            Err(_) => {
+                std::thread::sleep(PROBE_RETRY_DELAY);
+                attempt += 1;
+            }
+        }
+    }
 }
 
 /// 取路径所在卷的可用空间（字节）。
@@ -754,5 +812,70 @@ mod tests {
             Path::new("/definitely/not/a/mount/point")
         };
         assert_eq!(free_bytes(bogus), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // 写探测的重试（T056 C2：抗杀软/索引器对新建文件的瞬时占用）
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn 重试吸收瞬时失败() {
+        // 前两次失败、第三次成功——模拟 AV 短暂持有文件后放手。
+        // 这是真实用户机器上的形态：数据目录完全正常，只是扫描窗口内 IO 被拒。
+        let mut attempts = 0;
+        let result: std::io::Result<&str> = retry_io(|| {
+            attempts += 1;
+            if attempts < PROBE_ATTEMPTS {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "模拟杀软瞬时占用",
+                ))
+            } else {
+                Ok("成功")
+            }
+        });
+        assert_eq!(result.expect("第三次应成功"), "成功");
+        assert_eq!(attempts, PROBE_ATTEMPTS, "应在最后一次尝试成功");
+    }
+
+    #[test]
+    fn 重试耗尽后如实报错() {
+        // 目录**真的**不可写（只读挂载、权限不足）时，重试必须有终点——
+        // 无限重试等于挂死启动。耗尽后交回最后一次的错误（FR-043 的明确报告）。
+        let mut attempts = 0;
+        let result: std::io::Result<()> = retry_io(|| {
+            attempts += 1;
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "确定性失败",
+            ))
+        });
+        let error = result.expect_err("耗尽后应报错");
+        assert_eq!(attempts, PROBE_ATTEMPTS, "不该超过最大尝试次数");
+        assert_eq!(
+            error.kind(),
+            std::io::ErrorKind::PermissionDenied,
+            "应原样交回最后一次的错误（不吞、不换类型）"
+        );
+    }
+
+    #[test]
+    fn 重试不打断首次成功() {
+        // 绝大多数情况下第一次就成功——重试不该为此付出任何等待代价。
+        let mut attempts = 0;
+        let result = retry_io(|| {
+            attempts += 1;
+            Ok(42)
+        });
+        assert_eq!(result.expect("应成功"), 42);
+        assert_eq!(attempts, 1, "首次成功不该再试");
+    }
+
+    #[test]
+    fn 写探测在正常目录上成功() {
+        // 端到端：重试包住三个 IO 点后，正常目录照常通过（没有把探测本身弄坏）。
+        let dir = temp_dir("probe-ok");
+        assert!(probe(&dir).is_ok(), "正常目录应探测通过");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

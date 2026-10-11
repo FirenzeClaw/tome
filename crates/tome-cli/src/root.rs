@@ -49,6 +49,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use tome_core::error::ClassifiedError;
 use tome_core::{ErrorKind, NetHost, StoreHost};
 use tome_store::config::{Config, HttpLogSettings, NetworkSettings, StorageSettings};
 use tome_store::{DataDir, Db, SourceStore};
@@ -257,10 +258,20 @@ impl AppRoot {
     /// `--data-dir` 是用户在**这一次调用**里明确说的，而配置里的是长期设置。
     /// 反过来会让"临时指个别处的库跑一下"变成不可能——它会去配置里指定的
     /// 位置建库。
+    /// ## 返回 `ClassifiedError` 而非 `ErrorKind`
+    ///
+    /// 装配期的失败几乎全都要给用户**指引**（数据目录为什么不可用、该改哪里
+    /// ——FR-043）。`ErrorKind` 是无载荷的**分类**，装不下那些文字；此前在
+    /// 各个失败点 `.kind().clone()` 把 `with_detail` 刚写进去的细节丢掉，
+    /// 用户只看到一行裸 `error.storage`，无从判断原因。
+    ///
+    /// `ClassifiedError` 同时带分类（`kind()`，退出码据此映射）与细节
+    /// （`Display` 输出 `error.storage: <原因>；<指引>`）。`message_id()`
+    /// 仍是 `error.storage` 前缀，故既有契约断言语义不变。
     pub fn assemble(
         options: &GlobalOptions,
         config_override: Option<&Path>,
-    ) -> Result<Self, ErrorKind> {
+    ) -> Result<Self, ClassifiedError> {
         Self::assemble_with(options, config_override, |executor| {
             Ok(Arc::new(executor) as Arc<dyn NetHost>)
         })
@@ -274,13 +285,15 @@ impl AppRoot {
     /// 是装配的一部分。用闭包而不是给 `assemble` 加一个 `Arc<dyn NetHost>`
     /// 参数：后者会让"真实网络执行器"的构造逻辑跑到调用方去，而那是
     /// 组合根的职责（限速、代理、重放模式都在那里配）。
+    ///
+    /// 错误类型见 [`Self::assemble`] 的说明。
     pub fn assemble_with<F>(
         options: &GlobalOptions,
         config_override: Option<&Path>,
         customize_executor: F,
-    ) -> Result<Self, ErrorKind>
+    ) -> Result<Self, ClassifiedError>
     where
-        F: FnOnce(tome_net::RequestExecutor) -> Result<Arc<dyn NetHost>, ErrorKind>,
+        F: FnOnce(tome_net::RequestExecutor) -> Result<Arc<dyn NetHost>, ClassifiedError>,
     {
         // ① 数据目录：命令行 > 自动判定（可移植优先）
         let mut resolved = DataDir::resolve_for_current_exe(options.data_dir.as_deref());
@@ -296,30 +309,26 @@ impl AppRoot {
 
         let data_dir = match &resolved {
             tome_store::datadir::Resolved::Usable { .. } => DataDir::from_resolved(&resolved)
-                .ok_or_else(|| {
-                    ErrorKind::Storage
-                        .with_detail("数据目录解析结果内部不一致")
-                        .kind()
-                        .clone()
-                })?,
+                .ok_or_else(|| ErrorKind::Storage.with_detail("数据目录解析结果内部不一致"))?,
             tome_store::datadir::Resolved::Unusable {
                 reason, guidance, ..
             } => {
-                // FR-043：明确报告 + 给出指引（而不是静默失败或 panic）
-                return Err(ErrorKind::Storage
-                    .with_detail(format!("{reason}；{guidance}"))
-                    .kind()
-                    .clone());
+                // FR-043：明确报告 + 给出指引（而不是静默失败或 panic）。
+                //
+                // 细节（原因 + 指引）随 `ClassifiedError` 一路带到 stderr——
+                // 此前这里 `.kind().clone()` 把它丢掉，用户只看到裸
+                // `error.storage`，无法判断是权限、只读挂载还是别的。
+                return Err(ErrorKind::Storage.with_detail(format!("{reason}；{guidance}")));
             }
         };
 
-        data_dir.prepare().map_err(|error| error.to_error_kind())?;
+        data_dir.prepare().map_err(|error| error.to_classified())?;
 
         // ② 配置：命令行 `--config` > 数据目录下的 config.toml
         let config_path = config_override
             .map(Path::to_path_buf)
             .unwrap_or_else(|| data_dir.config_path());
-        let config = Config::load(&config_path).map_err(|error| error.to_error_kind())?;
+        let config = Config::load(&config_path).map_err(|error| error.to_classified())?;
 
         // 收集启动期告警（上层展示；引擎不产自然语言，FR-044）
         let mut warnings = Vec::new();
@@ -328,7 +337,7 @@ impl AppRoot {
         }
 
         // ③ 建库
-        let db = Db::open(&data_dir.database_path()).map_err(|error| error.to_error_kind())?;
+        let db = Db::open(&data_dir.database_path()).map_err(|error| error.to_classified())?;
 
         // ④ 网络：按配置的类型化子集构造执行器
         let network_settings = config.network();
@@ -470,7 +479,7 @@ impl AppRoot {
 fn build_executor_from(
     options: &GlobalOptions,
     settings: &NetworkSettings,
-) -> Result<tome_net::RequestExecutor, ErrorKind> {
+) -> Result<tome_net::RequestExecutor, ClassifiedError> {
     let mut builder = tome_net::RequestExecutor::builder();
 
     if let Some(interval_ms) = settings.request_interval_ms {
@@ -483,7 +492,9 @@ fn build_executor_from(
         builder = builder.replay(root, mode);
     }
 
-    builder.build().map_err(|error| error.to_error_kind())
+    builder
+        .build()
+        .map_err(|error| error.to_error_kind().with_detail(error.to_string()))
 }
 
 /// 从配置推导脱敏策略（T064）。
@@ -507,11 +518,13 @@ fn redaction_policy_from(config: &Config) -> tome_net::RedactionPolicy {
 /// 数据目录决定配置文件在哪，而配置文件里又可能有数据目录——循环。
 /// 解开的方式是：这里只读**显式 `--config` 指定的那个文件**（如果给了），
 /// 且只取一个字段。不给 `--config` 时返回 `None`（不做隐式搜索）。
-fn peek_config_data_dir(config_override: Option<&Path>) -> Result<Option<PathBuf>, ErrorKind> {
+fn peek_config_data_dir(
+    config_override: Option<&Path>,
+) -> Result<Option<PathBuf>, ClassifiedError> {
     let Some(path) = config_override else {
         return Ok(None);
     };
-    let config = Config::load(path).map_err(|error| error.to_error_kind())?;
+    let config = Config::load(path).map_err(|error| error.to_classified())?;
     Ok(config.storage().data_dir)
 }
 
@@ -761,7 +774,7 @@ mod tests {
             Ok(Arc::new(FakeHost::new(vec![])) as Arc<dyn NetHost>)
         })
         .expect_err("非法配置应报错");
-        assert_eq!(error, ErrorKind::Configuration);
+        assert_eq!(error.kind(), &ErrorKind::Configuration);
     }
 
     #[test]

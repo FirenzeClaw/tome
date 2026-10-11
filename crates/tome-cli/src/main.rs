@@ -99,11 +99,16 @@ fn execute(options: &GlobalOptions, command: &tome_cli::Command) -> i32 {
     // T093 的契约对照发现并修掉）
     let root = match tome_cli::root::AppRoot::assemble(options, options.config.as_deref()) {
         Ok(root) => root,
-        Err(kind) => {
-            // FR-043：数据目录不可用等要在启动期明确报告（`AppRoot::assemble`
-            // 的 `ErrorKind` 已带诊断细节）而不是静默失败
-            eprintln!("{kind}");
-            return tome_cli::exit_code_for(&kind);
+        Err(error) => {
+            // FR-043：数据目录不可用等要在启动期明确报告（而不是静默失败）。
+            //
+            // `ClassifiedError` 的 Display 是 `error.storage: <原因>；<指引>`
+            // ——标识在前便于日志检索（`message_id` 前缀不变，契约断言不受
+            // 影响），细节在后便于用户判断该改什么。此前这里只收到一个
+            // 无载荷的 `ErrorKind`（细节在装配点被丢掉），用户只看到一行
+            // 裸 `error.storage`，无从定位。
+            eprintln!("{error}");
+            return tome_cli::exit_code_for(error.kind());
         }
     };
 

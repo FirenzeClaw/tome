@@ -530,6 +530,15 @@ jobs:
         run: cargo test --workspace --no-default-features
 
       # 退出码 3 的断言：render / fonts 在无渲染面时必须诚实报能力错误
+      #
+      # ## 为什么断言的参数形态不止一种（T056）
+      #
+      # 只跑裸命令（`tome-cli render`）会漏掉**参数校验顺序**这一维：`render`
+      # 曾因缺 `--out` 在子命令分支先报用法错误而退 2，而 `fonts`（无必需参数）
+      # 直接退 3——两条对称的命令因"恰好有没有必需参数"分岔。故本步骤按
+      # **参数合法性矩阵**断言：合法、缺必需项、非法取值、未知选项四种形态
+      # 都必须退 3（PM 裁决：能力缺失压过用法错误——命令不存在则用法校验
+      # 无从谈起）。三种形态分别命中三个不同的失败点，缺一则覆盖不全。
       - name: 断言 render/fonts 在 feature-off 时返回退出码 3
         shell: bash
         run: |
@@ -541,21 +550,45 @@ jobs:
           fi
           echo "binary: $binary"
 
-          for sub in render fonts; do
+          # 参数形态矩阵。每项恰好测一个"若无短路会先报用法错误"的失败点。
+          shapes=(
+            "render"
+            "render --out x.png"
+            "render --theme sepia --page 0"
+            "render --bogus-flag"
+            "fonts"
+            "fonts --bogus-flag"
+          )
+
+          for shape in "${shapes[@]}"; do
+            # shellcheck disable=SC2086  # 形态串本就需要分词
             set +e
-            "$binary" "$sub" 2>&1 | tee "headless-$sub.log"
+            "$binary" $shape 2>&1 | tee "headless-shape.log"
             code=${PIPESTATUS[0]}
             set -e
             if [ "$code" -ne 3 ]; then
-              echo "::error::$sub 在 headless 构建下应返回退出码 3（不支持能力），实测 $code"
+              echo "::error::\`$shape\` 在 headless 构建下应返回退出码 3（不支持能力），实测 $code"
+              echo "::error::能力缺失须压过用法错误——命令不存在则参数校验无从谈起（FR-053/057/058）"
               exit 1
             fi
-            grep -q 'offscreenRendering' "headless-$sub.log" || {
-              echo "::error::$sub 的错误应携带 offscreenRendering 能力标识（FR-057/058）"
+            grep -q 'offscreenRendering' "headless-shape.log" || {
+              echo "::error::\`$shape\` 的错误应携带 offscreenRendering 能力标识（FR-057/058）"
               exit 1
             }
-            echo "$sub 正确返回退出码 3 + 能力标识"
+            echo "OK: \`$shape\` → 退出码 3 + 能力标识"
           done
+
+          # 短路**不扩大**：拼错的子命令仍是用法错误（2），不该被误报成能力缺失。
+          # 2 与 3 是不同信号（你写错了 / 本产品没有这项能力），吃掉前者会误导脚本。
+          set +e
+          "$binary" frobnicate 2>&1 | tee "headless-typo.log"
+          typo_code=${PIPESTATUS[0]}
+          set -e
+          if [ "$typo_code" -ne 2 ]; then
+            echo "::error::未知子命令应返回退出码 2（用法错误），实测 $typo_code——短路写成了通配？"
+            exit 1
+          fi
+          echo "OK: 未知子命令仍是用法错误 2（短路未扩大）"
 
       # SC-014：纯计算子命令在无图形环境下**照常可用**
       - name: 断言 verify-layout 在 headless 下照常可用（SC-014）

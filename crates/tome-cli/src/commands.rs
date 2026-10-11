@@ -60,11 +60,29 @@ impl CommandOutcome {
     }
 
     /// 失败：按错误分类决定退出码。
+    ///
+    /// ## 为什么能力错误要在诊断里带出能力标识
+    ///
+    /// `ErrorKind::UnsupportedCapability` 携带 `ErrorCapability`（如
+    /// `offscreenRendering` / `webView`）——那个标识**才是**调用方与脚本
+    /// 据以分支的东西（FR-057/FR-058；对齐 001 §FR-006 的"可捕获的结构化
+    /// 错误"）。只把人类可读的 message 写进 stderr，标识就丢了：调用方
+    /// 拿到一段中文散文，无法可靠判断"缺的是哪项能力"。
+    ///
+    /// 标识**不翻译**——它是书源生态的通用叫法（与 001 的 `webView` 同性质），
+    /// 翻译后用户无法把它与书源里写的那一行对应起来（同 `crate::i18n::message`
+    /// 的处置）。故以 `[capability: <id>]` 的稳定形态附在 message 之后。
     pub fn failure(kind: &ErrorKind, message: &str) -> Self {
+        let stderr = match kind {
+            ErrorKind::UnsupportedCapability { capability } => {
+                format!("{message}\n[capability: {}]\n", capability.capability_id())
+            }
+            _ => format!("{message}\n"),
+        };
         Self {
             exit_code: exit_code_for(kind),
             stdout: String::new(),
-            stderr: format!("{}\n", message),
+            stderr,
         }
     }
 }

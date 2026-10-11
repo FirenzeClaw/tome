@@ -443,11 +443,79 @@ pub enum ParseOutcome {
     Help(String),
 }
 
+/// 在 headless 构建里识别 `render` / `fonts` 子命令，供 `parse` 前置短路。
+///
+/// ## 为什么要跳过选项找子命令
+///
+/// 全局选项可出现在子命令之前（`tome --format json render`），故子命令未必是
+/// `args[0]`。这里只做"跳过 `--xxx` 及其取值"的最小识别——目标是回答"这次调用
+/// 指向的是不是那两个命令"，不是重建一份完整的参数语义（后者是主循环的职责）。
+///
+/// ## 为什么选项取值也要跳过
+///
+/// 若只跳过 `--` 开头的 token，`--format json render` 里的 `json` 会被误认成
+/// 子命令。故遇到 `--xxx` 后**再多跳一个 token**（它的取值）。代价是
+/// `--flag=value`（等号形态）与不带取值的布尔开关会识别偏——那在本函数里
+/// 只影响"是否短路"，不影响正确性：识别偏了就走原有解析路径，行为与今天一致。
+///
+/// 仅用于 `#[cfg(not(feature = "reader-render"))]` 分支，故在默认构建下
+/// 本函数不存在（`dead_code` 不触发）。
+#[cfg(not(feature = "reader-render"))]
+fn headless_render_subcommand(args: &[String]) -> Option<&str> {
+    let mut index = 0usize;
+    while index < args.len() {
+        let argument = args[index].as_str();
+        if argument.starts_with("--") {
+            index += 2;
+            continue;
+        }
+        if argument.starts_with('-') && argument.len() > 1 {
+            index += 1;
+            continue;
+        }
+        return matches!(argument, "render" | "fonts").then_some(argument);
+    }
+    None
+}
+
 /// 解析命令行参数（**不含**程序名）。
 ///
 /// \[DONE] T028/T029 的入口。参数解析的全部规则集中在这里，
 /// 便于让"用法错误 → 退出码 2"这条契约只需在一处保证。
 pub fn parse(args: &[String]) -> ParseOutcome {
+    // 能力缺失压过用法错误（FR-053/FR-057/FR-058、contracts/cli.md §2.3）。
+    //
+    // ## 为什么这个短路在解析**最前面**
+    //
+    // headless 构建（`--no-default-features`）里渲染面在**编译期**就不存在，
+    // 于是 `render` / `fonts` 这两个命令**根本不存在**。对一个不存在的命令，
+    // "参数写错了"这一判断无从谈起——故无论参数是否合法，都应回"不支持能力"
+    // （退出码 3 + `offscreenRendering` 标识）。
+    //
+    // 位置必须在最前：参数校验散在本函数各处（`--theme` 白名单在选项循环里、
+    // `--out` 必需项在子命令分支里、未知选项在循环兜底里），任何一处先触发
+    // 都会把退出码变成 2。放在最前，判别标准就只有一个：**首个子命令是不是
+    // `render`/`fonts`**——与两命令各自的参数面无关。
+    //
+    // ## 为什么不能只认 `args[0]`
+    //
+    // 全局选项可以出现在子命令之前（`tome --format json render`），故须跳过
+    // 选项与其取值找到真正的子命令。这里不复用解析循环（那会把本函数的职责
+    // 变成两遍解析），只做"跳过 `--xxx` 及其值"的最小识别：`render`/`fonts`
+    // 在 headless 下不需要任何选项语义，认出来即返回。
+    #[cfg(not(feature = "reader-render"))]
+    if let Some(subcommand) = headless_render_subcommand(args) {
+        let command = if subcommand == "render" {
+            Command::Render(Box::default())
+        } else {
+            Command::Fonts
+        };
+        return ParseOutcome::Run {
+            options: GlobalOptions::default(),
+            command,
+        };
+    }
+
     let mut options = GlobalOptions::default();
     let mut positionals: Vec<String> = Vec::new();
     let mut record: Option<PathBuf> = None;

@@ -427,9 +427,10 @@ impl BridgeTheme {
     ///
     /// ## 字重怎么表达
     ///
-    /// `egui::FontId` 没有字重维度（R8 点名的落点），故字重经 [`Self::font_family`]
-    /// 注册成独立 `FontFamily`。本函数只负责字号，族由调用方或
-    /// [`Self::style`] 决定。
+    /// `egui::FontId` 没有字重维度（R8 点名的落点），故字重经
+    /// [`crate::theme_bridge::register_ui_fonts`] 注册成独立 `FontFamily`
+    /// （`ui_font_families` 给出族名）。本函数只负责字号，族由调用方或
+    /// [`Self::apply`] 决定。
     #[must_use]
     pub fn font_id_for_step(&self, step: tome_core::model::theme::TypeStep) -> egui::FontId {
         egui::FontId::new(step.size_px, egui::FontFamily::Proportional)

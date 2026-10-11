@@ -20,7 +20,7 @@
 //! DAO 的方法各自带着已固化的约束（身份唯一性、`is_read` 不被目录重抓覆盖、
 //! 缓存写入顺序、错误分类）。在此处另写一套查询就产生了**第二个定义点**：
 //! 某天 DAO 改了约束，接缝这边不会跟着变，而两者的差异只在特定数据下才显形。
-//! 故本模块只做转发与错误分类映射（[`seam_kind`]），不碰 SQL。
+//! 故本模块只做转发与错误分类映射（私有 `seam_kind`），不碰 SQL。
 //!
 //! # 书源渠道导入为什么需要一个注入点
 //!
@@ -97,7 +97,7 @@ pub struct SqliteBookRepository {
 }
 
 impl SqliteBookRepository {
-    /// [DONE] 以已打开的库与数据目录构造。
+    /// \[DONE] 以已打开的库与数据目录构造。
     ///
     /// # 为什么收 `&DataDir` 而不是几个路径
     ///
@@ -127,7 +127,7 @@ impl SqliteBookRepository {
         }
     }
 
-    /// [DONE] 注入书源渠道导入的委托（组合根在装配期调用）。
+    /// \[DONE] 注入书源渠道导入的委托（组合根在装配期调用）。
     ///
     /// builder 形态而非构造参数：不注入时接缝仍可用（只是 `import_sources`
     /// 返回能力错误），故它不该成为构造的必填项。
@@ -161,7 +161,7 @@ impl BookRepository for SqliteBookRepository {
     // 书架
     // -----------------------------------------------------------------------
 
-    /// [DONE] 书架全量（最近加入的在前）。
+    /// \[DONE] 书架全量（最近加入的在前）。
     fn bookshelf(&self) -> Result<Vec<Book>, ErrorKind> {
         self.book_dao.bookshelf().map_err(seam_kind)
     }
@@ -170,7 +170,7 @@ impl BookRepository for SqliteBookRepository {
         self.book_dao.add_book(book).map_err(seam_kind)
     }
 
-    /// [DONE] 移除书籍：库里的行靠级联清，**缓存与搜索索引在此显式清**。
+    /// \[DONE] 移除书籍：库里的行靠级联清，**缓存与搜索索引在此显式清**。
     ///
     /// # 为什么顺带清缓存（FR-004）
     ///
@@ -300,7 +300,7 @@ impl BookRepository for SqliteBookRepository {
         self.source_store.get(source_id).map_err(seam_kind)
     }
 
-    /// [DONE] 导入书源（FR-001 的三渠道）。
+    /// \[DONE] 导入书源（FR-001 的三渠道）。
     ///
     /// # 未注入导入器时为什么返回能力错误而不是"导入 0 条"
     ///
@@ -400,7 +400,7 @@ impl BookRepository for SqliteBookRepository {
     // 书内搜索（FR-019b）
     // -----------------------------------------------------------------------
 
-    /// [DONE] 书内全文搜索（只查已缓存内容，不触发抓取）。
+    /// \[DONE] 书内全文搜索（只查已缓存内容，不触发抓取）。
     ///
     /// # 为什么在这里幂等建索引表
     ///

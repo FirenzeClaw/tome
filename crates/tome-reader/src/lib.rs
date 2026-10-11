@@ -53,6 +53,7 @@
 pub mod corpus;
 pub mod error;
 pub mod footer;
+pub mod keys;
 pub mod layout;
 pub mod paginate;
 pub mod precalc;

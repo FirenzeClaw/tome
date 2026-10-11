@@ -169,6 +169,37 @@ SC-009 重排 43–57 ms（红线 ≤ 300 ms）；SC-010 滚动释放 600/634 �
 
 ---
 
+## 7. headless 形态的能力契约（FR-052 / FR-053 / SC-014）
+
+`--no-default-features` 构建里渲染面在**编译期**消失（依赖树连 wgpu 都没有），
+这是 FR-052「能在无窗口系统上完整运行」的最强形态。此时：
+
+```bash
+# 无渲染面的构建
+cargo build -p tome-cli --no-default-features
+
+# render / fonts 无论参数是否合法，一律退出码 3 + offscreenRendering 能力标识
+target/debug/tome-cli render                                  # 3
+target/debug/tome-cli render --out x.png                      # 3（缺目标页，仍是 3）
+target/debug/tome-cli render --theme sepia --page 0           # 3（非法取值，仍是 3）
+target/debug/tome-cli fonts                                   # 3
+
+# 纯计算命令照常全能力（SC-014）——不得退 3
+target/debug/tome-cli layout --text <file>                    # 0
+```
+
+**口径（PM 裁决 2026-10-11，T056）**：**能力缺失压过用法错误**。命令在编译期
+不存在时，"参数写错了"这一判断无从谈起——故 `render`/`fonts` 无论参数如何都退 3，
+且 stderr 携带 `[capability: offscreenRendering]`（FR-058 的结构化标识）。
+反过来，**短路不扩大**：拼错的子命令仍是用法错误（退出码 2）——2 与 3 是不同信号
+（你写错了 / 本产品没有这项能力）。
+
+回归测试：`cargo test -p tome-cli --no-default-features --test render_headless_capability`
+（4 用例；矩阵覆盖「无参 / 缺必需项 / 非法取值 / 未知选项 / 合法」五种形态）。
+CI 的 `headless` job 对真实二进制断言同一矩阵。
+
+---
+
 ## 验证环境说明
 
 | 环境 | 能验什么 |

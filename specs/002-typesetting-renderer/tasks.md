@@ -269,12 +269,20 @@
 
 ## Phase 9: Polish & Cross-Cutting Concerns
 
-- [ ] T053 [P] quickstart.md 从零验证（按 `specs/002-typesetting-renderer/quickstart.md` 逐节走一遍，修正不符处）
-  - [ ] 每条命令真实可运行；期望与实际一致；修正处随本任务 commit
-- [ ] T054 [P] AGENTS.md 更新——`crates/tome-reader/` 入目录结构与依赖图描述（AUTO:STRUCTURE 段）
-  - [ ] 文档与真实结构一致
-- [ ] T055 [P] rustdoc 完整性——`cargo doc --no-deps -p tome-reader` 无警告
-  - [ ] 公开 API 均有 docstring（模块职责 + 关键入口）
+- [x] T053 [P] quickstart.md 从零验证（按 `specs/002-typesetting-renderer/quickstart.md` 逐节走一遍，修正不符处）
+  - [x] 每条命令真实可运行；期望与实际一致；修正处随本任务 commit
+  - PM 注记（2026-10-11）：逐节实走，7 处不符已修（`--chapter`→`--text`、测试选择子缺 `--test` 导致 45 个目标零执行、`--page` 0 起口径、fonts 体积 2.18MiB、verify-layout 字段名、perf 需 `--ignored`、渲染环境结论）；另补 `tests/fixtures/chapter-zh.txt` 走查语料（仓库原本不存在该文件）。
+- [x] T054 [P] AGENTS.md 更新——`crates/tome-reader/` 入目录结构与依赖图描述（AUTO:STRUCTURE 段）
+  - [x] 文档与真实结构一致
+  - PM 注记（2026-10-11）：AUTO 段**无生成脚本**（`.specify/scripts/` 仅 speckit 流程脚本），故手工更新并在 commit message 注明。除 STRUCTURE 段外一并修正同文件已过时事实（AUTO:BUILD 测试规模 2320→实测 3110/2958、PROJECT-META 的 crate 数、规格驱动流程的当前特性 001→002）。
+- [x] T055 [P] rustdoc 完整性——`cargo doc --no-deps -p tome-reader` 无警告
+  - [x] 公开 API 均有 docstring（模块职责 + 关键入口）
+  - PM 注记（2026-10-11）：修前 71 告警（60 条 `[DONE]` 等状态标注被误判 intra-doc link + 11 条失效链接/私有项/缺文档），修后 0（连续两次稳定）。状态标注一律反引号包裹、**未删任何信息**（76 处改前改后一致）。同源告警顺带清零 `tome-cli`，故 `--workspace` 亦为 0。
+- [x] T056 修复 headless 构建下 `render` 退 3 缺口（PM 新增 2026-10-11）
+  - [x] 能力缺失压过用法错误：headless 构建里 `render`/`fonts` 无论参数是否合法均退 3 + `offscreenRendering` 能力标识（FR-053/FR-057/FR-058、contracts §2.3）
+  - [x] `fonts`/`render` 两条路径行为对称；CI headless job 断言脚本同步为参数形态矩阵
+  - 落点：`crates/tome-cli/src/flags.rs`（`parse()` 入口前置短路 + `headless_render_subcommand` 辅助）、`crates/tome-cli/src/commands.rs`（`CommandOutcome::failure` 带出 `ErrorCapability` 标识）、`crates/tome-cli/tests/render_headless_capability.rs`（新建，4 用例；已实测无修复时 3/4 变红）、`.github/workflows/ci.yml`（断言矩阵 + 短路未扩大的反例）
+  - 发现（超出 T056 复述范围，一并修正）：CI 断言要求 stderr 携带 `offscreenRendering`，但 `fonts` 此前**也不带**该标识（`CommandOutcome::failure` 从未渲染 `ErrorCapability`）——只退码对、标识缺。故“fonts 已正常”仅对退出码成立。
 
 ---
 

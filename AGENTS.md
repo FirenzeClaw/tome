@@ -5,7 +5,7 @@
 
 - 项目：tome（Legado 阅读器的桌面版原生重写）
 - 技术栈：Rust（单体原生桌面应用，纯原生全栈重写）
-- 类型：跨平台桌面应用（预计拆为 10 crate workspace）
+- 类型：跨平台桌面应用（Rust workspace，当前 9 个 crate 已落地；S3/S4 的 `tome-app`/`tome-extra` 待建）
 - 目标平台：Windows 10+ / macOS 12+ / 现代 Linux
 - 初始化日期：2026-10-09
 <!-- /AUTO:PROJECT-META -->
@@ -36,34 +36,63 @@
 
 ```
 tome/
-├── .specify/                  # speckit 流程脚手架（模板/脚本/宪法/内存）
+├── crates/                    # Rust workspace（9 个 crate，见下）
 ├── specs/
-│   └── 001-pc-engine-core/    # 特性 001：S0 可行性验证 + S1 引擎内核
-│       ├── spec.md            # 规格说明
+│   ├── 001-pc-engine-core/    # 特性 001：S0 可行性验证 + S1 引擎内核
+│   │   ├── spec.md            # 规格说明
+│   │   └── checklists/        # 质量校验记录
+│   └── 002-typesetting-renderer/  # 特性 002：S2 排版渲染层
+│       ├── spec.md / plan.md / tasks.md
+│       ├── quickstart.md      # 走查手册（命令逐条实跑）
+│       ├── research.md / data-model.md / contracts/
+│       ├── size-report.md     # 体积报告（铁律 2 的记录处）
+│       ├── OPEN-QUESTIONS.md / SOURCES.md
 │       └── checklists/        # 质量校验记录
+├── assets/fonts/              # 内嵌字体（TomeSerifCN-subset.otf）+ 校验和 + OFL 许可
+├── design-system/             # 设计系统（MASTER.md / tokens.css / MOTION.md + 截图脚本）
+├── scripts/                   # 依赖守卫与度量脚本（reader 门控 / rquickjs / S2 栈体积）
+├── spikes/                    # S0 / S2 先行验证工程（不属 workspace）
+├── testdata/                  # baselines（入仓库）+ captures（抓取产物，gitignore）
+├── tests/                     # corpus（合成语料差分，SC-002a）
+├── tools/                     # ref-runner（上游黑盒参考运行器）+ subset-font.py
+├── .specify/                  # speckit 流程脚手架（模板/脚本/宪法/内存）
 ├── .codegraph/                # 代码索引（自动维护，勿手改）
-├── .kimi-tunnel/              # 项目内存（SQLite）
-└── (待补充：Rust workspace 落地后更新)
+└── .kimi-tunnel/              # 项目内存（SQLite）
 ```
 
-**规划的 workspace 结构**（S1 落地时创建，详见 `specs/001-pc-engine-core/plan.md` 的「Project Structure」与「Dependency Graph」）：
+**workspace 结构**（已落地；各 crate 的 `Cargo.toml` description 为职责单一来源）：
 
 ```
 crates/
-├── tome-core/     # 接缝 trait + DTO + ErrorKind 错误分类（窄；无工具函数；零图形依赖）
+├── tome-core/     # 接缝 trait + DTO + ErrorKind 错误分类（窄；无工具函数；零图形依赖；**零依赖**）
 ├── tome-net/      # HTTP、Cookie、代理、限速、字符集 + RequestSpec + 回放 adapter
 ├── tome-store/    # SQLite actor、迁移器、DAO、Pack 容器、图片缓存、配置注入
 ├── tome-js/       # QuickJS 沙箱 + 宿主能力注入 trait + 兼容前导脚本
 ├── tome-rule/     # 规则 DSL：分派/切分/CSS/JSONPath(+shim)/XPath(自研)/正则(双引擎)/替换链
 ├── tome-source/   # 书源管线：搜索/发现/详情/目录/正文/净化/换源/源检查
 ├── tome-local/    # TXT/EPUB/MOBI(分阶段) 解析、库根扫描、TOC 识别
-├── tome-cli/      # CLI 验证器（search/info/toc/content/run/verify/local/data）+ 差分测试入口
-├── tome-reader/   # [S2] 排版引擎 + 渲染 + 动效
-├── tome-app/      # [S3] 界面外壳与平台集成
-└── tome-extra/    # [S4] RSS / 朗读 / 词典 / 定时任务
+├── tome-reader/   # [S2] 排版引擎 + 渲染 + 动效（详见下方 reader 子结构）
+└── tome-cli/      # CLI 验证器（search/info/toc/content/run/verify/local/data）+ 差分测试入口
 ```
 
-**架构铁律**：依赖方向单向——实现 crate 依赖 `tome-core`，core 不依赖任何实现（箭头指向被依赖方）：`{tome-rule, tome-js, tome-net, tome-store} → tome-core`，`tome-source → {tome-rule, tome-js, tome-net, tome-store}`，`tome-local → {tome-store, tome-rule}`；`tome-app`/`tome-extra` 只依赖 `tome-core` 的接缝 trait，**永不直接构造** `tome-source`/`tome-store` 的内部类型。crate 边界即架构——用编译期强制，不靠约定。另两条接缝决策：宿主能力 trait（NetHost/StoreHost/CryptoHost）与共享值对象 RequestSpec/Response **定义在 tome-core**（接缝中枢），tome-net/tome-store 实现它们，tome-js 经组合根被注入——一切实现 crate 只依赖 tome-core，星型无环；tome-rule 求值产出 RequestSpec 不亲自发请求，管线是唯一发请求处。详见 `specs/001-pc-engine-core/plan.md` 依赖图与 `contracts/seams.md`。
+`tome-reader` 的模块划分（`crates/tome-reader/src/`）：
+
+```
+├── lib.rs / error.rs / font_setup.rs / theme.rs / precalc.rs   # 入口、错误、字体、主题、预计算
+├── text/      # 段落模型与文本模型（整形输入的规范化形态）
+├── layout/    # 整形与断行：engine / linebox / paragraph_mode / style
+├── rules/     # 中文排版规则：cjk / justify / mixed / squeeze
+├── paginate/  # 分页：booksem（书页语义）/ config / page / spread（跨页）
+├── scroll/    # 滚动模式：flow / map / placeholder / relayout / switch / throttle
+├── render/    # wgpu 自绘：pipeline / atlas / glyph_atlas / glyph_cache / batch / offscreen /
+│              #   fonts / image / animate / pixel_diff
+├── trace/     # 命中测试与渲染轨迹：dict / hit / render
+└── corpus.rs / corpus_eval.rs / footer.rs / keys.rs / record.rs / toolbar.rs
+```
+
+**架构铁律**：依赖方向单向——实现 crate 依赖 `tome-core`，core 不依赖任何实现（箭头指向被依赖方）：`{tome-rule, tome-js, tome-net, tome-store, tome-local, tome-reader} → tome-core`，`tome-rule → tome-js`，`tome-store → tome-net`（仅依赖其 `HttpLogSink` trait），`tome-source → {tome-rule, tome-js, tome-net, tome-store}`，`tome-local → {tome-store, tome-rule}`；`tome-reader → tome-core` **且仅此一条**（排版不感知缓存与抓取——正文唯一来源是 `ContentProvider` 接缝，由组合根注入）。`tome-cli` 是唯一允许依赖全部实现 crate 的**组合根**（搜索/验证器入口）。`tome-app`/`tome-extra`（S3/S4，未落地）只依赖 `tome-core` 的接缝 trait，**永不直接构造** `tome-source`/`tome-store` 的内部类型。crate 边界即架构——用编译期强制，不靠约定。另两条接缝决策：宿主能力 trait（NetHost/StoreHost/CryptoHost）与共享值对象 RequestSpec/Response **定义在 tome-core**（接缝中枢），tome-net/tome-store 实现它们，tome-js 经组合根被注入——一切实现 crate 只依赖 tome-core，星型无环；tome-rule 求值产出 RequestSpec 不亲自发请求，管线是唯一发请求处。详见 `specs/001-pc-engine-core/plan.md` 依赖图与 `contracts/seams.md`。
+
+**依赖门控**：`tome-reader` 的 `render` feature（默认开）收拢全部图形依赖（wgpu / swash / etagere），关闭后依赖树零图形包——`bash scripts/check-reader-features.sh` 对此有断言，是 FR-052「能在无窗口系统上完整运行」的机器可验证形式。
 <!-- /AUTO:STRUCTURE -->
 
 <!-- AUTO:BUILD -->
@@ -78,6 +107,7 @@ crates/
 | Lint（CI 同命令） | `cargo clippy --workspace --all-targets -- -D warnings` |
 | 格式检查（CI 同命令） | `cargo fmt --all -- --check` |
 | 文档构建（T099 门） | `cargo doc --no-deps --workspace` |
+| reader 门控守卫 | `bash scripts/check-reader-features.sh`（断言 headless 依赖树零图形包 + `--self-test` 自检） |
 | rquickjs 依赖守卫 | `bash scripts/check-rquickjs-features.sh`（`--self-test` 校验守卫自身有效） |
 
 ### 运行 CLI
@@ -99,6 +129,15 @@ crates/
 - `source list|check|group|enable|disable|groups`、`keyword list|add|remove` —— 书源与关键词管理
 - `verify --corpus <dir> [--report <file>]` —— 合成语料差分（SC-002a，≥95%）
 
+S2 排版渲染子命令（`layout` 选项见 `contracts/cli.md` §2.1，`specs/002-typesetting-renderer/contracts/cli.md`）：
+
+- `layout --text <file> [--mode paginated|scroll]` —— 排版单章正文（本阶段入口是 `--text`）
+- `layout --chapter <book>#<n>` —— 书架取章形式（**WIP**，需 S3 接线，当前返回能力错误）
+- `layout-anchor --char <offset> [--target-mode …]` —— 报告某字符锚点落在哪一行/哪一屏
+- `render --out <png> --page <n>|--viewport <n> [--theme day|night]` —— 渲染一页/一屏到 PNG
+- `verify-layout --corpus <dir> [--report <file>]` —— 排版合成语料差分（无硬门槛，如实报告）
+- `fonts` —— 列出内嵌字体与回退链
+
 ### 差分测试与对照数据
 
 | 入口 | 命令 | 说明 |
@@ -113,14 +152,14 @@ crates/
 
 ### CI
 
-- `.github/workflows/ci.yml`：windows-gnu / macos / ubuntu matrix——fmt、clippy、rquickjs 守卫、测试、依赖图断言（`cargo build -p tome-core` 独立 + `cargo test -p tome-cli --test dependency_graph` 星型无环 + 传递依赖无图形栈）
+- `.github/workflows/ci.yml`：windows-gnu / macos / ubuntu matrix——fmt、clippy、rquickjs 守卫、reader 门控守卫、测试、依赖图断言（`cargo build -p tome-core` 独立 + `cargo test -p tome-cli --test dependency_graph` 星型无环 + 传递依赖无图形栈）
 - `.github/workflows/release.yml`：三平台 release 产物 + 体积基线监控
 
 **工具链现状（2026-10-10 P9 复核）**：`cargo 1.99.0` / `rustc 1.99.0`（stable-x86_64-pc-windows-gnu，由 `rust-toolchain.toml` 钉版 channel=stable）。MSRV 声明 `rust-version = "1.98"` 尚未经 1.98 实测。
 
-**测试规模（2026-10-10 P9 实测）**：`cargo test --workspace` **2320 passed / 0 failed**。
+**测试规模（2026-10-11 S2 Phase 9 实测，含 S2 排版层）**：`cargo test --workspace -j 2` **2850 passed / 0 failed / 16 ignored**（95 个测试二进制合计）。S2 前的基线为 2320 passed——增量即 `tome-reader` 与其 CLI 集成测试。默认形态与 headless（`--no-default-features`）双形态均需绿。
 
-**性能基线**：SC-003/SC-004/SC-005 实测数据见 `specs/001-pc-engine-core/perf-baseline.md`。
+**性能基线**：SC-003/SC-004/SC-005 实测数据见 `specs/001-pc-engine-core/perf-baseline.md`；S2 体积报告见 `specs/002-typesetting-renderer/size-report.md`。
 <!-- /AUTO:BUILD -->
 
 ## 生产级护栏（本项目特有）
@@ -243,11 +282,12 @@ crates/
 
 ## 规格驱动流程
 
-本项目使用 speckit 流程。当前特性目录由 `.specify/feature.json` 指定。
+本项目使用 speckit 流程。当前特性目录由 `.specify/feature.json` 指定（当前值：`specs/002-typesetting-renderer`）。
 
-- 规格：`specs/001-pc-engine-core/spec.md`（S0 + S1）
+- 特性 001 规格：`specs/001-pc-engine-core/spec.md`（S0 + S1）
+- 特性 002 规格：`specs/002-typesetting-renderer/spec.md`（S2 排版渲染层）
 - 下游：`speckit-clarify` → `speckit-plan` → `speckit-tasks` → `speckit-implement`
-- S2（排版渲染）/ S3（应用外壳）/ S4（可选模块）各自独立规格，不在特性 001 范围内
+- S3（应用外壳）/ S4（可选模块）各自独立规格，不在特性 001/002 范围内
 
 ### 子项目顺序
 

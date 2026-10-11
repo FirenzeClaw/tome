@@ -679,7 +679,16 @@ impl ViewState {
     }
 
     /// 打开叠加层。
+    ///
+    /// ## 为什么打开设置时要顺带要一次设置
+    ///
+    /// 启动序列**不**请求设置（见 `start` 的说明：那会让用户一打开应用就看到
+    /// 一个与他当下无关的能力提示）。设置在用户真的去看它时才要——此时提示
+    /// 出现在上下文中，而不是凭空冒出来。
     pub fn open_overlay(&mut self, overlay: Overlay) {
+        if overlay == Overlay::Settings {
+            self.push_request(EngineRequest::SettingsLoad);
+        }
         self.overlay = Some(overlay);
     }
 
@@ -1016,18 +1025,28 @@ impl TomeApp {
         self.engine = Some(engine);
     }
 
-    /// 启动序列：向引擎要书架与设置。
+    /// 启动序列：向引擎要书架。
     ///
     /// ## 为什么不由引擎线程在启动时主动推
     ///
     /// 协议是**拉取式**的（UI 发请求、引擎回事件，见 `engine/thread.rs` 的
-    /// 说明）。让引擎在启动时自己推两个事件会引入"UI 还没准备好收"的时序
+    /// 说明）。让引擎在启动时自己推一个事件会引入"UI 还没准备好收"的时序
     /// 问题——而那是可以被拉取模型完全避开的复杂度。
+    ///
+    /// ## 为什么**不**在这里要设置
+    ///
+    /// 设置的持久化属 US4（T030），引擎当前对 `SettingsLoad` 如实返回能力
+    /// 错误。在启动时请求它，用户一打开应用就会看到一个错误提示——而那件
+    /// 事（"四组默认还没落地"）与他此刻要做的事（读书）毫无关系，提示只会
+    /// 制造困惑。
+    ///
+    /// 设置叠加层（T030）打开时才请求，那时提示出现在上下文中。
+    /// `ViewState.settings` 的初值是 `UserSettings::default_ma()`——即
+    /// MASTER §5.1 的设计默认值，故在此之前界面用的是正确的默认参数。
     ///
     /// 调用点在 `main.rs` 的创建闭包里（引擎已挂上、窗口已存在）。
     pub fn start(&mut self) {
         self.send(EngineRequest::ShelfLoad);
-        self.send(EngineRequest::SettingsLoad);
     }
 
     /// 从创建上下文构造（注册主题、UI 字体、渲染资源）。
@@ -1149,6 +1168,54 @@ impl eframe::App for TomeApp {
 
         // 本帧的意图（视图里产生的引擎请求）在画完之后统一发出
         let mut requests: Vec<EngineRequest> = Vec::new();
+
+        // --- 键盘：翻页 + Esc 返回书架（**Phase 3 的最小形态**）---
+        //
+        // ## 为什么现在就有它
+        //
+        // quickstart §1 的第 3 步是「读到中部 → `Esc` 回书架 → 重开 → 位置
+        // 逐字符恢复」。"读到中部"要翻页，回书架要 Esc——两者缺一那条走查就
+        // 只能改用鼠标，而走查脚本与实现不一致本身就是缺陷（它意味着"文档
+        // 描述的操作做不到"）。
+        //
+        // ## 与 T029（`keys.rs` 全表）的关系
+        //
+        // 这是**占位**：T029 会把 `contracts/ui.md` §2 的整张表落地，届时
+        // - 翻页键走 `tome_reader::keys` 的平台无关键表（含 `PgUp`/`PgDn` 同义）
+        // - Esc 的语义是「关抽屉 → 再按返回书架」（`EscStack` 的分层）
+        //
+        // 故本段在 T029 落地时应被**整体替换**，不是并存——两处各自处理同一批
+        // 键会打架（同一个按键被处理两次，表现为"翻一页跳两页"）。
+        if overlay.is_none() && view == AppView::Reading {
+            let (page_forward, page_back, escape) = ui.input(|input| {
+                (
+                    input.key_pressed(egui::Key::ArrowRight)
+                        || input.key_pressed(egui::Key::PageDown),
+                    input.key_pressed(egui::Key::ArrowLeft) || input.key_pressed(egui::Key::PageUp),
+                    input.key_pressed(egui::Key::Escape),
+                )
+            });
+
+            // 内容未就绪时不翻页（此时没有"页"可言，翻了也没反应——而
+            // "按了没反应"比"明确忽略"更让人困惑，故这里显式只在就绪时处理）
+            let ready = matches!(
+                self.state.content(),
+                crate::engine::messages::ContentState::Ready { .. }
+            );
+            if ready && page_forward {
+                requests.push(EngineRequest::ReadingTurnPage { delta: 1 });
+            }
+            if ready && page_back {
+                requests.push(EngineRequest::ReadingTurnPage { delta: -1 });
+            }
+            if escape {
+                if let Some(flush) = self.state.back_to_shelf_request() {
+                    requests.push(flush);
+                }
+                requests.push(EngineRequest::ReadingClose);
+            }
+        }
+
         {
             let state = &mut self.state;
 

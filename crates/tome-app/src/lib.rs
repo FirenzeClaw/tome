@@ -16,5 +16,7 @@
 
 #![deny(unsafe_code)]
 
+pub mod engine;
+
 #[cfg(feature = "reader-render")]
 pub mod render;

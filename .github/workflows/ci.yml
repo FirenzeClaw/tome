@@ -169,12 +169,14 @@ jobs:
       #
       # Tome-reader 依赖 wgpu，故"引擎依赖 reader"会间接把图形栈拉进引擎。
       # 这条是 ③ 的**充分性反证**：即便 ③ 因某种原因漏了，这条也会拦。
+      # 名单与 ③ 一致：tome-cli 是组合根（它**必须**依赖 tome-reader 来装配
+      # 渲染面），不在「引擎」之列——它的无头性由 ③ 的 headless 形态检查承载。
       - name: 引擎不依赖阅读器
         shell: bash
         run: |
           set -euo pipefail
           failed=0
-          for crate in tome-core tome-rule tome-js tome-net tome-store tome-source tome-local tome-cli; do
+          for crate in tome-core tome-rule tome-js tome-net tome-store tome-source tome-local; do
             tree=$(cargo tree -p "$crate" --edges normal --prefix none 2>/dev/null || true)
             if echo "$tree" | grep -qE "^tome-reader"; then
               echo "::error::$crate 依赖了 tome-reader（FR-039：引擎不得依赖上层）"
@@ -300,6 +302,263 @@ jobs:
           path: size-report/
           overwrite: false
           retention-days: 90
+
+  # ---------------------------------------------------------------------------
+  # 阅读层快照矩阵（T049 / SC-011 / SC-015）—— 三平台各自一个软件后端
+  #
+  # ## 为什么这个 job 独立于 build
+  #
+  # 快照需要**真正可用的图形后端**。CI runner 没有 GPU，故每平台各装一个
+  # 软件光栅器：
+  #
+  # | 平台 | 后端 | 安装方式 |
+  # |---|---|---|
+  # | ubuntu | lavapipe (Vulkan) | `mesa-vulkan-drivers` 包 + `VK_DRIVER_FILES` 指到 icd |
+  # | windows | lavapipe (Vulkan) | mesa-dist-win 预编译包（取 `*.dll` 与 icd json） |
+  # | macos | Metal | 系统自带（**禁 GL**——wgpu 的 GL 后端在 macOS 上已弃用） |
+  #
+  # ## 为什么先跑 probe
+  #
+  # `examples/probe.rs` 先打印后端名。它把两类失败**分开**：
+  #
+  # - probe 打印 `PROBE OK backend=...` → 环境能离屏渲染，继续跑快照
+  # - probe 退出码 3（`SKIPPED`）→ 环境**没有**后端，job **直接红**
+  #
+  # 若没有这一步，"没有后端"会表现为**所有快照测试都跳过**——而跳过是合法的
+  # （本地无 GPU 的开发机就该跳过）。两者在日志里长得一样，于是 CI 会"绿着"
+  # 而其实一张快照都没比。这正是 FR-053 要防的伪装（spikes/s2/BASELINE.md §10.1
+  # 记的三次"全绿但没测到"）。
+  #
+  # ## 快照与平台的关系
+  #
+  # SC-011 明文"跨平台不比较像素，只比较排版结构"。故快照基线**按平台存**，
+  # 本 job 用 `key: snapshots-${{ matrix.name }}` 的缓存隔离。三平台一致性由
+  # `platform_consistency.rs` 的**指纹**（平台无关）承载，不由像素承载。
+  # ---------------------------------------------------------------------------
+  reader-snapshot:
+    name: 阅读层快照（${{ matrix.name }}）
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-lavapipe
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - name: windows-lavapipe
+            os: windows-latest
+            target: x86_64-pc-windows-gnu
+          - name: macos-metal
+            os: macos-latest
+            target: aarch64-apple-darwin
+    env:
+      RUSTUP_TOOLCHAIN: stable-${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装工具链（${{ matrix.target }}）
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: 缓存 cargo 构建产物
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: reader-snapshot-${{ matrix.name }}
+
+      # --- 后端安装（三平台各自）------------------------------------------
+      - name: 安装 lavapipe（ubuntu）
+        if: matrix.name == 'linux-lavapipe'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            mesa-vulkan-drivers libvulkan1 vulkan-tools
+          # 让 loader 找到 lavapipe 的 ICD（软件 Vulkan 光栅器）
+          icd=$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' | head -1)
+          echo "lavapipe ICD: $icd"
+          test -n "$icd"
+          echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+          # 禁用可能干扰的 layer
+          echo "VK_LOADER_LAYERS_DISABLE=*" >> "$GITHUB_ENV"
+
+      - name: 安装 lavapipe（windows）
+        if: matrix.name == 'windows-lavapipe'
+        shell: pwsh
+        run: |
+          # mesa-dist-win 的 release 包提供 lavapipe（vulkan_lvp.dll + icd json）。
+          # 版本钉版：软件光栅器的行为随版本漂移，快照对该差异敏感。
+          $version = '24.3.4'
+          $url = "https://github.com/pal1000/mesa-dist-win/releases/download/$version/mesa3d-$version-release-msvc.7z"
+          $archive = "$env:RUNNER_TEMP\mesa.7z"
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          # 7z 在 windows runner 上可用（PATH 里自带）
+          7z x $archive -o"$env:RUNNER_TEMP\mesa" -y | Out-Null
+          $icd = Get-ChildItem -Path "$env:RUNNER_TEMP\mesa" -Recurse -Filter '*lvp*icd*.json' | Select-Object -First 1
+          if (-not $icd) { Write-Error 'mesa-dist-win 包里找不到 lavapipe 的 ICD json' }
+          Write-Host "lavapipe ICD: $($icd.FullName)"
+          $dllDir = $icd.DirectoryName
+          "PATH=$dllDir;$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VK_DRIVER_FILES=$($icd.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VK_LOADER_LAYERS_DISABLE=*" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: macOS 用 Metal（禁 GL）
+        if: matrix.name == 'macos-metal'
+        run: |
+          set -euo pipefail
+          # macOS runner 自带 Metal，无需安装。显式禁用 GL 后端：
+          # wgpu 的 GL 后端在 macOS 上已弃用，且 OpenGL 在 macOS 的软件回退
+          # 会给出与 Metal 不同的像素——用它会污染快照基线。
+          echo "WGPU_BACKEND=metal" >> "$GITHUB_ENV"
+
+      # --- 探针先行（后端不可用即 job 红，不静默跳过）-----------------------
+      - name: 后端探针（打印后端名；无后端则 job 红）
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "--- 探针输出 ---"
+          set +e
+          output=$(cargo run -q -p tome-reader --example probe 2>&1)
+          code=$?
+          set -e
+          echo "$output"
+          if [ "$code" -ne 0 ]; then
+            echo "::error::后端探针失败（退出码 $code）——本平台矩阵配置有误（如 lavapipe 未装）"
+            exit 1
+          fi
+          # 日志里必须能看到后端名（T049 验收子项）
+          echo "$output" | grep -q 'PROBE OK backend=' || {
+            echo "::error::探针未打印后端名——快照跑在哪个后端上不可知"
+            exit 1
+          }
+
+      # --- 快照测试（必须**实际运行**，不得全跳过）--------------------------
+      - name: 快照回归（SC-011）
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p tome-reader --test snapshot -- --nocapture 2>&1 | tee snapshot.log
+          # 关键判据：本次**至少有一条快照真的比对了**。全跳过说明后端没用上，
+          # 而"全跳过"在退出码上表现为成功——必须显式拦。
+          if grep -q 'SKIPPED' snapshot.log; then
+            echo "--- 检测到 SKIPPED 行 ---"
+            grep 'SKIPPED' snapshot.log || true
+            echo "::error::快照测试出现 SKIPPED——后端未生效（快照未实际比对，FR-053 的诚实跳过不得在 CI 上出现）"
+            exit 1
+          fi
+
+      # --- 三平台一致性指纹（SC-015）--------------------------------------
+      - name: 三平台分页/滚动一致性（SC-015）
+        shell: bash
+        run: cargo test -p tome-reader --test platform_consistency -- --nocapture
+
+      # --- 渲染管线与字形路径（含离屏读回，需要后端）-----------------------
+      - name: 渲染管线与确定性（FR-048 / SC-012）
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p tome-reader --test render_pipeline --test render_deterministic -- --nocapture
+
+      # --- 快照失败时上传三类文件供人工判断 --------------------------------
+      - name: 失败时上传快照差异
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-diff-${{ matrix.name }}
+          path: |
+            crates/tome-reader/tests/snapshots/**/*.png
+            snapshot.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # headless 形态（T049 / FR-052 / FR-036）—— 编译期无图形栈 + 能力错误退出码 3
+  #
+  # ## 这条 job 在证明什么
+  #
+  # `--no-default-features` 构建时，`tome-reader` 的渲染面在**编译期**消失
+  # （依赖树里连 wgpu 都没有）。于是：
+  #
+  # 1. 整个 workspace 能在**无图形环境**下构建（引擎 + CLI 均可）
+  # 2. `render` / `fonts` 子命令返回**退出码 3 + 结构化能力错误**（不伪装成功）
+  # 3. `verify-layout` 这类纯计算子命令**照常可用**（SC-014：无图形环境全能力）
+  #
+  # ## 为什么与依赖图断言不重复
+  #
+  # `dependency-graph` job 查的是 `cargo tree` 的**静态闭包**；本 job 查的是
+  # **运行期行为**（退出码、输出形态）。前者能发现"依赖被引入"，后者能发现
+  # "代码在无渲染面时走错了分支"——两者覆盖面不同。
+  # ---------------------------------------------------------------------------
+  headless:
+    name: headless 形态（无图形栈）
+    runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: stable-x86_64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 cargo 构建产物
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: headless
+
+      - name: 守卫（feature 门控方向）
+        run: bash scripts/check-reader-features.sh
+
+      - name: headless 构建
+        run: cargo build --workspace --no-default-features
+
+      - name: headless 测试（FR-052：无渲染面仍可完整构建）
+        run: cargo test --workspace --no-default-features
+
+      # 退出码 3 的断言：render / fonts 在无渲染面时必须诚实报能力错误
+      - name: 断言 render/fonts 在 feature-off 时返回退出码 3
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary=$(find target/debug -maxdepth 1 -name 'tome-cli' -o -maxdepth 1 -name 'tome-cli.exe' | head -1)
+          if [ -z "$binary" ]; then
+            echo "::error::找不到 tome-cli 二进制（headless 构建未产出？）"
+            exit 1
+          fi
+          echo "binary: $binary"
+
+          for sub in render fonts; do
+            set +e
+            "$binary" "$sub" 2>&1 | tee "headless-$sub.log"
+            code=${PIPESTATUS[0]}
+            set -e
+            if [ "$code" -ne 3 ]; then
+              echo "::error::$sub 在 headless 构建下应返回退出码 3（不支持能力），实测 $code"
+              exit 1
+            fi
+            grep -q 'offscreenRendering' "headless-$sub.log" || {
+              echo "::error::$sub 的错误应携带 offscreenRendering 能力标识（FR-057/058）"
+              exit 1
+            }
+            echo "$sub 正确返回退出码 3 + 能力标识"
+          done
+
+      # SC-014：纯计算子命令在无图形环境下**照常可用**
+      - name: 断言 verify-layout 在 headless 下照常可用（SC-014）
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary=$(find target/debug -maxdepth 1 -name 'tome-cli' -o -maxdepth 1 -name 'tome-cli.exe' | head -1)
+          # 退出码 0 或 1 都说明"命令跑起来了"（1 = 有语料未通过，是业务结论
+          # 而非能力错误）。**绝不能是 3**——那是"能力不可用"。
+          set +e
+          "$binary" verify-layout --corpus crates/tome-reader/tests/corpus --format json >/dev/null 2>&1
+          code=$?
+          set -e
+          if [ "$code" -eq 3 ]; then
+            echo "::error::verify-layout 在 headless 下报了能力错误——它是纯计算，SC-014 要求可用"
+            exit 1
+          fi
+          echo "verify-layout 在 headless 下可用（退出码 $code）"
 
   # ---------------------------------------------------------------------------
   # 三平台构建 + 测试 + 体积基线

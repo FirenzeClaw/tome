@@ -1,4 +1,4 @@
-//! [DONE] 字体内嵌加载 + fontdb 回退链（T037 / FR-050、FR-051、FR-047；research R3）
+//! `[DONE]` 字体内嵌加载 + fontdb 回退链（T037 / FR-050、FR-051、FR-047；research R3）
 //!
 //! ## 字体三角色与内嵌策略（FR-050 / 裁决 OQ#3→A）
 //!

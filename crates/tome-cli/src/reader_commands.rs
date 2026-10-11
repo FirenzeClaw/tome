@@ -1,4 +1,4 @@
-//! [DONE] S2 排版层的 CLI 薄壳（T048 的先行部分 / `contracts/cli.md` §2.1）
+//! `[DONE]` S2 排版层的 CLI 薄壳（T048 的先行部分 / `contracts/cli.md` §2.1）
 //!
 //! ## 薄壳的含义
 //!

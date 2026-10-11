@@ -1,4 +1,4 @@
-//! [DONE] RenderBatch 绘制指令序列（T034 / FR-048、SC-012）
+//! `[DONE]` RenderBatch 绘制指令序列（T034 / FR-048、SC-012）
 //!
 //! ## 这个模块是什么
 //!
@@ -101,7 +101,7 @@ pub struct GlyphQuad {
     pub font_size: f32,
     /// 行内亚像素偏移（缓存键的另一部分）
     pub subpixel_x: f32,
-    /// 字形所属字体（渲染必须知道画哪张位图；见 [`GlyphBox::font_id`]）
+    /// 字形所属字体（渲染必须知道画哪张位图；见 `GlyphBox::font_id`）
     pub font_id: cosmic_text::fontdb::ID,
     /// 字体内部字形索引
     pub glyph_id: u16,
@@ -264,7 +264,7 @@ impl RenderBatch {
     /// ## 与 [`Self::for_chapter`] 的关系
     ///
     /// `for_chapter` 取章的首屏；本函数取分页层切好的**第 N 页**。
-    /// 两者共用 [`Self::from_lines`] 的绘制指令生成——"同输入同指令序列"
+    /// 两者共用 `Self::from_lines` 的绘制指令生成——"同输入同指令序列"
     /// （SC-012）不因取页方式而变。
     ///
     /// ## 为什么直接消费 `page.lines` 而不重新按视口截取

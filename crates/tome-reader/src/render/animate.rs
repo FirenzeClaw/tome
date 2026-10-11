@@ -1,4 +1,4 @@
-//! [DONE] 翻页动效 + reduced-motion 降级（T038 / FR-046、FR-032）
+//! `[DONE]` 翻页动效 + reduced-motion 降级（T038 / FR-046、FR-032）
 //!
 //! ## 本模块的职责边界
 //!

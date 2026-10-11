@@ -1,4 +1,4 @@
-//! [DONE] 最小 PNG 编码（`tome render --out <png>` 的产物写入）
+//! `[DONE]` 最小 PNG 编码（`tome render --out <png>` 的产物写入）
 //!
 //! ## 为什么手写而不引 `png` crate
 //!

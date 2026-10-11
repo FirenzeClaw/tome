@@ -1,4 +1,4 @@
-//! [DONE] 书页语义（T021 / FR-016，裁决 OQ#5→A、OQ#20→C）
+//! `[DONE]` 书页语义（T021 / FR-016，裁决 OQ#5→A、OQ#20→C）
 //!
 //! ## 书页语义是什么
 //!
@@ -83,7 +83,7 @@ pub struct BookSemanticsResult {
 ///
 /// 语义上"要不要补"是布尔问题，但**补足量**在更长的章节链上有意义
 /// （调用方累加它来推导全书页码）。返回页数让两种用法都能表达；且它让
-/// "最多补一页"这条性质可被断言（[`Self::apply`] 的测试钉住了这点）。
+/// "最多补一页"这条性质可被断言（[`apply_book_semantics`] 的测试钉住了这点）。
 #[must_use]
 pub fn padding_needed_for_chapter_start(previous_chapter_pages: usize) -> usize {
     if previous_chapter_pages.is_multiple_of(2) {

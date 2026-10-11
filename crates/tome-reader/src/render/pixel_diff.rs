@@ -1,4 +1,4 @@
-//! [DONE] 像素比对：pixelmatch-YIQ 双闸门（T036 / research R4、SC-011）
+//! `[DONE]` 像素比对：pixelmatch-YIQ 双闸门（T036 / research R4、SC-011）
 //!
 //! ## 这套算法要解决的问题
 //!

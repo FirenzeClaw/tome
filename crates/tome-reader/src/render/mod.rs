@@ -1,4 +1,4 @@
-//! [DONE] 渲染管线入口（`render` feature 门控；T032 起落地）
+//! `[DONE]` 渲染管线入口（`render` feature 门控；T032 起落地）
 //!
 //! 本模块是排版层与渲染层的**物理分界**：它在 `render` feature 下才存在，
 //! 故 `--no-default-features` 的构建连"能否绘制"这个问题都不必回答——
@@ -8,16 +8,16 @@
 //!
 //! | 模块 | 职责 | 需求 | 状态 |
 //! |---|---|---|---|
-//! | [`pipeline`] | device/queue + 后端探测（无 surface） | FR-043 / FR-053 | [DONE] T032 |
-//! | [`atlas`] | 字形图集区域分配 + 增长簿记 | research R2-2/R2-4 | [DONE] T033 |
-//! | [`glyph_cache`] | 字形缓存键 + swash 栅格化 + 聚合上传 | FR-043 / FR-047 | [DONE] T033 |
-//! | [`batch`] | 绘制指令序列（顺序固定 + 确定性） | FR-048 / SC-012 | [DONE] T034 |
-//! | [`offscreen`] | 离屏渲染 + 256 对齐读回（能力错误诚实报告） | FR-053 | [DONE] T035 |
-//! | [`pixel_diff`] | pixelmatch-YIQ 双闸门（快照比对算法） | SC-011 | [DONE] T036 |
-//! | [`fonts`] | 内嵌子集注册 + 平台回退链（零网络；装载点见 `crate::font_setup`） | FR-050/051/047 | [DONE] T037 |
-//! | [`animate`] | 翻页动效档位 + reduced-motion 降级 | FR-046 / FR-032 | [DONE] T038 |
-//! | [`image`] | 图文混排（图片行盒 / 不被切开 / 占位） | FR-049 | [DONE] T039 |
-//! | [`glyph_atlas`] | 真实字形位图 → 图集 → WGSL 采样绘制 | research R2 | [DONE] 关门波次 |
+//! | [`pipeline`] | device/queue + 后端探测（无 surface） | FR-043 / FR-053 | `[DONE]` T032 |
+//! | [`atlas`] | 字形图集区域分配 + 增长簿记 | research R2-2/R2-4 | `[DONE]` T033 |
+//! | [`glyph_cache`] | 字形缓存键 + swash 栅格化 + 聚合上传 | FR-043 / FR-047 | `[DONE]` T033 |
+//! | [`batch`] | 绘制指令序列（顺序固定 + 确定性） | FR-048 / SC-012 | `[DONE]` T034 |
+//! | [`offscreen`] | 离屏渲染 + 256 对齐读回（能力错误诚实报告） | FR-053 | `[DONE]` T035 |
+//! | [`pixel_diff`] | pixelmatch-YIQ 双闸门（快照比对算法） | SC-011 | `[DONE]` T036 |
+//! | [`fonts`] | 内嵌子集注册 + 平台回退链（零网络；装载点见 `crate::font_setup`） | FR-050/051/047 | `[DONE]` T037 |
+//! | [`animate`] | 翻页动效档位 + reduced-motion 降级 | FR-046 / FR-032 | `[DONE]` T038 |
+//! | [`image`] | 图文混排（图片行盒 / 不被切开 / 占位） | FR-049 | `[DONE]` T039 |
+//! | [`glyph_atlas`] | 真实字形位图 → 图集 → WGSL 采样绘制 | research R2 | `[DONE]` 关门波次 |
 //!
 //! 后续落点（见 `specs/002-typesetting-renderer/plan.md` Project Structure）：
 //! `animate.rs`（T038）· `image.rs`（T039）· `fonts.rs`（T037）。

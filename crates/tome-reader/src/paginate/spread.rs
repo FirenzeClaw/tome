@@ -1,4 +1,4 @@
-//! [DONE] 单双页判据与手动覆盖（T019/T020 / FR-014、FR-015）
+//! `[DONE]` 单双页判据与手动覆盖（T019/T020 / FR-014、FR-015）
 //!
 //! ## FR-014 的判据（MASTER §5.2，逐字对应）
 //!
@@ -120,7 +120,7 @@ impl SpreadSide {
     /// | 1, 3, 5, … | 奇 | [`SpreadSide::Right`] |
     ///
     /// 于是"章节从偶数页（左页）开始"= 章节的首页序号使它在左页——
-    /// 这正是 [`for_chapter_start`] 要保证的事。若这里取反（0 = Right），
+    /// 这正是 [`Self::for_chapter_start`] 要保证的事。若这里取反（0 = Right），
     /// 每个章节都会从右页起，与 FR-016 直接冲突。
     #[must_use]
     pub fn for_page_index(page_index: u32) -> Self {

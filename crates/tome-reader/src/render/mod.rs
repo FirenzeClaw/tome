@@ -14,7 +14,7 @@
 //! | [`batch`] | 绘制指令序列（顺序固定 + 确定性） | FR-048 / SC-012 | [DONE] T034 |
 //! | [`offscreen`] | 离屏渲染 + 256 对齐读回（能力错误诚实报告） | FR-053 | [DONE] T035 |
 //! | [`pixel_diff`] | pixelmatch-YIQ 双闸门（快照比对算法） | SC-011 | [DONE] T036 |
-//! | [`fonts`] | 内嵌子集注册 + 平台回退链（零网络） | FR-050/051/047 | [DONE] T037 |
+//! | [`fonts`] | 内嵌子集注册 + 平台回退链（零网络；装载点见 `crate::font_setup`） | FR-050/051/047 | [DONE] T037 |
 //! | [`animate`] | 翻页动效档位 + reduced-motion 降级 | FR-046 / FR-032 | [DONE] T038 |
 //! | [`image`] | 图文混排（图片行盒 / 不被切开 / 占位） | FR-049 | [DONE] T039 |
 //! | [`glyph_atlas`] | 真实字形位图 → 图集 → WGSL 采样绘制 | research R2 | [DONE] 关门波次 |

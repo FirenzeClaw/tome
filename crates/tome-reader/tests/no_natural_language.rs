@@ -98,6 +98,10 @@ const MESSAGE_BEARING_SOURCES: &[&str] = &[
     "src/render/pipeline.rs",
     "src/render/offscreen.rs",
     "src/render/fonts.rs",
+    // C1（内嵌字体优先的共享装载点）新增：`font_setup.rs` 产出
+    // `FontSetupError` 的 `#[error(...)]` 消息（实现 `Display`，经
+    // `to_reader_error()` 进错误通道），属本表准则 1。
+    "src/font_setup.rs",
 ];
 
 const ALLOWED_NON_MESSAGE_LITERALS: &[(&str, &str)] = &[

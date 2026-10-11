@@ -99,7 +99,7 @@ fn layout_one(engine: &mut LayoutEngine, text: &str, mode: ParagraphMode) -> Vec
 /// US1 场景 4 的正方向：**段首行左偏移 = 2 字身**。
 #[test]
 fn indent_mode_shifts_first_line_by_two_em() {
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let lines = layout_one(
         &mut engine,
         &sample_chapter(),
@@ -126,7 +126,7 @@ fn indent_mode_shifts_first_line_by_two_em() {
 /// 这条会失败，而上面那条仍然通过。
 #[test]
 fn indent_mode_does_not_shift_later_lines() {
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let lines = layout_one(
         &mut engine,
         &sample_chapter(),
@@ -144,7 +144,7 @@ fn indent_mode_does_not_shift_later_lines() {
 /// 缩进模式的**段间无额外间距**：全部行高相等。
 #[test]
 fn indent_mode_has_no_extra_paragraph_gap() {
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let lines = layout_one(
         &mut engine,
         &sample_chapter(),
@@ -167,7 +167,7 @@ fn indent_mode_has_no_extra_paragraph_gap() {
 /// 间距模式的**首行不缩进**（FR-018："间距模式无首行缩进"）。
 #[test]
 fn gap_mode_does_not_indent_first_line() {
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let lines = layout_one(
         &mut engine,
         &sample_chapter(),
@@ -185,7 +185,7 @@ fn gap_mode_does_not_indent_first_line() {
 /// 间距模式的**段间 0.4em**——落在段末行的行高上。
 #[test]
 fn gap_mode_adds_four_tenths_em_to_paragraph_tail() {
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let lines = layout_one(
         &mut engine,
         &sample_chapter(),
@@ -224,7 +224,7 @@ fn gap_mode_adds_four_tenths_em_to_paragraph_tail() {
 /// "没做另一模式的事"。两方向都过才排除"两个都做"的实现。
 #[test]
 fn modes_are_mutually_exclusive() {
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let text = &sample_chapter();
     let base_line_height = FONT_SIZE_PX * LINE_HEIGHT;
 
@@ -249,7 +249,7 @@ fn modes_are_mutually_exclusive() {
 /// 缩进量的**参数化**：0.5/1/2/3em 各档位偏移量与声明成比例（不是硬编码 2em）。
 #[test]
 fn indent_amount_is_parametric() {
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let text = &sample_chapter();
 
     for em in [0.5f32, 1.0, 2.0, 3.0] {

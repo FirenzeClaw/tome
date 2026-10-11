@@ -400,7 +400,7 @@ fn theme_changes_only_colors_not_geometry() {
 /// 字体缺字不影响指令序列的**结构性**（回退字形也产出一条指令）。
 #[test]
 fn fallback_glyphs_still_produce_quads() {
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     // 含 CJK 扩展 B 的生僻字（很可能不在任何系统字体里）
     let model = TextModel::new("读书记录𠀋测试");
     let result = engine.layout_paragraph(&model, 0, &Geometry::default_ma());

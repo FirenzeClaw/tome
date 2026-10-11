@@ -371,7 +371,7 @@ fn missing_glyph_fallback_does_not_shift_the_line() {
     let normal = "读书记录";
     let with_rare = "读书𠀋录"; // U+2000B：CJK 扩展 B
 
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let geometry = Geometry::default_ma();
 
     let normal_layout = engine.layout_paragraph(&TextModel::new(normal), 0, &geometry);

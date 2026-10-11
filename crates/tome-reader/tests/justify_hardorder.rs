@@ -81,7 +81,7 @@ fn fr011_non_last_lines_are_stretched_to_measure() {
 
     for text in corpus {
         for measure_px in [342.0f32, 361.0, 380.0, 399.0, 418.0] {
-            let mut engine = LayoutEngine::new();
+            let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
             let model = TextModel::new(text);
             let result =
                 engine.layout_paragraph(&model, 0, &geometry(measure_px, Alignment::Justified));
@@ -120,7 +120,7 @@ fn fr011_non_last_lines_are_stretched_to_measure() {
 #[test]
 fn fr011_last_line_is_not_stretched() {
     let text = "短短一段。";
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let model = TextModel::new(text);
     // 单行段落 → 它既是首行也是末行
     let result = engine.layout_paragraph(&model, 0, &geometry(400.0, Alignment::Justified));
@@ -136,7 +136,7 @@ fn fr011_last_line_is_not_stretched() {
 #[test]
 fn fr011_left_alignment_does_not_stretch() {
     let text = "书页翻开的时候，光线正好落在那一行字上，把墨色照得发亮，像是刚刚写上去的一样。";
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let model = TextModel::new(text);
 
     let result = engine.layout_paragraph(&model, 0, &geometry(342.0, Alignment::Left));
@@ -159,7 +159,7 @@ fn fr011_left_alignment_does_not_stretch() {
 #[test]
 fn fr011_punctuation_adjacency_is_not_stretched() {
     let text = "甲乙，丙丁戊己庚辛壬癸子丑寅卯辰巳午未申酉戌亥";
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let model = TextModel::new(text);
 
     let left = engine.layout_paragraph(&model, 0, &geometry(342.0, Alignment::Left));
@@ -206,7 +206,7 @@ fn fr011_punctuation_adjacency_is_not_stretched() {
 #[test]
 fn fr011_centered_splits_slack_in_half() {
     let text = "标题";
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let model = TextModel::new(text);
 
     let left = engine.layout_paragraph(&model, 0, &geometry(342.0, Alignment::Left));
@@ -310,7 +310,7 @@ fn fr008_step_progression_is_monotonic() {
 fn fr008_step4_exceptions_are_enumerable() {
     // 段落以闭标点开头 → 首行行首必然是该标点（无排版手段可避免）
     let text = "。这是以句号开头的段落，用于逼出第 ④ 步的例外记录。";
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let model = TextModel::new(text);
     let result = engine.layout_paragraph(&model, 0, &geometry(342.0, Alignment::Justified));
 
@@ -346,7 +346,7 @@ fn fr009_overlong_word_is_degraded_by_engine() {
     let text = format!("这个术语拼作 {long_word}，是一个很长的词。");
     let measure_px = 228.0f32;
 
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let model = TextModel::new(&text);
     let result = engine.layout_paragraph(&model, 0, &geometry(measure_px, Alignment::Left));
 
@@ -388,7 +388,7 @@ fn fr009_overlong_word_is_degraded_by_engine() {
 #[test]
 fn fr009_normal_words_do_not_trigger_degradation() {
     let text = "这本书的英文名是 The Shadow of the Wind，作者写得很好。";
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let model = TextModel::new(text);
     let result = engine.layout_paragraph(&model, 0, &geometry(342.0, Alignment::Left));
 
@@ -425,7 +425,7 @@ fn sc003_word_breaks_only_for_overlong_words() {
             .collect();
 
         for measure_px in [228.0f32, 285.0, 342.0] {
-            let mut engine = LayoutEngine::new();
+            let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
             let model = TextModel::new(text);
             let result = engine.layout_paragraph(&model, 0, &geometry(measure_px, Alignment::Left));
 

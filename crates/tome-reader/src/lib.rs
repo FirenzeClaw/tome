@@ -43,6 +43,7 @@
 //! | [`record`] | 阅读记录两量 + 跨形态去重 | [DONE] T031 |
 //! | [`corpus`] | 排版合成语料的装载与校验 | [DONE] T004 |
 //! | [`error`] | 本层错误类型 + `→ErrorKind` 映射（FR-057/058） | [DONE] T003 |
+//! | [`font_setup`] | 内嵌正文衬线的**唯一**装载点（feature 无关；排版与渲染共用） | `[DONE]` C1 缺陷修复 |
 //! | [`render`] | wgpu 自绘管线（仅 `render` feature） | [WIP] S2-4 |
 //!
 //! 后续切片的模块（`trace` / `toolbar` / `footer` / `keys`）随 S2-5 落地，
@@ -53,6 +54,7 @@
 pub mod corpus;
 pub mod corpus_eval;
 pub mod error;
+pub mod font_setup;
 pub mod footer;
 pub mod keys;
 pub mod layout;

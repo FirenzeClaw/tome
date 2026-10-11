@@ -295,12 +295,16 @@ fn to_engine_geometry(case: &TypesettingCase) -> tome_reader::layout::engine::Ge
 }
 
 /// 直接排版并返回逐行字符数（供构造"必然正确"的期望）。
+#[expect(
+    clippy::expect_used,
+    reason = "测试夹具无法就绪时应让所属测试立即失败，错误传播只会加噪音（与 .clippy.toml 的 allow-expect-in-tests 同一意图；该配置不覆盖 #[test] 之外的辅助函数）"
+)]
 fn layout_line_lengths(text: &str, geometry: &tome_reader::layout::engine::Geometry) -> Vec<usize> {
     use tome_reader::layout::engine::LayoutEngine;
     use tome_reader::text::model::TextModel;
     use tome_reader::text::paragraph;
 
-    let mut engine = LayoutEngine::new();
+    let mut engine = LayoutEngine::new().expect("内嵌字体栈应可装载");
     let split = paragraph::split(text);
     let mut lengths = Vec::new();
     for para in &split.paragraphs {

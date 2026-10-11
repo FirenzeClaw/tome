@@ -278,10 +278,27 @@ impl GlyphCache {
     /// 故把它做成**公开的构造入口**：集成测试无法访问 `#[cfg(test)]` 的
     /// 私有构造，而"小图集"是验证增长路径的唯一实用手段。生产路径仍用
     /// [`Self::new`]（初始尺寸由 `atlas::INITIAL_ATLAS_SIZE` 定）。
+    ///
+    /// ## 字体栈为什么必须与排版面**同源**（C1 修复的关键）
+    ///
+    /// 本缓存栅格化时用 `GlyphRef::font_id` 去**自己的** `FontSystem` 里查
+    /// 字体（`get_image`）。而 `font_id` 是排版面产出 `GlyphBox` 时写下的。
+    /// 两者若不是同一个 `FontSystem`，`fontdb::ID` 在各自库里指向不同 face
+    /// ——查到的要么是别的字体，要么查不到，实测表现为
+    /// `no glyph bitmap could be produced (font stack failure)`（整页空白）。
+    ///
+    /// 故这里用与 [`crate::layout::engine::LayoutEngine`] 相同的**内嵌优先**
+    /// 构造（[`crate::font_setup`]）。共享字体栈（`shared_registry`）让
+    /// `font_id` 空间一致，是"排版与渲染不分叉"的结构保证。
     #[must_use]
     pub fn with_atlas_size(atlas_size: u32) -> Self {
         Self {
-            font_system: FontSystem::new(),
+            font_system: crate::font_setup::build_embedded_first_font_system(std::iter::empty())
+                .map(|(font_system, _id)| font_system)
+                // 内嵌字节不可解析是"构建产物损坏"，此时退化为系统字体栈：
+                // 渲染仍能出图（只是度量与排版未必一致），比 panic 好；
+                // 需要区分该状态的调用方用 `crate::font_setup` 的 Result 入口。
+                .unwrap_or_else(|_| FontSystem::new()),
             swash_cache: SwashCache::new(),
             atlas: GlyphAtlas::with_size(atlas_size),
             entries: HashMap::new(),
@@ -348,7 +365,7 @@ impl GlyphCache {
     ///
     /// 返回 `None` 表示系统字体里没有该字符——调用方应显式跳过而非假装成功。
     pub fn lookup_first_glyph(&mut self, ch: char) -> Option<GlyphRef> {
-        use cosmic_text::{Attrs, Family, Shaping};
+        use cosmic_text::{Attrs, Shaping};
 
         // 用 Buffer 走一次最小整形：这是拿到 (font_id, glyph_id) 的可靠途径
         // （直接查 fontdb 需要自己处理回退链，而回退链正是 cosmic-text 的职责）
@@ -359,7 +376,8 @@ impl GlyphCache {
         buffer.set_size(Some(1000.0), None);
         buffer.set_text(
             &ch.to_string(),
-            &Attrs::new().family(Family::Serif),
+            // 与排版面同一个通用族（见 `font_setup::reading_family` 的集中理由）
+            &Attrs::new().family(crate::font_setup::reading_family()),
             Shaping::Advanced,
             None,
         );

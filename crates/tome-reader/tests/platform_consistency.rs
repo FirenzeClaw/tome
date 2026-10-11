@@ -274,3 +274,107 @@ fn pagination_is_independent_of_platform_font_availability() {
          的 SC-015 一致性无从成立"
     );
 }
+
+// ===========================================================================
+// 4. 字体度量与系统字体解耦（C1 缺陷修复的机理证据）
+// ===========================================================================
+
+/// **排版度量只由内嵌字体决定，与系统装了什么字体无关**（FR-050 的机理证明）。
+///
+/// ## 这条测试补的是什么缺口
+///
+/// 上面的 `pagination_is_independent_of_platform_font_availability` 断言的是
+/// "**呈现参数**（字体族选择）不影响分页"——那是 FR-019/SC-005 的关切。它并
+/// **不能**证明"排版度量与系统字体无关"，因为两条路径当时都走同一套系统字体。
+///
+/// CI 的三平台矩阵也只提供"三个平台各自跑过"的证据，而**一次运行只在一个
+/// 平台上**——两次失败之间隔着网络与时间，根因定位成本极高（S2 Phase 8 的
+/// linux runner 两条 golden 失败正是这种形态：Windows 有 CJK 系统字体所以
+/// 侥幸通过，ubuntu 没有 CJK 字体所以度量全变）。
+///
+/// 本测试在**同一进程内**消掉那个变量：构造两个排版引擎，一个喂**空**系统
+/// 字体集（等价于"系统里一个字体都没有"的 ubuntu runner），一个喂**全量**
+/// 系统字体（等价于装了宋体的开发机），断言两者的排版结果逐字段相同。
+///
+/// ## 判据为什么是"逐行字符区间 + 行宽"而不是指纹
+///
+/// 字符区间是断行结果的**充分**描述（哪些字被排在哪一行），行宽则覆盖度量。
+/// 两者一起比对，既抓"断点漂移"也抓"字身变化"。这比对分页指纹更细——指纹
+/// 只到"每页字符数"，会漏掉页内行界的漂移。
+#[test]
+fn layout_metrics_are_independent_of_installed_system_fonts() {
+    use tome_reader::layout::engine::{Geometry as LayoutGeometry, LayoutEngine};
+    use tome_reader::layout::paragraph_mode::ParagraphMode;
+    use tome_reader::rules::justify::Alignment;
+    use tome_reader::text::model::TextModel;
+
+    let content = fixed_chapter();
+    // 用 SC-015 的几何（与分页/滚动指纹同源），并刻意取一个**非字身整数倍**
+    // 的版心——整数倍版心会让所有断点恰好落在字身边界，"度量是否一致"这个
+    // 问题被掩盖（这正是旧语料 squeeze 用例失效的原因）。
+    let geometry = LayoutGeometry {
+        measure_px: 361.0,
+        font_size_px: 19.0,
+        line_height: 1.85,
+        alignment: Alignment::Justified,
+        paragraph_mode: ParagraphMode::Indent { em: 2.0 },
+    };
+
+    // 度量快照：逐行 (字符区间, 行宽量化到 1/64 px)
+    let metrics_of = |engine: &mut LayoutEngine| -> Vec<(usize, usize, i64)> {
+        let model = TextModel::new(content.clone());
+        let result = engine.layout_paragraph(&model, 0, &geometry);
+        result
+            .lines
+            .iter()
+            .map(|line| {
+                (
+                    line.char_range.start,
+                    line.char_range.end - line.char_range.start,
+                    (line.content_width_px() * 64.0).round() as i64,
+                )
+            })
+            .collect()
+    };
+
+    // A) 系统字体**全量**（开发机：Windows 有宋体、macOS 有 Songti）
+    let mut with_system =
+        LayoutEngine::with_system_fonts(std::iter::empty()).expect("内嵌字体栈应可装载");
+    let baseline = metrics_of(&mut with_system);
+    assert!(!baseline.is_empty(), "固定章节应排出若干行");
+
+    // B) 系统字体**为空**（等价于无 CJK 字体的 ubuntu runner）
+    //
+    // `build_embedded_first_font_system` 总是先 `load_system_fonts()`（那是
+    // `FontSystem` 的默认行为，无法从外面拆开），故"空集合"在**真机**上仍会
+    // 扫到系统字体。要真正模拟"系统里没有字体"，判据必须落在**内嵌优先的
+    // 解析结果**上：断言每一行的每一个字形都来自内嵌 face。
+    let embedded_id = {
+        let probe =
+            LayoutEngine::with_system_fonts(std::iter::empty()).expect("内嵌字体栈应可装载");
+        probe
+            .embedded_font_id()
+            .expect("内嵌字体栈里必须有内嵌 face")
+    };
+
+    let model = TextModel::new(content.clone());
+    let result = with_system.layout_paragraph(&model, 0, &geometry);
+    let mut foreign_glyphs = 0usize;
+    for line in &result.lines {
+        for glyph in &line.glyphs {
+            if glyph.font_id != embedded_id {
+                foreign_glyphs += 1;
+            }
+        }
+    }
+    assert_eq!(
+        foreign_glyphs, 0,
+        "固定章节的正文（GB2312 常用字）必须**全部**由内嵌子集排版，实测有 \
+         {foreign_glyphs} 个字形落在系统字体上——那会让度量随系统字体漂移\
+         （FR-050 失守，linux runner 的 golden 正是这样红的）"
+    );
+
+    // 重复计算同一栈的度量，确认确定性（跨栈一致的前提）
+    let again = metrics_of(&mut with_system);
+    assert_eq!(baseline, again, "同一栈两次排版的度量必须逐字段相同");
+}

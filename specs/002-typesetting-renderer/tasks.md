@@ -210,31 +210,32 @@
 
 **Independent Test**: 痕迹渲染覆盖字符集合 == 区间 100%（SC-013）；MASTER §8 Don'ts 逐项断言过；命中往返 ≤半字形。
 
-- [ ] T040 [US1] Theme 组合根注入（tome-cli `root.rs` 装配昼/夜实例；`tome-reader` 只经 tome-core 取 Theme，不依赖 tome-app；FR-029）
-  - [ ] 注入路径测试（`crates/tome-reader/tests/theme_injection.rs`）；两实例语义色字段完整（对照 T002 清单）
-  - [ ] 分页逻辑不读 Theme（FR-019 的架构断言：paginate 模块无 Theme 引用，grep 断言）
-- [ ] T041 [P] [US1] 语义色映射 + 无障碍强制断言（FR-030：阅读区背景用主题阅读层色、禁纯白昼底、禁深灰替真黑、正文色不低于 text-secondary；FR-031：对比度/focus 环 2px/触达 ≥32px 渲染层强制）
-  - [ ] MASTER §8 Don'ts 逐项验收断言（禁蓝/禁纯白昼底/禁深灰夜底/禁 >700 字重）
-  - [ ] §2.3 对比度表六组组合全部达标断言
-- [ ] T042 [US4] 痕迹区间→可见片段 + 样式词表于 `crates/tome-reader/src/trace/render.rs`（FR-037：跨页/跨视口分段渲染且拼接无缝隙无重叠；FR-033：`HighlightRule.style` 解析序 = 语义词表→颜色名→默认下划线+诊断，词表可枚举）
-  - [ ] SC-013：`crates/tome-reader/tests/trace_exactness.rs`——渲染像素范围覆盖的字符集合与区间逐字符相等（100%，含跨页/跨视口）
-  - [ ] 未知样式回退可辨识（诊断记录断言）；不静默不渲染
-- [ ] T043 [US4] 命中测试与反查互逆 + 文字选择于 `crates/tome-reader/src/trace/hit.rs`（FR-040：两形态下互为逆运算，往返 ≤半字形；FR-038：选择产字符区间，口径与 `resolve_anchor` 一致）
-  - [ ] 互逆参数化测试（`crates/tome-reader/tests/hit_test_inverse.rs`，翻页/滚动各一组）
-  - [ ] US4 场景 3：拖选结果为字符区间且与锚点口径一致（同文件）
-- [ ] T044 [P] [US4] 词典查词桥于 `crates/tome-reader/src/trace/dict.rs`（FR-041：复用 001 §FR-016 词典求值，不实现第二套；失败提示可操作原因）
-  - [ ] US4 场景 4：命中词典展示；失败时结构化原因（不静默）
-- [ ] T045 [US1] 页脚信息于 `crates/tome-reader/src/footer.rs`（FR-042：章号统一为当前章；章内页码；剩余时间 = 当前章剩余字符数 ÷ 近期阅读速度（001 §FR-026b 记录），无足够数据时该项隐藏）
-  - [ ] 各分支测试（`crates/tome-reader/tests/footer.rs`）：正常估算 / 无数据隐藏（不出现无依据估算值）
-- [ ] T046 [P] [US1] 阅读工具栏状态机与几何于 `crates/tome-reader/src/toolbar.rs`（FR-034：默认隐形、静止 2.5s 淡出、整窗顶部 8px 热区（不随单/双页变化）、入口清单；对 S3 暴露状态与边界接口，S3 无需反查内部状态）
-  - [ ] 状态迁移测试（隐形→唤出→淡出）；热区为整窗顶部全域断言
-  - [ ] 接口形态断言：状态与几何经公开接口输出（不暴露内部实现类型）
-- [ ] T047 [P] [US1] 键位集 + 栈式 Esc 于 `crates/tome-reader/src/keys.rs`（FR-035：显式键位表逐项可测——前/后翻页、上/下一章、章节首/末、滚动行滚动与页滚动、工具栏唤出、Esc 栈式取消）
-  - [ ] 键位表逐项测试；Esc 栈式语义两层场景断言（沉浸/工具栏先退，抽屉/弹层在栈顶先关）
+- [x] T040 [US1] Theme 组合根注入（tome-cli `root.rs` 装配昼/夜实例；`tome-reader` 只经 tome-core 取 Theme，不依赖 tome-app；FR-029）
+  - [x] 注入路径测试（`crates/tome-reader/tests/theme_injection.rs`）；两实例语义色字段完整（对照 T002 清单）
+  - [x] 分页逻辑不读 Theme（FR-019 的架构断言：paginate 模块无 Theme 引用，grep 断言）
+- [x] T041 [P] [US1] 语义色映射 + 无障碍强制断言（FR-030：阅读区背景用主题阅读层色、禁纯白昼底、禁深灰替真黑、正文色不低于 text-secondary；FR-031：对比度/focus 环 2px/触达 ≥32px 渲染层强制）
+  - [x] MASTER §8 Don'ts 逐项验收断言（禁蓝/禁纯白昼底/禁深灰夜底/禁 >700 字重）
+  - [x] §2.3 对比度表六组组合全部达标断言
+- [x] T042 [US4] 痕迹区间→可见片段 + 样式词表于 `crates/tome-reader/src/trace/render.rs`（FR-037：跨页/跨视口分段渲染且拼接无缝隙无重叠；FR-033：`HighlightRule.style` 解析序 = 语义词表→颜色名→默认下划线+诊断，词表可枚举）
+  - [x] SC-013：`crates/tome-reader/tests/trace_exactness.rs`——渲染像素范围覆盖的字符集合与区间逐字符相等（100%，含跨页/跨视口）
+  - [x] 未知样式回退可辨识（诊断记录断言）；不静默不渲染
+- [x] T043 [US4] 命中测试与反查互逆 + 文字选择于 `crates/tome-reader/src/trace/hit.rs`（FR-040：两形态下互为逆运算，往返 ≤半字形；FR-038：选择产字符区间，口径与 `resolve_anchor` 一致）
+  - [x] 互逆参数化测试（`crates/tome-reader/tests/hit_test_inverse.rs`，翻页/滚动各一组）
+  - [x] US4 场景 3：拖选结果为字符区间且与锚点口径一致（同文件）
+- [x] T044 [P] [US4] 词典查词桥于 `crates/tome-reader/src/trace/dict.rs`（FR-041：复用 001 §FR-016 词典求值，不实现第二套；失败提示可操作原因）
+  - [x] US4 场景 4：命中词典展示；失败时结构化原因（不静默）
+- [x] T045 [US1] 页脚信息于 `crates/tome-reader/src/footer.rs`（FR-042：章号统一为当前章；章内页码；剩余时间 = 当前章剩余字符数 ÷ 近期阅读速度（001 §FR-026b 记录），无足够数据时该项隐藏）
+  - [x] 各分支测试（`crates/tome-reader/tests/footer.rs`）：正常估算 / 无数据隐藏（不出现无依据估算值）
+- [x] T046 [P] [US1] 阅读工具栏状态机与几何于 `crates/tome-reader/src/toolbar.rs`（FR-034：默认隐形、静止 2.5s 淡出、整窗顶部 8px 热区（不随单/双页变化）、入口清单；对 S3 暴露状态与边界接口，S3 无需反查内部状态）
+  - [x] 状态迁移测试（隐形→唤出→淡出）；热区为整窗顶部全域断言
+  - [x] 接口形态断言：状态与几何经公开接口输出（不暴露内部实现类型）
+- [x] T047 [P] [US1] 键位集 + 栈式 Esc 于 `crates/tome-reader/src/keys.rs`（FR-035：显式键位表逐项可测——前/后翻页、上/下一章、章节首/末、滚动行滚动与页滚动、工具栏唤出、Esc 栈式取消）
+  - [x] 键位表逐项测试；Esc 栈式语义两层场景断言（沉浸/工具栏先退，抽屉/弹层在栈顶先关）
 
 > **⛔ 检查点：S2-5 之后（体验完整门）**
-> - [ ] SC-013 痕迹精确 100%；FR-031 无障碍强制项逐项过
-> - [ ] 人工审查后进入下一阶段
+> - [x] SC-013 痕迹精确 100%；FR-031 无障碍强制项逐项过
+> - [x] 人工审查后进入下一阶段
+>   - PM 注记（2026-10-11）：体验完整门通过（SC-013 痕迹精确含跨页/跨视口、FR-031 无障碍六组对比度 AA、MASTER §8 Don'ts 逐项、FR-040 互逆误差 11.08px 贴限不越）。`--viewport` 已真实消费（三视口哈希互异 + 越界不产出文件）。rustdoc 状态标注被误判为 intra-doc link 的 ~70 条告警归 T055 处理。
 
 ---
 

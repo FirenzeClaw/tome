@@ -194,9 +194,25 @@ target/debug/tome-cli layout --text <file>                    # 0
 反过来，**短路不扩大**：拼错的子命令仍是用法错误（退出码 2）——2 与 3 是不同信号
 （你写错了 / 本产品没有这项能力）。
 
+**另一条不变量：能力错误不依赖装配成功。** 短路发生在**任何 IO 之前**，故退出码
+只由"渲染面在不在"决定，与数据目录能不能写无关。可确定性地验证（不靠运气）：
+
+```bash
+# --data-dir 指向一个已存在的普通文件 → 装配必然失败
+: > /tmp/not-a-dir
+target/debug/tome-cli --data-dir /tmp/not-a-dir render   # 仍是 3 + 能力标识
+target/debug/tome-cli --data-dir /tmp/not-a-dir fonts    # 仍是 3 + 能力标识
+target/debug/tome-cli --data-dir /tmp/not-a-dir layout   # 1 + error.storage: <原因>；<指引>
+```
+
+第三条同时演示**装配失败的诊断细节**：`ClassifiedError` 的 Display 是
+`error.storage: <原因>；<指引>`——标识前缀不变（仍在），细节在后（此前被
+`.kind()` 丢掉，用户只看到裸 `error.storage`，无从定位）。
+
 回归测试：`cargo test -p tome-cli --no-default-features --test render_headless_capability`
-（4 用例；矩阵覆盖「无参 / 缺必需项 / 非法取值 / 未知选项 / 合法」五种形态）。
-CI 的 `headless` job 对真实二进制断言同一矩阵。
+（6 用例；矩阵覆盖「无参 / 缺必需项 / 非法取值 / 未知选项 / 合法」五种参数形态，
+外加「装配必然失败时仍退 3」与「装配失败带诊断细节」两条）。CI 的 `headless` job
+对真实二进制断言同一矩阵。
 
 ---
 

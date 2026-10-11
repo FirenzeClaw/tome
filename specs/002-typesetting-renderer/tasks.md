@@ -281,8 +281,14 @@
 - [x] T056 修复 headless 构建下 `render` 退 3 缺口（PM 新增 2026-10-11）
   - [x] 能力缺失压过用法错误：headless 构建里 `render`/`fonts` 无论参数是否合法均退 3 + `offscreenRendering` 能力标识（FR-053/FR-057/FR-058、contracts §2.3）
   - [x] `fonts`/`render` 两条路径行为对称；CI headless job 断言脚本同步为参数形态矩阵
-  - 落点：`crates/tome-cli/src/flags.rs`（`parse()` 入口前置短路 + `headless_render_subcommand` 辅助）、`crates/tome-cli/src/commands.rs`（`CommandOutcome::failure` 带出 `ErrorCapability` 标识）、`crates/tome-cli/tests/render_headless_capability.rs`（新建，4 用例；已实测无修复时 3/4 变红）、`.github/workflows/ci.yml`（断言矩阵 + 短路未扩大的反例）
+  - 落点：`crates/tome-cli/src/flags.rs`（`parse()` 入口前置短路 + `headless_render_face_subcommand` 辅助）、`crates/tome-cli/src/commands.rs`（`CommandOutcome::failure` 带出 `ErrorCapability` 标识）、`crates/tome-cli/tests/render_headless_capability.rs`（新建，6 用例；已实测无修复时变红）、`.github/workflows/ci.yml`（断言矩阵 + 短路未扩大的反例 + 装配必然失败的反例）
   - 发现（超出 T056 复述范围，一并修正）：CI 断言要求 stderr 携带 `offscreenRendering`，但 `fonts` 此前**也不带**该标识（`CommandOutcome::failure` 从未渲染 `ErrorCapability`）——只退码对、标识缺。故“fonts 已正常”仅对退出码成立。
+  - **PM 验收打回后的二次修复（2026-10-11）**：
+    - C1 不对称：首版只把 `render` 纳入 parse 短路，`fonts` 仍走「装配 → 分发 → 能力错误」，退出码取决于**装配成不成**（PM 机上 8 轮 2 轮复现为退 1 + 裸 `error.storage`）。现 `fonts` 一并纳入短路，辅助函数更名为 `headless_render_face_subcommand` 以如实反映覆盖范围；两命令的能力错误路径现在都**早于任何 IO**。
+    - C2 产品级 flake：`probe()`（`crates/tome-store/src/datadir.rs`）对 write/remove_file/read_dir 三个 IO 点加有限重试（3 次尝试、间隔 50ms；常量 `PROBE_ATTEMPTS`/`PROBE_RETRY_DELAY` 注明 Windows AV 对新建文件瞬时占用的理由）。**面向真实用户机器的产品级加固**，非测试化妆（真实用户同样跑杀软）。
+    - C2 诊断可见性：`AppRoot::assemble`/`assemble_with` 由 `Result<_, ErrorKind>` 改为 `Result<_, ClassifiedError>`，`StoreError::to_classified()` 保留细节；`main.rs` 打印 `error.storage: <原因>；<指引>`（标识前缀不变，`error_contract.rs` 断言语义不受影响——已实测 9/9 通过）。类型系统现**结构性阻止**再次丢细节（旧 `.kind().clone()` 已无法编译）。
+    - 稳定性证据：修复后 `render_headless_capability` **连跑 20 轮全绿**；`layout_cli`/`render_cli`/`verify_layout_cli`/`theme_injection_cli` 全绿（28/12/12/2）。
+    - 另记录不处理（PM 已立项）：`scroll_memory.rs:296` 既有 flaky、`chapter-by-bookshelf` 标识未登记入 `contracts/cli.md`。
 
 ---
 

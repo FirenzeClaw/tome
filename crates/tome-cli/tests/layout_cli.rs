@@ -23,9 +23,21 @@
 use std::process::Command;
 
 /// 跑一次 `tome layout`，返回 (退出码, stdout, stderr)。
+///
+/// ## 为什么每次调用都带独立 `--data-dir`
+///
+/// 不传时数据目录落到可移植默认（exe 同级 `data/`），套件内**并行**的
+/// 子进程会并发打开同一个 SQLite 库——CI 上时序碰撞时 `Db::open` 报
+/// `error.storage`（windows-gnu / ubuntu 实测，本地靠时序侥幸通过）。
+/// 其余 CLI 套件（command_surface 等）的约定就是显式 `--data-dir` 到
+/// 临时目录，本 helper 把它内置：每次调用一个独立目录，进程间零共享。
+/// 布局输出是纯排版 JSON，不含数据目录路径，故逐字节确定性不受影响。
 fn run_layout(args: &[&str]) -> (i32, String, String) {
     let binary = env!("CARGO_BIN_EXE_tome-cli");
+    let data_dir = tempfile::tempdir().expect("临时数据目录");
     let output = Command::new(binary)
+        .arg("--data-dir")
+        .arg(data_dir.path())
         .args(args)
         .output()
         .expect("应能启动 tome-cli");
@@ -948,9 +960,6 @@ fn layout_anchor_clamps_consistently() {
         "--height",
         "150",
     ]);
-    // [DEBUG-CI] windows-2022/ubuntu 上该命令退出码非 0 而本地为 0——
-    // 先把 stderr 打进 CI 日志再修（定位后移除此行）
-    eprintln!("DEBUG code={code} stderr={stderr}");
     assert_eq!(code, 0, "layout-anchor 退出码应为 0，stderr: {stderr}");
     let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
 

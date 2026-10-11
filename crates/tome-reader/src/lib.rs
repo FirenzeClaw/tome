@@ -61,6 +61,7 @@ pub mod rules;
 pub mod scroll;
 pub mod text;
 pub mod theme;
+pub mod toolbar;
 pub mod trace;
 
 #[cfg(feature = "render")]

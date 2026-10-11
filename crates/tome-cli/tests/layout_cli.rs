@@ -937,7 +937,7 @@ fn layout_anchor_clamps_consistently() {
     let dir = tempfile::tempdir().expect("临时目录");
     let text = write_sample(dir.path());
 
-    let (code, stdout, _) = run_layout(&[
+    let (code, stdout, stderr) = run_layout(&[
         "layout-anchor",
         "--text",
         text.to_str().unwrap(),
@@ -948,12 +948,11 @@ fn layout_anchor_clamps_consistently() {
         "--height",
         "150",
     ]);
-    assert_eq!(code, 0);
+    // [DEBUG-CI] windows-2022/ubuntu 上该命令退出码非 0 而本地为 0——
+    // 先把 stderr 打进 CI 日志再修（定位后移除此行）
+    eprintln!("DEBUG code={code} stderr={stderr}");
+    assert_eq!(code, 0, "layout-anchor 退出码应为 0，stderr: {stderr}");
     let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
-
-    // [DEBUG-CI] windows-2022 runner 上 from/to 钳制值分叉而本地不可复现，
-    // 先把实测 JSON 打进 CI 日志再修（定位后移除此行）
-    eprintln!("DEBUG layout-anchor JSON: {}", serde_json::to_string_pretty(&value).unwrap());
 
     assert_eq!(
         value["from"]["char_offset"], value["to"]["char_offset"],

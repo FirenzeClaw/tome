@@ -266,6 +266,16 @@ pub enum Command {
     /// 位置换算与阅读形态切换：输出指定字符在给定几何下**两种形态**各自的
     /// 定位，并报告锚点值是否不变（验证 SC-004 / SC-005b / FR-022 / FR-023）。
     LayoutAnchor(LayoutArgs),
+    /// `verify-layout --corpus <dir> [--report <file>]`（`contracts/cli.md` §2.5）
+    ///
+    /// 跑排版层合成语料的一致性比对，输出通过率与逐条差异
+    /// （对齐 001 的 `verify` 形态与 spec §SC-001~SC-003）。
+    VerifyLayout {
+        /// 语料目录（含 `*.json` 用例）
+        corpus: PathBuf,
+        /// 报告输出文件（`None` 表示写 stdout）
+        report: Option<PathBuf>,
+    },
     /// `verify --corpus <dir> [--report <file>]`（`contracts/cli.md`）
     ///
     /// 跑合成语料差分：逐条比对引擎输出与期望，输出一致率与逐条 diff。
@@ -1337,6 +1347,18 @@ pub fn parse(args: &[String]) -> ParseOutcome {
         }
         // `fonts`（contracts/cli.md §2.4）
         "fonts" => Command::Fonts,
+        // `verify-layout`（contracts/cli.md §2.5）
+        //
+        // 与 001 的 `verify --corpus` 共用 `--corpus` / `--report` 两个全局
+        // 选项（都是"给一个目录、出一份报告"的形态），故本分支只做必需项校验。
+        "verify-layout" => {
+            let Some(corpus) = corpus else {
+                return ParseOutcome::Usage(
+                    "verify-layout 需要 --corpus <dir>（排版合成语料目录）".to_string(),
+                );
+            };
+            Command::VerifyLayout { corpus, report }
+        }
         // `layout-anchor`（contracts/cli.md §2.2）
         "layout-anchor" => {
             let Some(char_offset) = anchor_char.or(anchor_offset) else {
@@ -1525,6 +1547,11 @@ pub fn help_text() -> String {
         "  --out <png>            输出 PNG 路径（必需）",
         "  --theme day|night      主题（默认 day，FR-030）",
         "  --reduced-motion       关闭动效（不影响静态渲染结果，FR-032）",
+        "",
+        "验证子命令（contracts/cli.md §2.5）：",
+        "  verify-layout --corpus <dir> [--report <file>]",
+        "                         跑排版合成语料，输出通过率与逐条差异",
+        "                         （与 001 的 verify 同形态；无硬门槛，如实报告）",
         "  -h, --help             显示本帮助",
         "",
         "退出码：0 成功 / 1 业务错误 / 2 用法错误 / 3 不支持能力",

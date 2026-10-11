@@ -1024,3 +1024,160 @@ fn format_report(options: &GlobalOptions, value: &serde_json::Value) -> String {
         }
     }
 }
+
+/// 执行 `verify-layout` 子命令（`contracts/cli.md` §2.5）。
+///
+/// ## 为什么**不**加 `#[cfg(feature = "reader-render")]`
+///
+/// 语料求值是**纯计算**（排版 + 比对），不碰图形栈。它必须与 `layout` /
+/// `layout-anchor` 一样在 headless 构建里可用——SC-014 要求"无图形环境全
+/// 能力可调用"，`verify-layout` 正在那张能力表上。
+///
+/// ## 与 001 `verify` 的阈值差异
+///
+/// 001 的 SC-002a 是"≥95%"的硬门槛（`meets_threshold`）。本子命令**无硬
+/// 门槛**：spec §SC-001~003 是规则级不变量（由 `tome-reader` 的专项测试
+/// 覆盖），语料的职责是**如实报告**通过率与逐条差异。故判据是"是否全通过"
+/// ——有未通过条目即退出码 1（让 CI 与人工都看得见），而非"通过率是否过某线"。
+pub fn run_verify_layout(options: &GlobalOptions, command: &Command) -> CommandOutcome {
+    let Command::VerifyLayout { corpus, report } = command else {
+        return CommandOutcome::failure(
+            &ErrorKind::Configuration,
+            "run_verify_layout 收到的不是 VerifyLayout 命令",
+        );
+    };
+
+    let Some(corpus_text) = corpus.to_str() else {
+        return CommandOutcome::failure(&ErrorKind::Configuration, "语料目录路径不是合法 UTF-8");
+    };
+    if !corpus.is_dir() {
+        return CommandOutcome::failure(
+            &ErrorKind::Configuration,
+            &format!("语料目录不存在或不是目录：{corpus_text}"),
+        );
+    }
+
+    let cases = match tome_reader::corpus::load_corpus_directory(corpus) {
+        Ok(cases) => cases,
+        Err(error) => {
+            return CommandOutcome::failure(&ErrorKind::Rule, &format!("语料加载失败：{error}"));
+        }
+    };
+
+    let report_data = tome_reader::corpus_eval::evaluate_corpus(&cases);
+    let json = render_layout_report(corpus_text, &report_data);
+    let rendered = format_layout_report(options, &json);
+
+    // `--report <file>` 时把渲染结果写文件（失败即报错，不静默丢弃报告）
+    if let Some(report_path) = report {
+        if let Err(error) = std::fs::write(report_path, &rendered) {
+            return CommandOutcome::failure(
+                &ErrorKind::Storage,
+                &format!("报告写入 {} 失败：{error}", report_path.display()),
+            );
+        }
+    }
+
+    if report_data.passed == report_data.total {
+        CommandOutcome::with_stdout(rendered)
+    } else {
+        // 有未通过条目 = 业务错误（退出码 1）。**但报告照常输出**——差异是
+        // 最需要被看到的东西，吞掉它只会让排错变难。
+        CommandOutcome::failure(&ErrorKind::Rule, rendered.trim_end())
+    }
+}
+
+/// 把求值结果组装成契约 §2.5 的 JSON 形态。
+///
+/// ## 字段名与 001 的 `verify` 对齐
+///
+/// `mode` / `total` / `passed` / `pass_rate` / `outcomes[]` —— 脚本与 CI 可以
+/// 用同一套读取逻辑处理两个 verify 命令（形态对齐是契约 §2.5 的明文要求）。
+#[must_use]
+pub fn render_layout_report(
+    corpus_text: &str,
+    report: &tome_reader::corpus_eval::CorpusReport,
+) -> serde_json::Value {
+    let outcomes: Vec<serde_json::Value> = report
+        .outcomes
+        .iter()
+        .map(|outcome| {
+            serde_json::json!({
+                "name": outcome.name,
+                "category": outcome.category,
+                "passed": outcome.passed,
+                "diffs": outcome.diffs.iter().map(|diff| serde_json::json!({
+                    "field": diff.field,
+                    "expected": diff.expected,
+                    "actual": diff.actual,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+
+    let by_category: serde_json::Map<String, serde_json::Value> = report
+        .by_category()
+        .into_iter()
+        .map(|(category, (passed, total))| {
+            (
+                category,
+                serde_json::json!({ "passed": passed, "total": total }),
+            )
+        })
+        .collect();
+
+    serde_json::json!({
+        "mode": "layout-corpus",
+        "source": corpus_text,
+        "total": report.total,
+        "passed": report.passed,
+        "pass_rate": report.pass_rate(),
+        "by_category": by_category,
+        "outcomes": outcomes,
+    })
+}
+
+/// 按 `--format` 渲染（与 `format_report` 同形态，但**不**依赖 render feature）。
+///
+/// ## 为什么不复用 `format_report`
+///
+/// `format_report` 带 `#[cfg(feature = "reader-render")]`（它服务于 render/fonts
+/// 两个渲染面子命令）。`verify-layout` 必须在 headless 构建里可用，故不能
+/// 依赖它。两处逻辑相同但**门控不同**——把 `format_report` 去掉门控会牵连
+/// 另外两条路径，风险大于收益。
+fn format_layout_report(options: &GlobalOptions, value: &serde_json::Value) -> String {
+    match options.format {
+        OutputFormat::Json => {
+            serde_json::to_string_pretty(value).unwrap_or_else(|_| "{}".to_owned())
+        }
+        OutputFormat::Human => {
+            let total = value["total"].as_u64().unwrap_or(0);
+            let passed = value["passed"].as_u64().unwrap_or(0);
+            let rate = value["pass_rate"].as_f64().unwrap_or(0.0);
+            let mut lines = vec![format!(
+                "verify-layout: {passed}/{total} 通过（{:.1}%）",
+                rate * 100.0
+            )];
+            if let Some(outcomes) = value["outcomes"].as_array() {
+                for outcome in outcomes {
+                    let name = outcome["name"].as_str().unwrap_or("?");
+                    let ok = outcome["passed"].as_bool().unwrap_or(false);
+                    lines.push(format!("  [{}] {name}", if ok { "OK" } else { "FAIL" }));
+                    if !ok {
+                        if let Some(diffs) = outcome["diffs"].as_array() {
+                            for diff in diffs.iter().take(3) {
+                                lines.push(format!(
+                                    "       {} : 期望 {} / 实际 {}",
+                                    diff["field"].as_str().unwrap_or("?"),
+                                    diff["expected"].as_str().unwrap_or("?"),
+                                    diff["actual"].as_str().unwrap_or("?"),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            lines.join("\n")
+        }
+    }
+}

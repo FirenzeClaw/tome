@@ -247,6 +247,8 @@ pub fn run_with_js(
         Command::Render(_) => crate::reader_commands::run_render(options, command, hosts.themes),
         // §2.4：内嵌字体与回退链报告
         Command::Fonts => crate::reader_commands::run_fonts(options),
+        // §2.5：排版合成语料的一致性比对（纯计算，headless 亦可用）
+        Command::VerifyLayout { .. } => crate::reader_commands::run_verify_layout(options, command),
         // T093：分组与启停（FR-001）
         Command::SourceGroup { source_ids, name } => {
             crate::pipeline_commands::run_source_group(options, source_ids, name)

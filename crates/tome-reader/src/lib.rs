@@ -51,6 +51,7 @@
 #![forbid(unsafe_code)]
 
 pub mod corpus;
+pub mod corpus_eval;
 pub mod error;
 pub mod footer;
 pub mod keys;

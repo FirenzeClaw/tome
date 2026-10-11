@@ -45,12 +45,26 @@ egui_extras = "0.36.2"
 app-single-instance = "0.1.0"
 # 跟随系统主题的 OS 探测（R7：设计系统无此机制，由外壳探测后映射 Day/Night token）
 dark-light = "3.0.0"
+# `egui_wgpu::RenderState::create` 是 async；spike 的 headless 形态要驱动它。
+# pollster 就是 eframe 自己的选择（eframe 的 `wgpu` feature 依赖它），
+# 故这里不引入新的异步运行时形态——依赖树里本来就有。
+pollster = "0.4"
+# spike 的失败诊断走日志（GUI 进程在 Windows 上无控制台，stderr 看不到）。
+log = "0.4"
 
 # 消息协议与设置的序列化（data-model.md §1 的值类型）
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # 外壳自有错误类型（AGENTS.md：每个 crate 拥有自己的错误类型）
 thiserror = "2.0.21"
+
+# `tome-cli` 只为**示例**（spike 落盘 PNG 复用它已验收的编码器）。写在
+# `[dev-dependencies]` 而非 `[dependencies]`：外壳的**生产**依赖面里不该出现
+# 另一个组合根，否则依赖图守卫会看到一个可疑的 `tome-app → tome-cli` 边。
+# 见 `crates/tome-cli/src/png.rs` 的模块文档（它刻意不引 png crate）。
+[dev-dependencies]
+tome-cli = { workspace = true }
+
 
 [features]
 # 默认带渲染面（与 tome-cli 同形）。
@@ -60,6 +74,14 @@ thiserror = "2.0.21"
 # ——因为 `cargo test --workspace --no-default-features` 是既有的 workspace 级门。
 default = ["reader-render"]
 reader-render = ["tome-reader/render"]
+
+# spike 示例（S3 T005）只在渲染面存在时才有意义——`required-features` 让
+# `--no-default-features` 构建**跳过**它，而不是编译失败。这不是可选的润色：
+# `cargo test` 默认会编译 examples，若不加这一条，workspace 的 headless 门
+# 会因这个示例而变红。
+[[example]]
+name = "spike_render"
+required-features = ["reader-render"]
 
 [lints]
 workspace = true

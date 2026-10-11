@@ -487,6 +487,199 @@ jobs:
           retention-days: 14
 
   # ---------------------------------------------------------------------------
+  # S3-0 spike：PaintCallback 同 device 直绘 S2 管线（tasks.md 003 T005）
+  #
+  # ## 这条 job 是 S3 的**放行门**
+  #
+  # 它回答一个问题：S2 的排版渲染管线能不能在 **eframe 用的那台 device**
+  # 上跑起来，并把同一页画成与离屏路径**逐像素相同**的结果？答"能"则 S3 的
+  # 阅读视图走路径 A（零拷贝直绘）；答"不能"则须停下来由用户裁决是否启用
+  # fallback 路径 B（readback 纹理）——**spike 自身不得降级**。
+  #
+  # ## 为什么判据是"逐像素相同"而不是"窗口里有东西"
+  #
+  # "窗口里出现了一页字"几乎无法证伪：离屏路径画错了也会出现一页字。真正要证
+  # 的是**两条路径是同一份绘制代码、同一台 device**——那才是路径 A 的实质。
+  # 故 spike 的 headless 形态在 `egui_wgpu::RenderState::create`（eframe 内部
+  # 用的同一个函数）建的 device 上跑 PaintCallback 的 prepare/paint 两阶段，
+  # 再把结果读回与离屏路径逐字节比对。
+  #
+  # ## 为什么先跑 probe 形态（沿用 T049 的形态）
+  #
+  # 与 `reader-snapshot` 同一理由：无后端时若"静默跳过"，job 会**绿着而其实
+  # 什么都没测**。spike 在无后端时打印 `SKIPPED` 并退 3——本 job 把退 3 判为
+  # **失败**（runner 没配好 lavapipe 就是矩阵配错了，不是"环境不支持"）。
+  #
+  # ## 三平台
+  #
+  # 与 `reader-snapshot` 完全同构：ubuntu/windows 装 lavapipe（软件 Vulkan），
+  # macos 用系统 Metal（禁 GL）。这不是巧合——路径 A 若在某个平台上不成立，
+  # 那个平台的快照基线也就没有意义，两者必须同源。
+  # ---------------------------------------------------------------------------
+  s3-spike:
+    name: S3-0 spike（${{ matrix.name }}）
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-lavapipe
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - name: windows-lavapipe
+            os: windows-latest
+            target: x86_64-pc-windows-gnu
+          - name: macos-metal
+            os: macos-latest
+            target: aarch64-apple-darwin
+    env:
+      RUSTUP_TOOLCHAIN: stable-${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装工具链（${{ matrix.target }}）
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: 缓存 cargo 构建产物
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: s3-spike-${{ matrix.name }}
+
+      # --- 后端安装（与 reader-snapshot 逐条同构）--------------------------
+      - name: 安装 lavapipe + Linux 图形构建依赖（ubuntu）
+        if: matrix.name == 'linux-lavapipe'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          # 图形构建依赖与 s0-spike 的 Linux 步骤**同一份清单**：winit 的后端
+          # 在编译期链接 x11/wayland 的客户端库，缺一即编译失败。两处若漂移，
+          # 会出现"某个 job 能编、另一个不能"的分裂。
+          sudo apt-get install -y --no-install-recommends \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
+            libwayland-dev libxkbcommon-dev libgl1-mesa-dev \
+            mesa-vulkan-drivers libvulkan1 vulkan-tools
+          icd=$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' | head -1)
+          echo "lavapipe ICD: ${icd}"
+          test -n "${icd}"
+          echo "VK_DRIVER_FILES=${icd}" >> "$GITHUB_ENV"
+          echo "VK_LOADER_LAYERS_DISABLE=*" >> "$GITHUB_ENV"
+
+      - name: 安装 lavapipe（windows）
+        if: matrix.name == 'windows-lavapipe'
+        shell: pwsh
+        run: |
+          # 版本与 reader-snapshot 钉同一版：软件光栅器的行为随版本漂移，
+          # 两条 job 若跑在不同版本的 lavapipe 上，像素证据就不可比。
+          $version = '24.3.4'
+          $url = "https://github.com/pal1000/mesa-dist-win/releases/download/$version/mesa3d-$version-release-msvc.7z"
+          $archive = "$env:RUNNER_TEMP\mesa.7z"
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          7z x $archive -o"$env:RUNNER_TEMP\mesa" -y | Out-Null
+          $icd = Get-ChildItem -Path "$env:RUNNER_TEMP\mesa" -Recurse -Filter '*lvp*icd*.json' | Select-Object -First 1
+          if (-not $icd) { Write-Error 'mesa-dist-win 包里找不到 lavapipe 的 ICD json' }
+          Write-Host "lavapipe ICD: $($icd.FullName)"
+          $dllDir = $icd.DirectoryName
+          "PATH=$dllDir;$env:PATH" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VK_DRIVER_FILES=$($icd.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "VK_LOADER_LAYERS_DISABLE=*" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: macOS 用 Metal（禁 GL）
+        if: matrix.name == 'macos-metal'
+        run: |
+          set -euo pipefail
+          echo "WGPU_BACKEND=metal" >> "$GITHUB_ENV"
+
+      # --- spike（headless 形态）：失败即门不过 ------------------------------
+      - name: S3-0 spike（headless，逐像素比对 + 后端名可见）
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "--- spike 输出 ---"
+          set +e
+          output=$(cargo run -q -p tome-app --example spike_render -- --headless --out spike-artifacts 2>&1)
+          code=$?
+          set -e
+          echo "$output"
+
+          # 无后端：**必须红**。runner 没配好后端是矩阵配错，不是"环境不支持"；
+          # 而"跳过"在退出码上看起来是成功——那正是 FR-053 要防的伪装。
+          if [ "$code" -eq 3 ]; then
+            echo "::error::spike 报告无可用图形后端（退出码 3）——本平台矩阵配置有误（如 lavapipe 未装）"
+            exit 1
+          fi
+          if [ "$code" -ne 0 ]; then
+            echo "::error::S3-0 spike 失败（退出码 ${code}）——路径 A 在本平台不成立"
+            exit 1
+          fi
+
+          # 正面证据一：后端名可见（否则"跑在哪个后端上"不可知）
+          echo "$output" | grep -q 'SPIKE backend=' || {
+            echo "::error::spike 未打印后端名——快照/比对跑在哪个后端上不可知"
+            exit 1
+          }
+          # 正面证据二：真的比对了（不是"两条路径都空白"式的假绿）
+          echo "$output" | grep -q 'SPIKE OK' || {
+            echo "::error::spike 未打印 SPIKE OK——逐像素比对没有通过"
+            exit 1
+          }
+          # 负面证据：不得出现 SKIPPED（退 3 已拦，此处再兜一道）
+          if echo "$output" | grep -q 'SKIPPED'; then
+            echo "::error::spike 输出出现 SKIPPED——CI 上不得有诚实跳过（FR-053）"
+            exit 1
+          fi
+
+      # --- 负例：无后端必须退 3（而不是伪装通过）--------------------------
+      #
+      # 这条判据若只能用"本机没有 GPU"触发就**无法被验证**——开发机有 GPU、
+      # CI 有 lavapipe，任何一处都走不到那条分支。`--no-backend` 清空实例的
+      # 后端集，确定性地走到它（与 S2 的 `Backends::empty()` 同一手法）。
+      #
+      # 期望：退 3 + 打印 SKIPPED。**这是唯一允许出现 SKIPPED 的地方**，
+      # 故它必须与上面那条正向断言分开跑、分开判。
+      - name: 负例（清空后端集必须退 3，不得伪装通过）
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          output=$(cargo run -q -p tome-app --example spike_render -- --headless --no-backend 2>&1)
+          code=$?
+          set -e
+          echo "$output"
+          if [ "$code" -ne 3 ]; then
+            echo "::error::清空后端集后 spike 未退 3（实测 ${code}）——FR-053 的诚实失败路径失效"
+            exit 1
+          fi
+          echo "$output" | grep -q 'SKIPPED' || {
+            echo "::error::退 3 但未打印 SKIPPED——失败形态不可辨"
+            exit 1
+          }
+          echo "负例通过：无后端 → 退 3 + SKIPPED（不伪装成功）"
+
+      # --- 三平台一致性：同字体同内容两条路径的像素差必须为 0 ----------------
+      - name: 产物落盘（供人工核对）
+        shell: bash
+        run: |
+          set -euo pipefail
+          # spike 已把两张 PNG 落盘；此处断言文件非空（真的写了产物）。
+          # 三平台之间**不比像素**（SC-011 的既定口径：跨平台只比排版结构），
+          # 比的是"每个平台上两条路径自洽"——那正是上一步在做的事。
+          for png in spike-artifacts/s3-spike-offscreen.png spike-artifacts/s3-spike-paintcallback.png; do
+            test -s "${png}" || { echo "::error::产物缺失或为空：${png}"; exit 1; }
+          done
+          echo "两张产物均已写出"
+
+      - name: 失败或成功都上传产物（供人工核对）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: s3-spike-${{ matrix.name }}
+          path: spike-artifacts/*.png
+          if-no-files-found: warn
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
   # headless 形态（T049 / FR-052 / FR-036）—— 编译期无图形栈 + 能力错误退出码 3
   #
   # ## 这条 job 在证明什么

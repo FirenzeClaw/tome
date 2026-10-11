@@ -28,7 +28,7 @@
 //!    的 `glyphs` 移动保持 `start`/`end` 序列不变），本层复用该实现。
 
 use cosmic_text::{
-    Attrs, Buffer, Family, FontSystem, Hinting, Metrics, ShapeLine, ShapeWord, Shaping, Wrap,
+    Attrs, Buffer, FontSystem, Hinting, Metrics, ShapeLine, ShapeWord, Shaping, Wrap,
 };
 
 use crate::layout::linebox::{GlyphBox, HardOrderStep, LineBox, RuleExceptionRecord};
@@ -112,20 +112,98 @@ pub struct LayoutResult {
 ///
 /// ## 为什么持有而非每次新建
 ///
-/// `FontSystem::new()` 会加载系统字体库（实测耗时可观）。分页预计算
+/// `FontSystem` 的构造会扫描系统字体库（实测耗时可观）。分页预计算
 /// （T024）要对多章反复排版，每次新建会成为瓶颈。故引擎是**长生命周期**
 /// 对象，排版是它的方法。
+///
+/// ## 字体栈的来源（C1 缺陷修复 / FR-050）
+///
+/// 引擎**不再**用裸 `FontSystem::new()`。它必须持有**内嵌子集优先**的字体栈
+/// （[`crate::font_setup::build_embedded_first_font_system`]）：排版度量若由
+/// 系统字体决定，三平台的断行结果必然分叉，且每台用户机器的版面随其系统
+/// 字体漂移——SC-005 系列的锚点不变量在跨机器场景下不成立。
+///
+/// 共享同一个栈（而不是各建一份）的理由是成本：`FontSystem` 的构造要扫系统
+/// 字体目录。共享栈的失败状态由 [`Self::new`] 的返回值表达。
 pub struct LayoutEngine {
     font_system: FontSystem,
 }
 
 impl LayoutEngine {
-    /// 新建引擎（加载系统字体库）。
+    /// 新建引擎（内嵌子集优先的字体栈）。
+    ///
+    /// ## 为什么返回 `Result` 而不是 `Self`
+    ///
+    /// 内嵌字节无法解析是**不应发生**的状态（字节是编译期 `include_bytes!`
+    /// 进来的合法 OpenType）。但把它做成 panic 在 `panic = "abort"` 下会终止
+    /// 进程——那是渲染面/排版面共用的可恢复错误面（FR-057）。故返回
+    /// `Result`，调用方映射为 `fontUnavailable` 能力错误。
+    pub fn new() -> Result<Self, crate::font_setup::FontSetupError> {
+        let (font_system, _embedded_id) =
+            crate::font_setup::build_embedded_first_font_system(std::iter::empty())?;
+        Ok(Self { font_system })
+    }
+
+    /// 降级构造：只有系统字体的栈。
+    ///
+    /// ## 什么时候用它
+    ///
+    /// 内嵌子集装载失败时 [`Self::new`] 返回 `Err`。调用方若要保住"排版仍可
+    /// 运行"这一能力（而不是让整个进程停摆），就在这里接住——这是
+    /// [`crate::paginate::page::Paginator::new`] 的选择。
+    ///
+    /// ## 为什么这是个需要被标记的状态
+    ///
+    /// 降级栈下度量**不再由内嵌字体决定**（FR-050 的三平台一致保证失效）。
+    /// 故调用方**不得**把降级结果当作一致性的证据；在意这点的调用方应当直接
+    /// 用 [`Self::new`] 的 `Result`，而不是走本方法把它咽下去。
     #[must_use]
-    pub fn new() -> Self {
+    pub fn with_system_fonts_only() -> Self {
         Self {
             font_system: FontSystem::new(),
         }
+    }
+
+    /// 用**指定的系统字体集**构造内嵌优先的栈。
+    ///
+    /// ## 为什么需要这个入口（C2 的机理验证）
+    ///
+    /// FR-050 的承诺是"三平台正文字形观感一致"——即排版度量**只由内嵌字体
+    /// 决定**，与系统装了什么字体无关。这条承诺在单机上无法用 CI 矩阵直接
+    /// 断言（一次运行只在一个平台上）。
+    ///
+    /// 本入口让测试在**同一进程内**消掉"系统字体不同"这个变量：构造一个喂
+    /// 自定义系统字体集的栈，与默认栈（喂空集合）比较排版结果。两者的断行与
+    /// 行宽若逐字段相同，则"度量不依赖系统字体"被真正证明，而不是"在两个
+    /// 平台上恰好都过了"（`tests/platform_consistency.rs` 即此用法）。
+    ///
+    /// 生产路径用 [`Self::new`]（等价于本方法传空集合）。
+    pub fn with_system_fonts(
+        system_fonts: impl IntoIterator<Item = cosmic_text::fontdb::Source>,
+    ) -> Result<Self, crate::font_setup::FontSetupError> {
+        let (font_system, _embedded_id) =
+            crate::font_setup::build_embedded_first_font_system(system_fonts)?;
+        Ok(Self { font_system })
+    }
+
+    /// 内嵌子集的 `fontdb::ID`（诊断用）。
+    ///
+    /// ## 用途
+    ///
+    /// 让"这一行的字形来自内嵌还是系统"可判定。FR-050 的承诺是正文观感由内嵌
+    /// 字体决定，故"正文里有没有落在系统字体上的字形"是一条可断言的判据
+    /// （`platform_consistency.rs` 用它证明度量与系统字体解耦）。
+    ///
+    /// 返回 `None` 表示字体栈里查不到内嵌 face——那意味着栈被换成了降级形态
+    /// （[`Self::with_system_fonts_only`]）。
+    #[must_use]
+    pub fn embedded_font_id(&self) -> Option<cosmic_text::fontdb::ID> {
+        let family = crate::font_setup::family_name();
+        self.font_system
+            .db()
+            .faces()
+            .find(|face| face.families.iter().any(|(name, _)| name == family))
+            .map(|face| face.id)
     }
 
     /// 排版一段文本。
@@ -244,7 +322,11 @@ impl LayoutEngine {
         buffer.set_hinting(Hinting::Disabled);
         buffer.set_text(
             text,
-            &Attrs::new().family(Family::Serif),
+            // 通用族 Serif 已在字体栈构造时**重指向内嵌子集**
+            // （`font_setup::build_embedded_first_font_system`），故此处取
+            // `Family::Serif` 即等于“用内嵌正文衬线排版”。常量集中在
+            // `font_setup::reading_family()`，避免排版与渲染两处各写一份而分叉。
+            &Attrs::new().family(crate::font_setup::reading_family()),
             Shaping::Advanced,
             None,
         );
@@ -511,8 +593,15 @@ impl LayoutEngine {
 }
 
 impl Default for LayoutEngine {
+    /// 默认构造走 [`Self::new`]，失败时**降级**为只有系统字体的栈。
+    ///
+    /// `Default` 的签名不允许失败，而 `panic = "abort"` 下 panic 会终止进程
+    /// （AGENTS.md 安全红线：生产路径不得 panic）。故失败时走
+    /// [`Self::with_system_fonts_only`]：排版仍然可运行，代价是度量不再由
+    /// 内嵌字体决定。生产路径**不应**依赖 `Default`——它只为测试与诊断入口
+    /// 保留；需要区分降级的调用方用 [`Self::new`]。
     fn default() -> Self {
-        Self::new()
+        Self::new().unwrap_or_else(|_| Self::with_system_fonts_only())
     }
 }
 
@@ -1043,7 +1132,7 @@ mod tests {
     use super::*;
 
     fn engine() -> LayoutEngine {
-        LayoutEngine::new()
+        LayoutEngine::new().expect("内嵌字体栈应可装载")
     }
 
     #[test]

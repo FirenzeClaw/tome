@@ -95,11 +95,21 @@ impl CorpusReport {
 ///
 /// ## 引擎为何在这里新建一次
 ///
-/// `LayoutEngine::new()` 会加载系统字体库（耗时可观）。批量求值共用**一个**
-/// 引擎实例——每条用例各建一次会让 `verify-layout` 在几十条语料上慢一个量级。
+/// `LayoutEngine::new()` 会构造内嵌优先的字体栈（含系统字体扫描，耗时可观）。
+/// 批量求值共用**一个**引擎实例——每条用例各建一次会让 `verify-layout` 在
+/// 几十条语料上慢一个量级。
+///
+/// ## 字体栈加载失败时怎么办
+///
+/// 返回**全不通过**的报告（每条用例带同一个差异说明），而不是 panic 或静默
+/// 当作"零用例"。理由：`verify-layout` 是验收入口，把"字体装不上"伪装成
+/// "没有用例"或"进程崩溃"都会让 CI 的结论失真——逐条报错才是诚实的
+/// （FR-057：能力不可用要明确报告）。
 #[must_use]
 pub fn evaluate_corpus(cases: &[TypesettingCase]) -> CorpusReport {
-    let mut engine = LayoutEngine::new();
+    let Ok(mut engine) = LayoutEngine::new() else {
+        return unloadable_font_report(cases);
+    };
     let outcomes: Vec<CaseOutcome> = cases
         .iter()
         .map(|case| evaluate_case(&mut engine, case))
@@ -109,6 +119,34 @@ pub fn evaluate_corpus(cases: &[TypesettingCase]) -> CorpusReport {
     CorpusReport {
         total: outcomes.len(),
         passed,
+        outcomes,
+    }
+}
+
+/// 字体栈装不上时产出的报告（每条用例都失败，差异说明一致）。
+///
+/// 这是 [`evaluate_corpus`] 的失败分支落点：它保证调用方拿到的是**结构完整的
+/// 报告**（有逐条结果、有通过率 0.0），而不是一个崩溃或一段空输出。
+fn unloadable_font_report(cases: &[TypesettingCase]) -> CorpusReport {
+    use crate::font_setup::FontSetupError;
+
+    let detail = FontSetupError::EmbeddedFontUnusable("字体栈装载失败").to_string();
+    let outcomes: Vec<CaseOutcome> = cases
+        .iter()
+        .map(|case| CaseOutcome {
+            name: case.name.clone(),
+            category: case.name.split(':').next().unwrap_or("other").to_owned(),
+            passed: false,
+            diffs: vec![CaseDiff {
+                field: "font_setup".to_owned(),
+                expected: "内嵌字体可用".to_owned(),
+                actual: detail.clone(),
+            }],
+        })
+        .collect();
+    CorpusReport {
+        total: outcomes.len(),
+        passed: 0,
         outcomes,
     }
 }
@@ -374,4 +412,65 @@ fn compare_mixed(
         });
     }
     diffs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::corpus::parse_corpus;
+
+    /// 一条最小合法用例（字段全部可解析，期望必然不满足）。
+    const SAMPLE: &str = r#"[
+      {
+        "name": "squeeze:样例",
+        "input": { "kind": "text", "paragraphs": ["甲乙丙"] },
+        "geometry": {
+          "measure_px": 342.0,
+          "font_size_px": 19.0,
+          "line_height": 1.85,
+          "paragraph_indent_em": 2.0
+        },
+        "expect": { "kind": "squeeze", "compression_px": [0.0, 0.0] },
+        "basis": "测试用最小依据"
+      }
+    ]"#;
+
+    /// **字体栈装不上时的报告形态**——结构完整、逐条失败、通过率 0.0。
+    ///
+    /// ## 为什么这条要存在
+    ///
+    /// [`unloadable_font_report`] 的分支在生产里**不会**走到（内嵌字节是
+    /// 编译期常量）。但"不会走到"不等于"可以没有测试"：它是 `verify-layout`
+    /// 在构建产物损坏时的**唯一**诚实出口，一旦写错（如返回空报告，从而让
+    /// 通过率计算除零、或让 CI 把"字体装不上"读成"没有用例"），失效是静默的
+    /// ——那正是本项目反复记的"全绿但没测到"形态。
+    #[test]
+    fn unloadable_font_report_is_structurally_complete() {
+        let cases = parse_corpus(SAMPLE).expect("样例语料应可解析");
+        let report = unloadable_font_report(&cases);
+
+        assert_eq!(report.total, 1, "总数应等于用例数（不得为零）");
+        assert_eq!(report.passed, 0, "字体装不上时不得有任何用例通过");
+        assert_eq!(report.pass_rate(), 0.0, "通过率应为 0.0");
+        assert_eq!(report.outcomes.len(), 1);
+
+        let outcome = &report.outcomes[0];
+        assert!(!outcome.passed);
+        assert_eq!(outcome.name, "squeeze:样例");
+        assert_eq!(outcome.category, "squeeze", "类别仍应取自用例名前缀");
+        assert_eq!(outcome.diffs.len(), 1, "应带一条差异说明");
+        assert_eq!(outcome.diffs[0].field, "font_setup");
+        assert!(
+            !outcome.diffs[0].actual.is_empty(),
+            "差异说明不得为空——空说明等于静默失败"
+        );
+    }
+
+    /// 空语料下该分支不得 panic（`pass_rate` 的 0/0 路径）。
+    #[test]
+    fn unloadable_font_report_handles_empty_input() {
+        let report = unloadable_font_report(&[]);
+        assert_eq!(report.total, 0);
+        assert_eq!(report.pass_rate(), 0.0, "空语料的通过率必须是 0.0 而非 NaN");
+    }
 }

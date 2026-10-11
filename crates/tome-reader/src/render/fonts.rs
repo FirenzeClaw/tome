@@ -16,15 +16,17 @@
 //!
 //! 思源宋体带 **Reserved Font Name「Source」**，OFL 规定修改版不得用它作
 //! 字体标识。T008 的子集化脚本已改家族名为 `Tome Serif CN` 并随分发附
-//! OFL 全文。本模块的 [`READING_SERIF_FAMILY`] 是该改名结果的**运行时**
-//! 落点——`tests/fonts.rs` 断言它不含 "Source"，防的是"某次重新子集化时
-//! 脚本回退到原名"。
+//! OFL 全文。本模块经 [`READING_SERIF_FAMILY`] 再导出该常量（定义在
+//! [`crate::font_setup`]——排版与渲染的**共用**装载点），它是改名结果的
+//! **运行时**落点——`tests/fonts.rs` 断言它不含 "Source"，防的是"某次
+//! 重新子集化时脚本回退到原名"。
 //!
 //! ## 零网络（FR-051/FR-056）
 //!
 //! 加载路径只有两条：`include_bytes!`（编译期嵌入）与 fontdb 的系统扫描
 //! （本地文件系统）。[`FontRegistry::load`] **无参数**——没有"从哪取"的
-//! 输入，故结构上不可能去网络取。
+//! 输入，故结构上不可能去网络取。字节的持有者是 [`crate::font_setup`]，
+//! 本模块只是它的再导出与消费方。
 //!
 //! ## 回退链的平台差异（FR-051）
 //!
@@ -34,22 +36,14 @@
 
 use std::sync::OnceLock;
 
-use cosmic_text::fontdb::{self, Source as FontdbSource};
+use cosmic_text::fontdb;
 
-/// 内嵌子集的字体家族名（OFL RFN 合规的改名结果）。
-pub const READING_SERIF_FAMILY: &str = "Tome Serif CN";
-
-/// 内嵌子集的字节（编译期嵌入，**不读文件系统**）。
-///
-/// ## 为什么用 `include_bytes!` 而不是运行时读文件
-///
-/// 三个理由，缺一不可：
-///
-/// 1. **单二进制分发**（宪法「附加约束 · 体积纪律」的前提）：运行时不依赖
-///    外部资源路径，用户移动/删除 `assets/` 不影响渲染
-/// 2. **零网络**（FR-051）：字节在二进制里，不存在"去取"的路径
-/// 3. **三平台一致**（FR-050）：同一个二进制在三个平台上嵌的是同一份字节
-const EMBEDDED_FONT: &[u8] = include_bytes!("../../../../assets/fonts/TomeSerifCN-subset.otf");
+// 内嵌字节、家族名与“内嵌优先”的字体栈构造都在 feature 无关的
+// `crate::font_setup`——排版层（headless 也要用）与渲染层共用同一份，
+// 避免两处各写一遍而让度量分叉（C1 缺陷的成因正是这种分叉）。
+pub use crate::font_setup::{
+    embedded_font_bytes, family_name, FontSetupError as FontLoadError, READING_SERIF_FAMILY,
+};
 
 /// 内嵌体积的**预算上限**：5 MiB（FR-050 的 3–5MB 区间上界）。
 ///
@@ -135,18 +129,6 @@ pub fn fallback_chain_for_current_platform() -> Vec<&'static str> {
     fallback_chain_for(Platform::current())
 }
 
-/// 内嵌子集的字节。
-#[must_use]
-pub fn embedded_font_bytes() -> &'static [u8] {
-    EMBEDDED_FONT
-}
-
-/// 内嵌子集的家族名。
-#[must_use]
-pub fn family_name() -> &'static str {
-    READING_SERIF_FAMILY
-}
-
 /// 字形的**来源**（内嵌子集 / 系统回退）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FontSource {
@@ -195,29 +177,18 @@ impl FontRegistry {
     ///
     /// 没有"从哪取"的输入，故不可能去网络取（FR-051）。
     ///
-    /// ## 加载顺序为什么重要
+    /// ## 构造为什么委托给 `font_setup`
     ///
-    /// **先注册内嵌**，再让它扫描系统字体。fontdb 按注册顺序解析同名家族，
-    /// 先注册者优先——若顺序反了，系统里恰好装有同名家族时会被它抢走，
-    /// 于是"三平台一致"（FR-050）静默失效。
+    /// 本注册表与排版引擎（`layout::engine::LayoutEngine`）**必须**持有同一种
+    /// 字体栈——否则排版按一套度量断行、渲染按另一套取字形，"快照与分页对不上"
+    /// 这类问题会反复出现。构造（内嵌注册顺序 + 通用族重指向）是那条共同语义的
+    /// 唯一实现，落在 feature 无关的 [`crate::font_setup`]，两个面都调它。
     ///
-    /// 实测风险低（`Tome Serif CN` 是改名后的专有家族名，不会与系统字体
-    /// 撞名），但顺序是**语义正确性**而非概率问题，故显式固定。
+    /// 顺序为何是语义正确性（而不是概率问题）见
+    /// [`crate::font_setup::build_embedded_first_font_system`] 的文档。
     pub fn load() -> Result<Self, FontLoadError> {
-        // 新建 FontSystem（它默认已扫描系统字体），再把内嵌子集**插到最前**
-        let mut font_system = cosmic_text::FontSystem::new();
-
-        let ids = font_system
-            .db_mut()
-            .load_font_source(FontdbSource::Binary(std::sync::Arc::new(
-                EMBEDDED_FONT.to_vec().into_boxed_slice(),
-            )));
-        let embedded_id = ids
-            .into_iter()
-            .next()
-            .ok_or(FontLoadError::EmbeddedFontUnusable(
-                "load_font_source returned no font id",
-            ))?;
+        let (font_system, embedded_id) =
+            crate::font_setup::build_embedded_first_font_system(std::iter::empty())?;
 
         Ok(Self {
             font_system,
@@ -347,27 +318,6 @@ pub fn shared_registry() -> Option<&'static std::sync::Mutex<FontRegistry>> {
         .as_ref()
 }
 
-/// 字体加载失败。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum FontLoadError {
-    /// 内嵌字节无法解析为可用字体。
-    ///
-    /// 这**不应发生**（字节是编译期 `include_bytes!` 进来的合法 OpenType），
-    /// 故它是"构建产物被破坏"的信号——对外映射为 `fontUnavailable`
-    /// 能力错误（FR-057：字体不可用要明确报告而非静默失败）。
-    #[error("embedded font subset unavailable: {0}")]
-    EmbeddedFontUnusable(&'static str),
-}
-
-impl FontLoadError {
-    /// 映射为本层统一错误面（FR-057/FR-058）。
-    #[must_use]
-    pub fn to_reader_error(self) -> crate::error::ReaderError {
-        crate::error::ReaderError::unsupported_capability(crate::capability::FONT_UNAVAILABLE)
-            .with_detail(self.to_string())
-    }
-}
-
 /// `tome fonts` 的报告数据（`contracts/cli.md` §2.4）。
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct FontsReport {
@@ -418,18 +368,8 @@ impl FontsReport {
 mod tests {
     use super::*;
 
-    #[test]
-    fn embedded_bytes_are_the_font_file() {
-        let bytes = embedded_font_bytes();
-        assert!(bytes.len() > 100_000);
-        assert_eq!(&bytes[..4], b"OTTO", "子集应是 CFF 轮廓的 OTF");
-    }
-
-    #[test]
-    fn family_name_is_rfn_compliant() {
-        assert_eq!(family_name(), "Tome Serif CN");
-        assert!(!family_name().contains("Source"));
-    }
+    // 内嵌字节与家族名的断言已随其定义迁到 `crate::font_setup` 的测试模块
+    // （单一来源，避免两处各断一次而漂移）。
 
     #[test]
     fn budget_is_five_mebibytes() {
@@ -490,13 +430,15 @@ mod tests {
     }
 
     #[test]
-    fn font_load_error_maps_to_capability() {
-        let error = FontLoadError::EmbeddedFontUnusable("测试构造");
-        let reader_error = error.to_reader_error();
-        assert_eq!(
-            reader_error.capability_id(),
-            Some(crate::capability::FONT_UNAVAILABLE),
-            "字体不可用必须报 fontUnavailable 能力标识（FR-057）"
+    fn registry_uses_the_shared_embedded_first_construction() {
+        // 渲染面的注册表必须与排版面用同一套构造：内嵌子集能被查到，
+        // 且**通用族 Serif 解析到它**（否则渲染按系统字体取字形，
+        // 与排版的度量分叉——C1 缺陷的成因）。
+        let registry = FontRegistry::load().expect("加载应成功");
+        let embedded_id = registry.embedded_id();
+        assert!(
+            registry.font_system.db().face(embedded_id).is_some(),
+            "内嵌子集应已注册"
         );
     }
 }

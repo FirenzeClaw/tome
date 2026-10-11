@@ -513,7 +513,11 @@ fn default_reading_params_come_from_the_design_system() {
         reading.line_height
     );
     assert_eq!(params.mode, ReadingMode::Paged);
-    assert_eq!(params.page_layout, PageLayout::Single);
+    assert_eq!(
+        params.page_layout,
+        PageLayout::Auto,
+        "默认是自动（MASTER §5.2 的默认行为），不是强制单页"
+    );
     assert_eq!(params.theme, ThemeChoice::FollowSystem);
 }
 
@@ -536,7 +540,7 @@ fn user_settings_are_exactly_four_groups() {
     assert!((default_font_size_px - tome_core::model::theme::READING.font_size_px).abs() < 0.001);
     assert!((default_line_height - tome_core::model::theme::READING.line_height).abs() < 0.001);
     assert_eq!(default_mode, ReadingMode::Paged);
-    assert_eq!(default_page_layout, PageLayout::Single);
+    assert_eq!(default_page_layout, PageLayout::Auto);
 }
 
 /// `ThemeChoice` 三态可往返，且 `FollowSystem` **不是**一个主题名。

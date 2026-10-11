@@ -16,6 +16,7 @@
 
 #![deny(unsafe_code)]
 
+pub mod app;
 pub mod engine;
 pub mod theme_bridge;
 

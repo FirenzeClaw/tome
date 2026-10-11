@@ -1,10 +1,27 @@
-//! `[WIP]` tome 应用外壳入口（S3 T001：crate 骨架，空窗口可启动）
+//! `[WIP]` tome 应用外壳入口（S3 T009：单实例 + 窗口配置 + eframe 启动）
 //!
-//! ## 本任务的范围
+//! ## 本文件刻意很薄
 //!
-//! T001 只交付「crate 落地 + 空 egui 窗口可开关 + 双形态构建通过」。
-//! 单实例、`ViewportBuilder` 尺寸、视图状态机在 T009 落地——届时本文件
-//! 收缩为薄壳（单实例判定 → `run_native`），视图与状态迁到 `app.rs`。
+//! 全部逻辑在 [`tome_app::app`] 的 `TomeApp` / `ViewState` 里（那层是纯 Rust
+//! 值，headless 可测）。这里只做三件必须在**进程入口**做的事：
+//!
+//! 1. **单实例判定**（第二实例唤醒已有窗口后立即退出）
+//! 2. **窗口配置**（`ViewportBuilder`：标题、最小尺寸、app id）
+//! 3. **引擎句柄的构造与移交**（启动失败 → 渲染结构化错误页，不静默）
+//!
+//! ## 单实例的时序（为什么是这个顺序）
+//!
+//! ```text
+//!   notify_if_running(APP_ID)  ← 第二实例在这里发唤醒信号并退出
+//!        ↓ false（本进程是主实例）
+//!   run_native(...)
+//!        ↓ 创建闭包内
+//!   start_primary(APP_ID, cb)  ← 注册唤醒回调（必须在窗口存在之后）
+//! ```
+//!
+//! `start_primary` **必须**在 `run_native` 的创建闭包里调用：回调要
+//! `ctx.request_repaint()`，而 `egui::Context` 那时才存在。提前注册就得把
+//! ctx 存起来再跨线程取——那条路会引入"回调在 ctx 就绪前触发"的竞态。
 //!
 //! ## 为什么 `#![deny(unsafe_code)]`
 //!
@@ -14,25 +31,46 @@
 
 #![deny(unsafe_code)]
 
-/// 空窗口应用（T001 的占位；T009 起由 `app.rs` 的 `TomeApp` 取代）。
-struct EmptyShell;
+use tome_app::app::TomeApp;
 
-impl eframe::App for EmptyShell {
-    /// eframe 0.34 起 `App` 拆为 `ui` + `logic` 两方法，**旧的单 `update`
-    /// 形态不再编译**（research-eframe.md Q1）。此处只实现必需的 `ui`。
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ui, |ui| {
-            ui.centered_and_justified(|ui| {
-                ui.label("tome");
-            });
-        });
-    }
-}
+/// 单实例标识（named pipe / UDS 的名字，也是 Wayland 下关联 `.desktop` 的键）。
+///
+/// 用固定的反向域名串而非 `CARGO_PKG_NAME`：包名可能随重构变化，而单实例
+/// 标识一旦变了，**旧版本实例与新版本实例会同时启动**——用户看到两个窗口，
+/// 且两个进程写同一个数据目录（spec 边缘情况要防的正是这个）。
+const APP_ID: &str = "com.firenzeclaw.tome";
 
 fn main() -> eframe::Result<()> {
+    // --- ① 单实例：已有实例则唤醒它并退出 ---
+    if app_single_instance::notify_if_running(APP_ID) {
+        return Ok(());
+    }
+
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_title("tome")
+            // 最小尺寸：低于它侧栏与版心都放不下（MASTER §6 的 768px 档）
+            .with_min_inner_size([768.0, 520.0])
+            .with_inner_size([1280.0, 840.0])
+            // app_id 的双重作用：eframe 的持久化目录 key + Wayland 的图标分组
+            .with_app_id(APP_ID),
+        ..Default::default()
+    };
+
     eframe::run_native(
         "tome",
-        eframe::NativeOptions::default(),
-        Box::new(|_creation_context| Ok(Box::new(EmptyShell))),
+        options,
+        Box::new(|creation_context| {
+            // --- ② 注册主实例（回调里只 request_repaint，真正的激活在 UI 帧里做）---
+            let ctx = creation_context.egui_ctx.clone();
+            let handle = app_single_instance::start_primary(APP_ID, move || {
+                // 只唤醒：`ViewportCommand` 必须在 UI 帧里发（见 app.rs 的说明）
+                ctx.request_repaint();
+            });
+
+            let mut app = TomeApp::new(creation_context);
+            app.set_single_instance(handle);
+            Ok(Box::new(app))
+        }),
     )
 }

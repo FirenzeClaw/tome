@@ -473,6 +473,25 @@ impl BridgeTheme {
     pub fn animation_time_seconds(&self) -> f32 {
         self.theme.motion().dur_base_ms as f32 / 1000.0
     }
+
+    /// 把本主题装进 egui 上下文（**唯一的装配点**）。
+    ///
+    /// ## 为什么要给两套主题都设
+    ///
+    /// egui 0.36 的样式按 `Theme::{Dark, Light}` 分槽存（`set_style_of`），
+    /// 而当前生效哪一套由 `ThemePreference` 决定。若只设一套，用户在系统里
+    /// 切昼夜时 egui 会切到**另一套默认样式**——我们的 token 就丢了。
+    /// 故两套都装成同一份（我们自己的主题已经区分了昼夜），偏好按当前主题设。
+    pub fn apply(&self, ctx: &egui::Context) {
+        let style = self.style();
+        ctx.set_style_of(egui::Theme::Dark, style.clone());
+        ctx.set_style_of(egui::Theme::Light, style);
+        ctx.set_theme(if self.is_night {
+            egui::ThemePreference::Dark
+        } else {
+            egui::ThemePreference::Light
+        });
+    }
 }
 
 // ===========================================================================

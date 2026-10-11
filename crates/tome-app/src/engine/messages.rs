@@ -57,21 +57,32 @@ pub struct ReadingAnchor {
 /// 本层另立一个同义枚举只会引入一处需要手工同步的映射。
 pub use tome_reader::paginate::config::ReadingMode;
 
-/// 单页 / 双页。
+/// 单页 / 双页的**意图**（三态，与 S2 的 `SpreadMode` 同构）。
 ///
-/// ## 为什么不复用 S2 的 `SpreadMode`
+/// ## 为什么必须有 `Auto`（T009 修正 T006 的两态决策）
 ///
-/// S2 的 `SpreadMode` 有三态（`Auto` / `ForceSingle` / `ForceSpread`），因为
-/// **分页层**要能表达"按 em 制判据自动决定"。外壳的这组调整只有"单页/双页"
-/// 两态（FR-007 的五组调整之一），`Auto` 由窗口宽度阈值自动触发而非用户选择
-/// （contracts/ui.md §4.3：≥1512px 才允许双页）。两态在类型上排除"用户选了
-/// Auto"这个不存在的状态。
+/// T006 曾把它做成两态（`Single` / `Spread`），理由是"`Auto` 由窗口宽度阈值
+/// 自动触发而非用户选择"。那个理由**与设计系统矛盾**：MASTER §5.2 的关键行为
+/// 第 3 条明写
+///
+/// > 用户可在工具栏**手动覆盖**为「自动 / 强制单页 / 强制双页」，手动选择在
+/// > 本次会话内优先于自动判定，并按**语义回落**失效
+///
+/// 即 `Auto` 是一个**用户可见的选择项**，不是内部状态。两态模型的后果在
+/// T009 的状态机测试里当场暴露：默认值只能是 `Single`，于是"默认配置在
+/// 1512px 窗口下应允许双页"与"用户选了单页就不切双页"这两条断言**互相矛盾**
+/// ——同一个值不可能既表示"未表态"又表示"表态为单页"。
+///
+/// 三态把这个歧义消灭在类型层：`Auto` = 未表态（宽度说了算），`Single` /
+/// `Spread` = 表态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum PageLayout {
-    /// 单页
+    /// 自动（按 em 制宽度判据决定；MASTER §5.2 的默认行为）
     #[default]
+    Auto,
+    /// 强制单页
     Single,
-    /// 双页（跨页）
+    /// 强制双页（宽度容不下两栏时按语义回落，MASTER §5.2 第 3 条）
     Spread,
 }
 
@@ -128,7 +139,7 @@ impl ReadingParams {
             font_size_px: reading.font_size_px,
             line_height: reading.line_height,
             mode: ReadingMode::Paged,
-            page_layout: PageLayout::Single,
+            page_layout: PageLayout::Auto,
             theme: ThemeChoice::FollowSystem,
         }
     }
@@ -159,7 +170,7 @@ impl UserSettings {
             default_font_size_px: reading.font_size_px,
             default_line_height: reading.line_height,
             default_mode: ReadingMode::Paged,
-            default_page_layout: PageLayout::Single,
+            default_page_layout: PageLayout::Auto,
         }
     }
 
@@ -325,6 +336,23 @@ pub enum ContentState {
 // ===========================================================================
 // §3 引擎消息协议
 // ===========================================================================
+
+/// 一次搜索会话（`data-model.md` §2 的 `SearchSession`）。
+///
+/// ## 为什么 `generation` 在这里而不只在请求里
+///
+/// 请求里的 `generation` 是"这次搜索的编号"，本结构是"UI 侧当前的搜索状态"。
+/// 两者必须同源：UI 收到结果时要比对"事件带的代际 == 我当前会话的代际"，
+/// 才能丢弃过期结果（DM §2 不变量 4）。把当前代际存在会话里，比对才有基准。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchSession {
+    /// 本次搜索的代际号（全局单调）
+    pub generation: u64,
+    /// 关键词
+    pub keyword: String,
+    /// 是否已结束（全部源到达或已取消）
+    pub done: bool,
+}
 
 /// UI → 引擎线程的请求（`data-model.md` §3 全量）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

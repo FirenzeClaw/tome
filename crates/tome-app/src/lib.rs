@@ -17,8 +17,13 @@
 #![deny(unsafe_code)]
 
 pub mod app;
+pub mod composition;
 pub mod engine;
+pub mod i18n;
+pub mod state;
 pub mod theme_bridge;
+pub mod views;
+pub mod widgets;
 
 #[cfg(feature = "reader-render")]
 pub mod render;

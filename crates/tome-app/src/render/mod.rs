@@ -31,5 +31,7 @@
 //! 不需要任何偏移补偿。
 
 pub mod callback;
+pub mod texture;
 
 pub use callback::{draw_reading_area, GlyphCallback, StageResources};
+pub use texture::PageFrameCache;

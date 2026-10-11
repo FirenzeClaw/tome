@@ -280,6 +280,25 @@ impl BridgeTheme {
         }
     }
 
+    /// 由已解析的 token 构造。
+    ///
+    /// ## 为什么需要它（而不是只留 `resolve`）
+    ///
+    /// `ViewState` 持有的是**已解析**的 `Theme`（它经 `resolve` 得到并随主题
+    /// 选择更新）。视图层每帧要用它取色与取几何，而再 `resolve` 一次会**重复
+    /// 探测 OS 主题**——那既浪费，又可能因为探测结果在两次调用之间变化而让
+    /// 同一帧里出现两套 token（一半昼一半夜的界面）。
+    ///
+    /// `is_night` 从 `Theme` 自身推导（`Theme::is_night()` 的判据是纸噪点
+    /// 不透明度），不依赖调用方告知——两处判断同一件事就会有分叉的一天。
+    #[must_use]
+    pub fn from_theme(theme: Theme) -> Self {
+        Self {
+            is_night: theme.is_night(),
+            theme,
+        }
+    }
+
     /// 底层 token（供排版层取几何/字体栈）。
     #[must_use]
     pub fn theme(&self) -> Theme {

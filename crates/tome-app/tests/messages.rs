@@ -60,7 +60,8 @@ fn request_section(request: &EngineRequest) -> &'static str {
         | EngineRequest::ReadingSetParams { .. }
         | EngineRequest::ReadingTurnPage { .. }
         | EngineRequest::ReadingSeekAnchor { .. }
-        | EngineRequest::ReadingLoadChapter { .. } => "Reading",
+        | EngineRequest::ReadingLoadChapter { .. }
+        | EngineRequest::ReadingViewport { .. } => "Reading",
         EngineRequest::TocLoad { .. } => "Toc",
         EngineRequest::BookmarkAdd { .. }
         | EngineRequest::BookmarkRemove { .. }
@@ -93,6 +94,7 @@ fn event_section(event: &EngineEvent) -> &'static str {
         EngineEvent::AddedToShelf { .. } => "Shelf",
         EngineEvent::SourceSwitched { .. } => "Source",
         EngineEvent::SettingsLoaded { .. } | EngineEvent::Saved => "Settings",
+        EngineEvent::RequestFailed { .. } => "Failed",
         EngineEvent::EnginePanic { .. } => "Panic",
     }
 }

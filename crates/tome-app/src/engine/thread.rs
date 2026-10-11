@@ -60,6 +60,26 @@ use super::messages::{ClassifiedErrorView, EngineEvent, EngineRequest};
 pub trait EngineWorker: Send + 'static {
     /// 处理一个请求，返回零到多条事件。
     fn handle(&mut self, request: EngineRequest) -> Vec<EngineEvent>;
+
+    /// 距下次需要"定时唤醒"还有多久（`None` = 不需要定时唤醒）。
+    ///
+    /// ## 为什么这个能力在 worker 而不在服务循环
+    ///
+    /// "什么时候该做一次后台工作"（如进度落盘窗口到点）取决于 worker 自己的
+    /// 状态。服务循环若自己去猜一个轮询间隔，就必然出现"该落盘的时刻晚了一个
+    /// 间隔"——而 SC-009 的丢失量口径正是那个窗口本身。
+    ///
+    /// 默认实现返回 `None`：不关心定时工作的 worker 一行都不用改。
+    fn next_wakeup(&self) -> Option<std::time::Duration> {
+        None
+    }
+
+    /// 定时唤醒时的工作（返回零到多条事件）。
+    ///
+    /// 只有在 [`Self::next_wakeup`] 返回 `Some` 之后才可能被调用。
+    fn on_wakeup(&mut self) -> Vec<EngineEvent> {
+        Vec::new()
+    }
 }
 
 /// 引擎线程启动失败的**结构化**报告（FR-023 / S1 FR-043）。
@@ -277,6 +297,17 @@ impl Drop for EngineHandle {
 /// 是"读某章崩了，之后整个阅读器不再响应"。边界放在请求粒度上，panic 的
 /// 影响面就被限制在**那一次请求**内（spec 边缘情况要的正是这个隔离粒度）。
 ///
+/// ## 定时唤醒（T015 的进度节流依赖它）
+///
+/// 循环在等待请求时，若 worker 声明了"还有多久需要醒来"（
+/// [`EngineWorker::next_wakeup`]），就用 `recv_timeout` 而不是无限阻塞的
+/// `recv`。到点后调 [`EngineWorker::on_wakeup`]，把"窗口到点该落盘了"这类
+/// 后台工作交给 worker 自己处理。
+///
+/// 这条通道是必要的：进度落盘的状态（脏标记 + 上次落盘时刻）只存在于引擎
+/// 线程，UI 线程无从知道"现在该落盘了吗"。若让 UI 定期发一个请求来问，状态
+/// 就有了两份。
+///
 /// ## `AssertUnwindSafe` 的理由
 ///
 /// `catch_unwind` 要求闭包 `UnwindSafe`，而 worker 是 `&mut`（可变引用天然
@@ -289,24 +320,41 @@ fn serve<W: EngineWorker>(
     requests: Receiver<EngineRequest>,
     events: Sender<EngineEvent>,
 ) {
-    while let Ok(request) = requests.recv() {
-        let context = describe(&request);
-        let outcome = catch_unwind(AssertUnwindSafe(|| worker.handle(request)));
+    loop {
+        // 有定时工作就带超时等，否则无限等（不空转）
+        let request = match worker.next_wakeup() {
+            Some(timeout) => match requests.recv_timeout(timeout) {
+                Ok(request) => Some(request),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+            },
+            None => match requests.recv() {
+                Ok(request) => Some(request),
+                Err(_) => return,
+            },
+        };
 
-        match outcome {
-            Ok(produced) => {
-                for event in produced {
-                    if events.send(event).is_err() {
-                        // 接收端没了（UI 已退出）——引擎线程该结束了
-                        return;
-                    }
+        let produced = match request {
+            Some(request) => {
+                let context = describe(&request);
+                match catch_unwind(AssertUnwindSafe(|| worker.handle(request))) {
+                    Ok(produced) => produced,
+                    // 兜底：如实报结构化事件，**循环继续**（线程存活可继续服务）
+                    Err(_) => vec![EngineEvent::EnginePanic { context }],
                 }
             }
-            Err(_) => {
-                // 兜底：如实报结构化事件，**循环继续**（线程存活可继续服务）
-                if events.send(EngineEvent::EnginePanic { context }).is_err() {
-                    return;
-                }
+            None => match catch_unwind(AssertUnwindSafe(|| worker.on_wakeup())) {
+                Ok(produced) => produced,
+                Err(_) => vec![EngineEvent::EnginePanic {
+                    context: "on_wakeup".to_owned(),
+                }],
+            },
+        };
+
+        for event in produced {
+            if events.send(event).is_err() {
+                // 接收端没了（UI 已退出）——引擎线程该结束了
+                return;
             }
         }
     }
@@ -329,6 +377,7 @@ fn describe(request: &EngineRequest) -> String {
         EngineRequest::ReadingTurnPage { .. } => "ReadingTurnPage",
         EngineRequest::ReadingSeekAnchor { .. } => "ReadingSeekAnchor",
         EngineRequest::ReadingLoadChapter { .. } => "ReadingLoadChapter",
+        EngineRequest::ReadingViewport { .. } => "ReadingViewport",
         EngineRequest::TocLoad { .. } => "TocLoad",
         EngineRequest::BookmarkAdd { .. } => "BookmarkAdd",
         EngineRequest::BookmarkRemove { .. } => "BookmarkRemove",

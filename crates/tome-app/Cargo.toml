@@ -22,6 +22,12 @@ tome-core = { workspace = true }
 # 声明在**根 Cargo.toml 的 [workspace.dependencies] 表**——写在成员使用点
 # 会被 cargo 忽略（2026-10-11 CI 依赖图断言实测抓出）。
 tome-reader = { workspace = true }
+# 本地书解析（TXT/EPUB/MOBI）与本地内容提供者（US1 的正文来源）
+tome-local = { workspace = true }
+# 存储层（T010 的 BookRepository 生产 adapter 在其中）
+tome-store = { workspace = true }
+# 净化管线的构造（`Cleaner` 的实现要吃 `ContentPipeline`）
+tome-rule = { workspace = true }
 
 # --- GUI 栈 ---
 #
@@ -45,6 +51,32 @@ egui_extras = "0.36.2"
 app-single-instance = "0.1.0"
 # 跟随系统主题的 OS 探测（R7：设计系统无此机制，由外壳探测后映射 Day/Night token）
 dark-light = "3.0.0"
+# 原生文件选择对话框（FR-002 的"文件选择"路径）。
+#
+# ## 为什么用原生对话框而不是自绘文件浏览器
+#
+# SC-003 的口径是"导入到开始阅读 ≤3 步（步 = 用户动作）"。自绘浏览器会把
+# 这件事变成"在应用里导航目录"（远超 3 步），而原生对话框是用户已经会用的
+# 东西——它把"找到文件"这件事留在操作系统里，而不是重新实现一遍。
+#
+# 平台面：Windows（`IFileOpenDialog`）/ macOS（`NSOpenPanel`）/ Linux（xdg
+# portal）。三者都由 rfd 封装，外壳不碰平台 API（`#![deny(unsafe_code)]`
+# 因此仍成立）。
+#
+# ## 为什么关掉默认 feature 再显式开 `xdg-portal`
+#
+# rfd 在 Linux 上有两条后端：GTK3（要 `libgtk-3-dev`）与 xdg portal（纯 D-Bus，
+# 只要会话总线）。CI 的 ubuntu job 只装了 `libwayland-dev` / `libxkbcommon-dev`
+# / `libgl1-mesa-dev`（见 `.github/workflows/ci.yml`），**没有** GTK 开发头
+# ——若走默认的 GTK 后端，CI 会因缺头文件而构建失败，而那个失败与本次改动
+# 的真实风险毫无关系。xdg portal 后端不依赖任何系统开发包。
+#
+# `tokio` 是 xdg-portal 后端跑 D-Bus 调用所需的运行时；它本来就在依赖树里
+# （`tome-net` 的 `RequestExecutor` 自持一个 tokio runtime）。
+rfd = { version = "0.15.4", default-features = false, features = [
+    "xdg-portal",
+    "tokio",
+] }
 # `egui_wgpu::RenderState::create` 是 async；spike 的 headless 形态要驱动它。
 # pollster 就是 eframe 自己的选择（eframe 的 `wgpu` feature 依赖它），
 # 故这里不引入新的异步运行时形态——依赖树里本来就有。

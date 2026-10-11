@@ -31,6 +31,7 @@ use crate::engine::messages::{
     ClassifiedErrorView, ContentState, EngineEvent, EngineRequest, PageLayout, ReadingAnchor,
     ReadingParams, SearchSession, ShelfEntry, ThemeChoice, UserSettings,
 };
+use crate::state::shelf::{ShelfSort, ShelfState};
 use crate::theme_bridge::{BridgeTheme, FollowSystem, ThemeSource};
 
 /// 视图（互斥切换的两个顶层视图）。
@@ -155,11 +156,11 @@ pub struct ViewState {
     overlay: Option<Overlay>,
 
     // --- 书架 ---
-    shelf: Vec<ShelfEntry>,
-    shelf_filter: String,
-    shelf_scroll: f32,
-    shelf_sort_descending: bool,
-    shelf_selected: Option<String>,
+    //
+    // 书架的**全部决策**（条目、过滤、排序、滚动、选中）在 `state::shelf`
+    // 里，这里只持有一份实例。分开的理由见那个模块的文档：那些决策都有
+    // 明确判据（SC-005/010），而判据不该依赖一个真实窗口。
+    shelf: ShelfState,
 
     // --- 阅读 ---
     book_id: String,
@@ -170,6 +171,24 @@ pub struct ViewState {
     current_chapter: i32,
     drawer: Option<DrawerTab>,
     geometry: ReadingGeometry,
+    /// 当前章的目录（T014 的页脚要显示章标题）
+    toc: Vec<String>,
+    /// 当前章的字符总数（页脚进度百分比的分母；来自排版结果）
+    chapter_char_len: usize,
+    /// 导入是否在进行中（T013 的骨架态判据）
+    importing: bool,
+    /// 待发往引擎的请求（由事件处理与视图意图共同产生）
+    ///
+    /// ## 为什么要有队列而不是"各处直接发"
+    ///
+    /// 状态机是**纯值**（headless 可测），它拿不到 `EngineHandle`。若把句柄
+    /// 传进来，"每一条不变量都能被 CI 覆盖"这条性质就没了——测试就得起一条
+    /// 真线程。
+    ///
+    /// 故状态机只把请求**排进队列**，由 `TomeApp` 在帧末统一发出。这条缝
+    /// 让"状态变化产生了哪些请求"变成一个可断言的量（`tests/shelf_state.rs`
+    /// 用它验证"打开书会请求 ReadingOpen"）。
+    requests: Vec<EngineRequest>,
 
     // --- 搜索 ---
     search: Option<SearchSession>,
@@ -196,11 +215,7 @@ impl ViewState {
         Self {
             view: AppView::Shelf,
             overlay: None,
-            shelf: Vec::new(),
-            shelf_filter: String::new(),
-            shelf_scroll: 0.0,
-            shelf_sort_descending: false,
-            shelf_selected: None,
+            shelf: ShelfState::new(),
             book_id: String::new(),
             anchor: ReadingAnchor {
                 chapter_index: 0,
@@ -216,6 +231,10 @@ impl ViewState {
                 font_size_px: params.font_size_px,
                 allowed: PageLayout::Single,
             },
+            toc: Vec::new(),
+            chapter_char_len: 0,
+            importing: false,
+            requests: Vec::new(),
             search: None,
             next_generation: 0,
             search_hits: Vec::new(),
@@ -245,6 +264,12 @@ impl ViewState {
     ///
     /// 真正的持久化进度恢复由 [`EngineEvent::ProgressRestored`] 抵达后覆盖——
     /// 它带的是库里存的值，与内存里的这份互为校验。
+    ///
+    /// ## 为什么同时发出 `ReadingOpen`
+    ///
+    /// 进入阅读视图与"引擎开始为这本书准备内容"是**同一件事的两面**：界面
+    /// 若只切视图不发请求，用户会停在一个永远不会到达内容的加载态上。
+    /// 两者一起做，`ReadingOpen` 的失败也走同一条错误呈现路径（R3）。
     pub fn open_book(&mut self, book_id: impl Into<String>) {
         let book_id = book_id.into();
         let is_same_book = self.book_id == book_id;
@@ -261,7 +286,35 @@ impl ViewState {
             self.current_chapter = 0;
             self.content = ContentState::Loading;
             self.content_version = None;
+            self.toc.clear();
+            self.chapter_char_len = 0;
         }
+    }
+
+    /// 打开一本书的完整意图（视图切换 + 需要发出的引擎请求）。
+    ///
+    /// 返回请求而不是自己发：状态机是纯值，拿不到 `EngineHandle`（见
+    /// `requests` 字段的说明）。视图层收下它、与自己的其它请求一并返回，
+    /// 由 `TomeApp` 在帧末统一发出。
+    #[must_use]
+    pub fn open_book_request(&mut self, book_id: impl Into<String>) -> EngineRequest {
+        let book_id = book_id.into();
+        self.open_book(book_id.clone());
+        EngineRequest::ReadingOpen { book_id }
+    }
+
+    /// 返回书架（并冲刷进度，FR-009）。
+    ///
+    /// ## 为什么返回书架必须冲刷
+    ///
+    /// 用户"读完就退回书架"是最常见的收尾动作，而此刻内存里的位置可能还在
+    /// 节流窗口内（尚未落盘）。若不冲刷，用户以为读完就走、结果下次打开回到
+    /// 三秒前的位置——那看起来像"进度没记住"。
+    #[must_use]
+    pub fn back_to_shelf_request(&mut self) -> Option<EngineRequest> {
+        let flush = self.flush_request();
+        self.back_to_shelf();
+        flush
     }
 
     /// 返回书架。
@@ -277,27 +330,42 @@ impl ViewState {
     }
 
     // --- 书架 ---
+    //
+    // 下面这些方法**全部**是 `ShelfState` 的转发。保留它们的理由是调用点的
+    // 稳定性：T009 的状态机断言与 T012 的视图都按这些名字调用，而把决策搬进
+    // `state::shelf` 是一次内部重构，不该迫使所有调用点跟着改。
+
+    /// 书架状态（视图层的读入口）。
+    #[must_use]
+    pub fn shelf(&self) -> &ShelfState {
+        &self.shelf
+    }
+
+    /// 书架状态（可变；供视图写回滚动位置与选中）。
+    pub fn shelf_mut(&mut self) -> &mut ShelfState {
+        &mut self.shelf
+    }
 
     /// 设置过滤词。
     pub fn set_shelf_filter(&mut self, filter: String) {
-        self.shelf_filter = filter;
+        self.shelf.set_filter(filter);
     }
 
     /// 当前过滤词。
     #[must_use]
     pub fn shelf_filter(&self) -> &str {
-        &self.shelf_filter
+        self.shelf.filter()
     }
 
     /// 记录书架滚动位置。
     pub fn set_shelf_scroll(&mut self, offset: f32) {
-        self.shelf_scroll = offset;
+        self.shelf.set_scroll(offset);
     }
 
     /// 书架滚动位置。
     #[must_use]
     pub fn shelf_scroll(&self) -> f32 {
-        self.shelf_scroll
+        self.shelf.scroll()
     }
 
     /// 书架条目数（全量）。
@@ -309,46 +377,51 @@ impl ViewState {
     /// 按标识取条目。
     #[must_use]
     pub fn shelf_entry(&self, book_id: &str) -> Option<&ShelfEntry> {
-        self.shelf.iter().find(|entry| entry.book_id == book_id)
+        self.shelf.get(book_id)
     }
 
     /// 过滤后的可见条目（FR-005 的标题子串匹配）。
-    ///
-    /// ## 排序为什么在这里做而不是让视图排
-    ///
-    /// 排序与过滤的**正交性**是一条断言（`sorting_and_filtering_are_orthogonal`）。
-    /// 若视图各自 `sort` 一次，那条断言就只能测"某个视图的某个实现"。
-    /// 收在这里，"过滤 + 排序"只有一处定义。
     #[must_use]
     pub fn visible_shelf_entries(&self) -> Vec<&ShelfEntry> {
-        let needle = self.shelf_filter.trim();
-        let mut visible: Vec<&ShelfEntry> = self
-            .shelf
-            .iter()
-            .filter(|entry| needle.is_empty() || entry.title.contains(needle))
-            .collect();
-        if self.shelf_sort_descending {
-            visible.sort_by(|left, right| right.title.cmp(&left.title));
-        } else {
-            visible.sort_by(|left, right| left.title.cmp(&right.title));
-        }
-        visible
+        self.shelf.visible()
     }
 
-    /// 切换排序方向。
+    /// 切换排序键（视图的"排序"按钮；三态循环）。
     pub fn toggle_shelf_sort(&mut self) {
-        self.shelf_sort_descending = !self.shelf_sort_descending;
+        self.shelf.cycle_sort();
+    }
+
+    /// 当前排序键。
+    #[must_use]
+    pub fn shelf_sort(&self) -> ShelfSort {
+        self.shelf.sort()
+    }
+
+    /// 设置排序键。
+    pub fn set_shelf_sort(&mut self, sort: ShelfSort) {
+        self.shelf.set_sort(sort);
     }
 
     /// 选中的书卡。
     #[must_use]
     pub fn shelf_selected(&self) -> Option<&str> {
-        self.shelf_selected.as_deref()
+        self.shelf.selected()
     }
 
     /// 选中书卡。
     pub fn select_shelf_entry(&mut self, book_id: Option<String>) {
-        self.shelf_selected = book_id;
+        self.shelf.select(book_id);
+    }
+
+    /// 导入是否进行中（T013 的骨架态判据）。
+    #[must_use]
+    pub fn is_importing(&self) -> bool {
+        self.importing
+    }
+
+    /// 标记"导入已开始"（拖入或文件选择之后，事件回来之前）。
+    pub fn begin_import(&mut self) {
+        self.importing = true;
     }
 
     // --- 阅读 ---
@@ -383,6 +456,18 @@ impl ViewState {
         self.current_chapter
     }
 
+    /// 当前章的目录（章标题列表）。
+    #[must_use]
+    pub fn toc(&self) -> &[String] {
+        &self.toc
+    }
+
+    /// 当前章的字符总数（页脚进度百分比的分母；来自排版结果）。
+    #[must_use]
+    pub fn chapter_char_len(&self) -> usize {
+        self.chapter_char_len
+    }
+
     /// 版心几何。
     #[must_use]
     pub fn reading_geometry(&self) -> ReadingGeometry {
@@ -393,6 +478,31 @@ impl ViewState {
     pub fn seek_anchor(&mut self, anchor: ReadingAnchor) {
         self.anchor = anchor;
         self.current_chapter = anchor.chapter_index;
+    }
+
+    /// 跳到锚点的完整意图（状态 + 引擎请求入队）。
+    pub fn seek_anchor_request(&mut self, anchor: ReadingAnchor) {
+        self.seek_anchor(anchor);
+        self.push_request(EngineRequest::ReadingSeekAnchor { anchor });
+    }
+
+    /// 翻页的完整意图（FR-006b 的章间接续由引擎处理）。
+    ///
+    /// ## 为什么锚点先动、请求后发
+    ///
+    /// 界面上"翻了一页"应当**立刻**有反应（进度条、页脚数字），而不是等引擎
+    /// 的事件回来才更新。锚点的**权威值**随后由 `ChapterReady` 校正（引擎按
+    /// 页边界给出精确的章内偏移），故这里的乐观更新不会留下错误。
+    pub fn turn_page_request(&mut self, delta: i32) {
+        self.push_request(EngineRequest::ReadingTurnPage { delta });
+    }
+
+    /// 告知引擎阅读区尺寸（每帧按需；引擎侧对未变化的尺寸去重）。
+    pub fn report_viewport(&mut self, width_px: f32, height_px: f32) {
+        self.push_request(EngineRequest::ReadingViewport {
+            width_px,
+            height_px,
+        });
     }
 
     /// 应用阅读参数（**只改 params**，不碰 anchor —— 不变量 3）。
@@ -612,19 +722,13 @@ impl ViewState {
     pub fn apply_event(&mut self, event: EngineEvent) {
         match event {
             EngineEvent::ShelfLoaded { entries } => {
-                self.shelf = entries;
+                self.shelf.replace_all(entries);
             }
             EngineEvent::ShelfEntryChanged { entry } => {
-                match self
-                    .shelf
-                    .iter_mut()
-                    .find(|existing| existing.book_id == entry.book_id)
-                {
-                    Some(existing) => *existing = entry,
-                    None => self.shelf.push(entry),
-                }
+                self.shelf.upsert(entry);
             }
             EngineEvent::ImportFailed { error } => {
+                self.importing = false;
                 self.error = Some(
                     ErrorToast::new(error)
                         .with_action(ErrorAction::Retry)
@@ -650,7 +754,10 @@ impl ViewState {
                     self.content = ContentState::Ready { content_version };
                 }
                 self.current_chapter = chapter_index;
-                let _ = laid_out;
+                // 章字符总数供页脚进度用（`laid_out` 是排版结果，它知道）
+                if let Some(layout) = &laid_out {
+                    self.chapter_char_len = layout.char_len;
+                }
             }
             EngineEvent::ChapterFailed {
                 book_id,
@@ -686,8 +793,14 @@ impl ViewState {
                 }
                 self.seek_anchor(anchor);
             }
-            EngineEvent::TocLoaded { .. } | EngineEvent::Bookmarks { .. } => {
-                // 目录/书签列表在 T019/T020 落地；本任务只需状态机骨架。
+            EngineEvent::TocLoaded { book_id, toc } => {
+                if book_id != self.book_id {
+                    return;
+                }
+                self.toc = toc;
+            }
+            EngineEvent::Bookmarks { .. } => {
+                // 书签列表在 T020 落地；本任务只需状态机骨架。
             }
 
             EngineEvent::SearchResult {
@@ -733,6 +846,18 @@ impl ViewState {
             }
             EngineEvent::Saved => {}
 
+            EngineEvent::RequestFailed { request, error } => {
+                // 非导入、非章节类失败的统一出口（见 `messages.rs` 的说明）。
+                // 动作集按请求类型给：书架类可重试或返回，阅读类给换源。
+                let toast = ErrorToast::new(error).with_action(ErrorAction::Retry);
+                let toast = if request.starts_with("Reading") {
+                    toast.with_action(ErrorAction::SwitchSource)
+                } else {
+                    toast
+                };
+                self.error = Some(toast.with_action(ErrorAction::Back));
+            }
+
             EngineEvent::EnginePanic { context } => {
                 // spec 边缘情况：引擎 panic 经外壳兜底捕获 → 结构化呈现。
                 // **不**退出当前视图：用户应留在原地重试（判据见测试）。
@@ -769,6 +894,31 @@ impl ViewState {
             book_id: self.book_id.clone(),
         })
     }
+
+    // --- 请求队列 ---
+
+    /// 排入一个请求（视图与事件处理共用）。
+    pub fn push_request(&mut self, request: EngineRequest) {
+        self.requests.push(request);
+    }
+
+    /// 取走当前排队的全部请求。
+    ///
+    /// ## 为什么是"取走"而不是"读"
+    ///
+    /// 请求是**一次性**的：发出去之后队列就该空，否则下一帧会重发（表现为
+    /// "翻一次页引擎收到两次请求"——重复的重排会被用户看成卡顿）。取走让
+    /// "已发送"与"待发送"在类型层面分开。
+    #[must_use]
+    pub fn take_requests(&mut self) -> Vec<EngineRequest> {
+        std::mem::take(&mut self.requests)
+    }
+
+    /// 当前排队的请求数（供断言）。
+    #[must_use]
+    pub fn pending_request_count(&self) -> usize {
+        self.requests.len()
+    }
 }
 
 /// 主题选择 → 具体 token。
@@ -794,8 +944,23 @@ pub struct TomeApp {
     single_instance: Option<app_single_instance::PrimaryHandle>,
     /// 本帧是否需要把窗口带到前台（由单实例回调置位）
     bring_to_front: bool,
-    /// 引擎句柄（T010 起接入真实 worker；本任务只留位）
+    /// 引擎句柄（T010 起接入真实 worker）
     engine: Option<crate::engine::thread::EngineHandle>,
+    /// 版心帧缓存（T014；`content_version` 未变时复用已构造的绘制批次）
+    #[cfg(feature = "reader-render")]
+    frames: crate::render::texture::PageFrameCache,
+    /// 当前版心（引擎事件带来的排版结果）
+    ///
+    /// ## 为什么 UI 侧要留一份 `ChapterLayout`
+    ///
+    /// 路径 A（PaintCallback 同 device 直绘）下，绘制发生在 egui 的 render
+    /// pass 里，而那一阶段只拿得到回调值。构造绘制批次（`RenderBatch`）必须
+    /// 在提交回调**之前**完成，故排版结果要在这里留一份。
+    ///
+    /// 它不参与序列化（`ChapterReady.laid_out` 的 `#[serde(skip)]` 即此意）
+    /// ——排版结果是进程内渲染产物，跨进程无意义。
+    #[cfg(feature = "reader-render")]
+    laid_out: Option<Arc<tome_reader::paginate::page::ChapterLayout>>,
 }
 
 impl TomeApp {
@@ -807,6 +972,10 @@ impl TomeApp {
             single_instance: None,
             bring_to_front: false,
             engine: None,
+            #[cfg(feature = "reader-render")]
+            frames: crate::render::texture::PageFrameCache::new(),
+            #[cfg(feature = "reader-render")]
+            laid_out: None,
         }
     }
 
@@ -829,6 +998,20 @@ impl TomeApp {
     /// 挂上引擎句柄。
     pub fn set_engine(&mut self, engine: crate::engine::thread::EngineHandle) {
         self.engine = Some(engine);
+    }
+
+    /// 启动序列：向引擎要书架与设置。
+    ///
+    /// ## 为什么不由引擎线程在启动时主动推
+    ///
+    /// 协议是**拉取式**的（UI 发请求、引擎回事件，见 `engine/thread.rs` 的
+    /// 说明）。让引擎在启动时自己推两个事件会引入"UI 还没准备好收"的时序
+    /// 问题——而那是可以被拉取模型完全避开的复杂度。
+    ///
+    /// 调用点在 `main.rs` 的创建闭包里（引擎已挂上、窗口已存在）。
+    pub fn start(&mut self) {
+        self.send(EngineRequest::ShelfLoad);
+        self.send(EngineRequest::SettingsLoad);
     }
 
     /// 从创建上下文构造（注册主题、UI 字体、渲染资源）。
@@ -884,6 +1067,14 @@ impl eframe::App for TomeApp {
     /// 修法：命令直接从 `logic` 发——那里有 `ctx`，且 `run_logic` 会处理
     /// `logic_output.viewport_commands`（`epi_integration.rs` 的
     /// `update_logic_only` 明确读它）。于是可见/不可见两条路径都成立。
+    ///
+    /// ## 拖入文件为什么在这里处理（而不是在 `ui()`）
+    ///
+    /// `egui` 的 `dropped_files` 是**事件**：它只在发生的那一帧存在于
+    /// `ctx.input()` 里。在 `ui()` 里读它意味着"那帧必须恰好是可见帧"，
+    /// 而窗口最小化时拖入是不可能的（用户看不到窗口）——这条其实安全。
+    /// 放在 `logic()` 的理由是它更早：UI pass 可能因为别的原因跳过（如
+    /// 窗口刚被最小化），而事件不该因为"这帧没画"而丢失。
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // 单实例：第二实例发来唤醒信号 → 立即把窗口带到前台
         if let Some(handle) = &self.single_instance {
@@ -896,10 +1087,41 @@ impl eframe::App for TomeApp {
             bring_to_front(ctx);
         }
 
+        // 拖入的本地书（FR-002 的"拖入"路径）
+        let dropped = ctx.input(|input| input.raw.dropped_files.clone());
+        for file in dropped {
+            // `DroppedFile` 是 trait（egui 把平台句柄的持有权留给集成层），
+            // 故路径要经方法取——原生平台上 `path()` 返回绝对路径。
+            let path = file.path();
+            if path.as_os_str().is_empty() {
+                continue;
+            }
+            self.state.begin_import();
+            self.send(EngineRequest::ShelfImportLocal {
+                path: path.display().to_string(),
+            });
+        }
+
         // 引擎事件：每帧取一次（UI 拉取模型，见 engine/thread.rs 的说明）
         if let Some(engine) = &self.engine {
+            let mut produced = Vec::new();
             for event in engine.drain_events() {
+                // 排版结果要留在 UI 侧（构造绘制批次用），但它不在状态机里
+                // （状态机是纯值、可序列化，而排版结果是进程内产物）
+                #[cfg(feature = "reader-render")]
+                if let EngineEvent::ChapterReady {
+                    laid_out: Some(layout),
+                    ..
+                } = &event
+                {
+                    self.laid_out = Some(Arc::clone(layout));
+                }
                 self.state.apply_event(event);
+                // 状态变化可能产生后续请求（如进入阅读视图后要告知视口尺寸）
+                produced.extend(self.state.take_requests());
+            }
+            for request in produced {
+                engine.send(request);
             }
         }
     }
@@ -908,15 +1130,57 @@ impl eframe::App for TomeApp {
         // 先取出视图与叠加层（都是 `Copy`），避免下面借用整个 `self.state`
         let view = self.state.view();
         let overlay = self.state.overlay();
-        let state = &mut self.state;
 
-        egui::CentralPanel::default().show(ui, |ui| match view {
-            AppView::Shelf => draw_shelf(ui, state),
-            AppView::Reading => draw_reading(ui, state),
-        });
+        // 本帧的意图（视图里产生的引擎请求）在画完之后统一发出
+        let mut requests: Vec<EngineRequest> = Vec::new();
+        {
+            let state = &mut self.state;
 
-        if let Some(overlay) = overlay {
-            draw_overlay(ui, state, overlay);
+            egui::CentralPanel::default().show(ui, |ui| match view {
+                AppView::Shelf => requests.extend(crate::views::shelf::draw(ui, state)),
+                AppView::Reading => {
+                    // 渲染面（路径 A）只在 `reader-render` 下存在；headless
+                    // 构建里 `Stage` 是 `None`，阅读视图退化为加载/错误态呈现
+                    #[cfg(feature = "reader-render")]
+                    let stage = Some(crate::views::reading::Stage {
+                        laid_out: self.laid_out.as_deref(),
+                        frames: &mut self.frames,
+                        theme: BridgeTheme::from_theme(state.theme()),
+                    });
+                    #[cfg(not(feature = "reader-render"))]
+                    let stage = None;
+
+                    requests.extend(crate::views::reading::draw(ui, state, stage));
+                }
+            });
+
+            if let Some(overlay) = overlay {
+                requests.extend(crate::views::overlay::draw(ui, state, overlay));
+            }
+        }
+        requests.extend(self.state.take_requests());
+        for request in requests {
+            self.send(request);
+        }
+    }
+}
+
+impl TomeApp {
+    /// 发一个请求给引擎（无引擎时静默丢弃——那是"未接引擎的骨架形态"）。
+    ///
+    /// ## 为什么丢弃是安全的
+    ///
+    /// 无引擎时界面上的动作本来就无处可去（测试构造的 `TomeApp` 就是这样）。
+    /// 这里**不**伪造事件、也**不** panic：一个没有引擎的外壳仍然应该是可
+    /// 交互的（能翻视图、能开叠加层），只是数据永远不来。
+    fn send(&self, request: EngineRequest) {
+        if let Some(engine) = &self.engine {
+            if !engine.send(request) {
+                // 引擎线程已结束：这是**值得知道**的事（否则表现为"点了没反应"）。
+                // 此处**只报"请求被丢弃"**，不打请求内容——请求里含书籍路径
+                // 与搜索词，那是用户数据，不该进日志。
+                log::error!("tome-app: 引擎线程已结束，请求被丢弃");
+            }
         }
     }
 }
@@ -935,124 +1199,6 @@ fn bring_to_front(ctx: &egui::Context) {
     ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
         egui::UserAttentionType::Informational,
     ));
-}
-
-/// 书架视图（**骨架**；T012 落地虚拟化网格与书卡）。
-///
-/// 本任务只保证：空态有引导动作（contracts/ui.md V1 的契约断言），
-/// 有书时列出标题——足够验证"骨架 wired 到主题"。
-fn draw_shelf(ui: &mut egui::Ui, state: &mut ViewState) {
-    if state.shelf_len() == 0 {
-        // MASTER §7 的 EmptyState：插画位 + 标题 + 说明 + 主操作（禁止只有一行灰字）
-        //
-        // 两个按钮都**真的动作**（打开对应的导入叠加层）——契约 V1 要求空态
-        // "必有下一步动作引导"，一个点了没反应的按钮不算引导。
-        ui.vertical_centered(|ui| {
-            ui.add_space(80.0);
-            ui.heading("书架是空的");
-            ui.label("把一本 TXT / EPUB 拖进窗口，或用下面的按钮选择文件。");
-            ui.add_space(16.0);
-            if ui.button("导入本地书").clicked() {
-                state.open_overlay(Overlay::ImportLocal);
-            }
-            if ui.button("导入书源").clicked() {
-                state.open_overlay(Overlay::ImportSource);
-            }
-        });
-        return;
-    }
-
-    let visible: Vec<String> = state
-        .visible_shelf_entries()
-        .iter()
-        .map(|entry| {
-            format!(
-                "{} · {} · {:.0}%",
-                entry.title, entry.author, entry.progress_percent
-            )
-        })
-        .collect();
-
-    for line in visible {
-        ui.label(line);
-    }
-}
-
-/// 阅读视图（**骨架**；T014 落地 PaintCallback 嵌入）。
-fn draw_reading(ui: &mut egui::Ui, state: &mut ViewState) {
-    // 先克隆内容态：下面要按它分支，同时闭包里还要可变借用 `state`
-    // （`ContentState` 是纯值，克隆它比"把借用拆开"更直白）。
-    let content = state.content().clone();
-    match &content {
-        ContentState::Loading => {
-            ui.centered_and_justified(|ui| {
-                ui.label("正在加载…");
-            });
-        }
-        ContentState::Ready { content_version } => {
-            ui.centered_and_justified(|ui| {
-                // T014 起这里换成 S2 渲染的版心（PaintCallback）
-                ui.label(format!(
-                    "第 {} 章 · 第 {} 字（内容版本 {content_version}）",
-                    state.current_chapter() + 1,
-                    state.anchor().char_offset
-                ));
-            });
-        }
-        ContentState::Failed { error } => {
-            ui.vertical_centered(|ui| {
-                ui.add_space(60.0);
-                ui.heading("这一章打不开");
-                ui.label(format!("[{}]", error.id));
-                if let Some(detail) = &error.detail {
-                    ui.label(detail);
-                }
-                ui.add_space(12.0);
-                // 错误态的两个动作都真的动作（contracts/ui.md R3：错误必有可行动作）
-                ui.horizontal(|ui| {
-                    if ui.button("重试").clicked() {
-                        // T014 起：重发 ReadingLoadChapter。骨架阶段先清除错误态，
-                        // 让用户能看到"确实响应了"，而不是点了没反应。
-                        state.dismiss_error();
-                    }
-                    if ui.button("返回书架").clicked() {
-                        state.back_to_shelf();
-                    }
-                });
-            });
-        }
-    }
-}
-
-/// 叠加层（骨架：设置 / 导入）。
-fn draw_overlay(ui: &mut egui::Ui, state: &mut ViewState, overlay: Overlay) {
-    let mut close = false;
-    egui::Window::new(match overlay {
-        Overlay::Settings => "设置",
-        Overlay::ImportLocal => "导入本地书",
-        Overlay::ImportSource => "导入书源",
-    })
-    .collapsible(false)
-    .resizable(false)
-    .show(ui.ctx(), |ui| {
-        if overlay == Overlay::Settings {
-            ui.label(format!("主题：{:?}", state.settings().theme));
-            ui.label(format!(
-                "默认字号：{}px",
-                state.settings().default_font_size_px
-            ));
-        } else {
-            ui.label("（T013 / T024 落地导入路径）");
-        }
-        ui.add_space(12.0);
-        if ui.button("关闭").clicked() {
-            close = true;
-        }
-    });
-
-    if close {
-        state.close_overlay();
-    }
 }
 
 /// 让 `Arc` 的导入不被判为未使用（`ChapterReady.laid_out` 的载荷类型）。

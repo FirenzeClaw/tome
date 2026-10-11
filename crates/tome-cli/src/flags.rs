@@ -443,13 +443,22 @@ pub enum ParseOutcome {
     Help(String),
 }
 
-/// 在 headless 构建里识别 `render` / `fonts` 子命令，供 `parse` 前置短路。
+/// 在 headless 构建里识别**渲染面**命令（`render` / `fonts`），供 `parse` 前置短路。
+///
+/// ## 覆盖范围是「渲染面」而非只有 `render`
+///
+/// 这两个命令同属渲染面：`render` 出自 `render` 模块、`fonts` 出自
+/// `render::fonts`——`tome-reader` 的 `render` feature 一关，**两者同时在
+/// 编译产物里消失**。故能力错误必须对两者同源同形态。
+///
+/// 函数名如实反映这一范围（原为 `headless_render_subcommand`，只认 `render`，
+/// 把 `fonts` 漏在短路之外——见下）。
 ///
 /// ## 为什么要跳过选项找子命令
 ///
 /// 全局选项可出现在子命令之前（`tome --format json render`），故子命令未必是
 /// `args[0]`。这里只做"跳过 `--xxx` 及其取值"的最小识别——目标是回答"这次调用
-/// 指向的是不是那两个命令"，不是重建一份完整的参数语义（后者是主循环的职责）。
+/// 指向的是不是渲染面命令"，不是重建一份完整的参数语义（后者是主循环的职责）。
 ///
 /// ## 为什么选项取值也要跳过
 ///
@@ -458,10 +467,18 @@ pub enum ParseOutcome {
 /// `--flag=value`（等号形态）与不带取值的布尔开关会识别偏——那在本函数里
 /// 只影响"是否短路"，不影响正确性：识别偏了就走原有解析路径，行为与今天一致。
 ///
+/// ## 短路必须早于 bootstrap（`fonts` 曾漏在这里）
+///
+/// 只把 `render` 纳入短路时，`fonts` 仍走"组合根装配 → 分发 → 能力错误"的旧路。
+/// 那让它的退出码**取决于装配成不成**：装配成功才退 3，装配失败（如数据目录
+/// 写探测撞上杀软瞬时占用）就退 1 并报 `error.storage`。同一命令两种退出码、
+/// 取决于本机 IO 运气——那不是契约。纳入短路后，两者都在**任何 IO 之前**
+/// 返回，退出码只由"渲染面在不在"决定。
+///
 /// 仅用于 `#[cfg(not(feature = "reader-render"))]` 分支，故在默认构建下
 /// 本函数不存在（`dead_code` 不触发）。
 #[cfg(not(feature = "reader-render"))]
-fn headless_render_subcommand(args: &[String]) -> Option<&str> {
+fn headless_render_face_subcommand(args: &[String]) -> Option<&str> {
     let mut index = 0usize;
     while index < args.len() {
         let argument = args[index].as_str();
@@ -501,10 +518,18 @@ pub fn parse(args: &[String]) -> ParseOutcome {
     //
     // 全局选项可以出现在子命令之前（`tome --format json render`），故须跳过
     // 选项与其取值找到真正的子命令。这里不复用解析循环（那会把本函数的职责
-    // 变成两遍解析），只做"跳过 `--xxx` 及其值"的最小识别：`render`/`fonts`
+    // 变成两遍解析），只做"跳过 `--xxx` 及其值"的最小识别：渲染面命令
     // 在 headless 下不需要任何选项语义，认出来即返回。
+    //
+    // ## 为什么必须早于 bootstrap，而非只在分发时兜住
+    //
+    // `main` 的执行顺序是"装配组合根 → 分发命令"。只在分发点退 3（而不短路）
+    // 会让退出码**取决于装配成不成**——`fonts` 曾正是如此：装配成功退 3，
+    // 装配撞上数据目录写探测失败就退 1 并报 `error.storage`。同一命令两种
+    // 退出码、取决于本机 IO 运气，那不是契约。短路把两者都提到**任何 IO
+    // 之前**，退出码只由"渲染面在不在"决定。
     #[cfg(not(feature = "reader-render"))]
-    if let Some(subcommand) = headless_render_subcommand(args) {
+    if let Some(subcommand) = headless_render_face_subcommand(args) {
         let command = if subcommand == "render" {
             Command::Render(Box::default())
         } else {

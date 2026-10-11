@@ -51,11 +51,16 @@ const CAPABILITY_ID: &str = "offscreenRendering";
 
 /// 跑一次真实二进制，返回 `(退出码, stdout, stderr)`。
 fn run_cli(args: &[&str]) -> (i32, String, String) {
-    let binary = env!("CARGO_BIN_EXE_tome-cli");
     let data_dir = tempfile::tempdir().expect("临时数据目录");
+    run_cli_with_data_dir(args, data_dir.path())
+}
+
+/// 同上，但显式指定数据目录（用于构造**必然装配失败**的场景）。
+fn run_cli_with_data_dir(args: &[&str], data_dir: &std::path::Path) -> (i32, String, String) {
+    let binary = env!("CARGO_BIN_EXE_tome-cli");
     let output = Command::new(binary)
         .arg("--data-dir")
-        .arg(data_dir.path())
+        .arg(data_dir)
         .args(args)
         .output()
         .expect("应能启动 tome-cli");
@@ -187,5 +192,103 @@ fn 无关命令的用法错误不受短路影响() {
     assert!(
         !stderr.contains(CAPABILITY_ID),
         "layout 不该被误报为渲染能力缺失；stderr：{stderr}"
+    );
+}
+
+/// 渲染面命令的能力错误**不依赖装配成功**（T056 C1 的核心判据）。
+///
+/// # 这条防的是"退出码取决于本机 IO 运气"
+///
+/// 首版修复只把 `render` 纳入 parse 短路，`fonts` 仍走"装配组合根 → 分发
+/// → 能力错误"的旧路。那让 `fonts` 的退出码**取决于装配成不成**：
+///
+/// - 装配成功（常态）→ 退 3，看起来正确
+/// - 装配失败（数据目录写探测撞上杀软瞬时占用）→ 退 1 + 裸 `error.storage`
+///
+/// 同一个命令、同一次构建，两种退出码，差别只在"这次 IO 顺不顺"——那不是
+/// 契约，是运气。PM 机上 8 轮中 2 轮复现的失败正是这个形态。
+///
+/// # 怎么构造"必然装配失败"
+///
+/// `--data-dir` 指向一个**已存在的普通文件**：`create_dir_all` 必失败，
+/// 装配必然报 `error.storage`。于是本测试把"装配失败"这一分支**确定性地**
+/// 摆到台面上——不需要碰运气等杀软来干扰。
+///
+/// 判据：`render` / `fonts` 仍退 3 + 能力标识（短路早于任何 IO）；
+/// 而 `layout`（真的要走装配）如实退 1 并报 `error.storage`——后者同时
+/// 证明"坏数据目录"这个前提真的生效了，测试没有空跑。
+#[test]
+fn 渲染面命令的能力错误不依赖装配成功() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    // 数据目录位置放一个**文件**——装配时 create_dir_all 必失败。
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, b"not a directory").expect("应能写");
+
+    // 前提自检：坏数据目录下 `layout` 确实装配失败（否则本测试没测到东西）。
+    let (layout_code, _stdout, layout_stderr) = run_cli_with_data_dir(&["layout"], &blocker);
+    assert_eq!(
+        layout_code, 1,
+        "坏数据目录下 layout 应装配失败退 1（本测试的前提）；stderr：{layout_stderr}"
+    );
+    assert!(
+        layout_stderr.contains("error.storage"),
+        "前提自检：应报 error.storage，实际：{layout_stderr}"
+    );
+
+    // 正题：渲染面两命令在**装配必然失败**的前提下仍退 3 + 能力标识，
+    // 即它们的错误路径根本不经过装配。
+    for subcommand in ["render", "fonts"] {
+        let (code, _stdout, stderr) = run_cli_with_data_dir(&[subcommand], &blocker);
+        assert_eq!(
+            code, 3,
+            "{subcommand} 的能力错误不该依赖装配是否成功（应退 3）；stderr：{stderr}"
+        );
+        assert!(
+            stderr.contains(CAPABILITY_ID),
+            "{subcommand} 应携带能力标识 `{CAPABILITY_ID}`，实际：{stderr}"
+        );
+        assert!(
+            !stderr.contains("error.storage"),
+            "{subcommand} 不该报存储错误——那说明它走了装配路径；stderr：{stderr}"
+        );
+    }
+}
+
+/// 装配失败时，stderr 必须带上**诊断细节**（T056 C2 的可观测面）。
+///
+/// # 为什么这条与能力错误同处一个文件
+///
+/// 两者是同一场景的两面：坏数据目录下，装配失败的命令要能**说清楚**
+/// 为什么失败。此前 `root.rs` 在装配的每个失败点 `.kind().clone()`，把
+/// `with_detail` 刚写进去的原因丢掉，用户只看到一行裸 `error.storage`——
+/// 那是"有错误信息但无法定位"的形态，排查成本全落在用户身上。
+///
+/// 判据：`error.storage` 标识仍在（可本地化标识前缀不变，契约断言语义
+/// 不受影响），且后面跟有具体原因（不只是 id 本身）。
+#[test]
+fn 装配失败时错误带诊断细节() {
+    let dir = tempfile::tempdir().expect("临时目录");
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, b"not a directory").expect("应能写");
+
+    let (code, _stdout, stderr) = run_cli_with_data_dir(&["layout"], &blocker);
+    assert_eq!(code, 1, "应退 1（业务错误）；stderr：{stderr}");
+
+    // ① 标识前缀不变（`ClassifiedError::message_id` 仍是 error.storage）
+    assert!(
+        stderr.contains("error.storage"),
+        "应保留 error.storage 标识便于日志检索；stderr：{stderr}"
+    );
+
+    // ② 细节确实带出来了：不能只有那一行裸标识。
+    //    判据用"含冒号分隔的后续内容"——`error.storage: <原因>` 是
+    //    `ClassifiedError` 的 Display 契约。
+    let detailed_line = stderr
+        .lines()
+        .find(|line| line.contains("error.storage"))
+        .unwrap_or_default();
+    assert!(
+        detailed_line.len() > "error.storage".len() + 2,
+        "error.storage 之后应跟有诊断细节（此前被 .kind() 丢掉）；实际整行：{detailed_line}"
     );
 }

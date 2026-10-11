@@ -590,6 +590,32 @@ jobs:
           fi
           echo "OK: 未知子命令仍是用法错误 2（短路未扩大）"
 
+          # 能力错误**不依赖装配成功**（T056 C1）。
+          #
+          # 首版修复只把 render 纳入短路，fonts 仍走「装配 → 分发 → 能力错误」，
+          # 于是它的退出码取决于装配成不成：装配撞上数据目录写探测失败（Windows
+          # 杀软对新建文件的瞬时占用，实测约 1/30）就退 1 + error.storage。
+          # 这里用「--data-dir 指向一个已存在的普通文件」确定性地制造装配失败
+          # ——不靠运气等杀软来复现。
+          blocker="$RUNNER_TEMP/not-a-dir"
+          : > "$blocker"
+          for sub in render fonts; do
+            set +e
+            "$binary" --data-dir "$blocker" "$sub" 2>&1 | tee "headless-blocked.log"
+            code=${PIPESTATUS[0]}
+            set -e
+            if [ "$code" -ne 3 ]; then
+              echo "::error::\`$sub\` 的能力错误不该依赖装配是否成功（应退 3），实测 $code"
+              echo "::error::若报 error.storage 则说明它走了装配路径——短路漏了它"
+              exit 1
+            fi
+            grep -q 'offscreenRendering' "headless-blocked.log" || {
+              echo "::error::\`$sub\` 在装配失败时仍应携带 offscreenRendering 标识"
+              exit 1
+            }
+            echo "OK: \`$sub\` 在装配必然失败时仍退 3 + 能力标识（短路早于任何 IO）"
+          done
+
       # SC-014：纯计算子命令在无图形环境下**照常可用**
       - name: 断言 verify-layout 在 headless 下照常可用（SC-014）
         shell: bash

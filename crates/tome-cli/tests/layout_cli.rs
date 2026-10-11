@@ -951,6 +951,10 @@ fn layout_anchor_clamps_consistently() {
     assert_eq!(code, 0);
     let value: serde_json::Value = serde_json::from_str(&stdout).unwrap();
 
+    // [DEBUG-CI] windows-2022 runner 上 from/to 钳制值分叉而本地不可复现，
+    // 先把实测 JSON 打进 CI 日志再修（定位后移除此行）
+    eprintln!("DEBUG layout-anchor JSON: {}", serde_json::to_string_pretty(&value).unwrap());
+
     assert_eq!(
         value["from"]["char_offset"], value["to"]["char_offset"],
         "两形态的钳制结果必须一致"

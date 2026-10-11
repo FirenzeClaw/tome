@@ -49,6 +49,12 @@ use tome_app::composition;
 const APP_ID: &str = "com.firenzeclaw.tome";
 
 fn main() -> eframe::Result<()> {
+    // --- ⓪ 计时起点（SC-001 的口径起点；`TOME_TIMING=1` 时才有输出）---
+    //
+    // 必须是 `main` 的第一行：冷启动的绝大部分耗时（数据目录判定、建库、
+    // 迁移、起引擎线程）都在窗口创建之前。见 `timing` 模块的说明。
+    tome_app::timing::mark_process_start();
+
     // --- ① 单实例：已有实例则唤醒它并退出 ---
     if app_single_instance::notify_if_running(APP_ID) {
         return Ok(());
@@ -65,6 +71,8 @@ fn main() -> eframe::Result<()> {
     for warning in &composition.warnings {
         log::warn!("tome-app: 启动期诊断——{warning}");
     }
+    // 组合根装配完成（库已打开、引擎线程已就绪）
+    tome_app::timing::milestone("engine_ready");
     let engine = composition.engine;
 
     let options = eframe::NativeOptions {
@@ -97,6 +105,7 @@ fn main() -> eframe::Result<()> {
             app.set_engine(engine);
             // 拉取式协议：启动时主动要书架与设置（见 `TomeApp::start` 的说明）
             app.start();
+            tome_app::timing::milestone("window_created");
             Ok(Box::new(app))
         }),
     )

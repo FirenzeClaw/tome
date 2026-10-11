@@ -134,8 +134,13 @@ fn draw_settings(ui: &mut Ui, theme: &BridgeTheme, state: &ViewState) {
 ///
 /// 返回 `None` 表示用户取消——那是正常路径，不是错误。
 fn pick_local_book_file() -> Option<std::path::PathBuf> {
+    // 过滤器名是**面向用户的文案**，故同样出自文案表
+    // （`tests/i18n_guards.rs` 的零字面串守卫扫到了这里——它是对的）
     rfd::FileDialog::new()
-        .add_filter("电子书", &["txt", "epub", "mobi"])
-        .add_filter("全部文件", &["*"])
+        .add_filter(
+            i18n::t(i18n::key::IMPORT_LOCAL_FILTER_BOOKS),
+            &["txt", "epub", "mobi"],
+        )
+        .add_filter(i18n::t(i18n::key::IMPORT_LOCAL_FILTER_ALL), &["*"])
         .pick_file()
 }

@@ -177,6 +177,12 @@ pub struct ViewState {
     chapter_char_len: usize,
     /// 导入是否在进行中（T013 的骨架态判据）
     importing: bool,
+    /// 首屏计时（SC-002：从"打开书"到 `ChapterReady` 抵达）
+    ///
+    /// 存成 `Option<Span>` 而不是在 `apply_event` 里现起一次：起点是**用户的
+    /// 动作**（点书卡），不是"事件开始处理"。用错起点会让这个数字只反映引擎
+    /// 的排版耗时，而 SC-002 说的是"打开书到首屏可阅读"。
+    first_frame: Option<crate::timing::Span>,
     /// 待发往引擎的请求（由事件处理与视图意图共同产生）
     ///
     /// ## 为什么要有队列而不是"各处直接发"
@@ -234,6 +240,7 @@ impl ViewState {
             toc: Vec::new(),
             chapter_char_len: 0,
             importing: false,
+            first_frame: None,
             requests: Vec::new(),
             search: None,
             next_generation: 0,
@@ -300,6 +307,8 @@ impl ViewState {
     pub fn open_book_request(&mut self, book_id: impl Into<String>) -> EngineRequest {
         let book_id = book_id.into();
         self.open_book(book_id.clone());
+        // SC-002 的计时起点（"打开书"这个动作本身）
+        self.first_frame = Some(crate::timing::Span::start());
         EngineRequest::ReadingOpen { book_id }
     }
 
@@ -723,6 +732,9 @@ impl ViewState {
         match event {
             EngineEvent::ShelfLoaded { entries } => {
                 self.shelf.replace_all(entries);
+                // SC-001 的终点口径："书架视图可响应输入"。书架数据到位即为
+                // 那一刻——视图此后每帧都能响应点击与键盘。
+                crate::timing::milestone("shelf_loaded");
             }
             EngineEvent::ShelfEntryChanged { entry } => {
                 self.shelf.upsert(entry);
@@ -757,6 +769,10 @@ impl ViewState {
                 // 章字符总数供页脚进度用（`laid_out` 是排版结果，它知道）
                 if let Some(layout) = &laid_out {
                     self.chapter_char_len = layout.char_len;
+                }
+                // SC-002：从"打开书"到首屏可阅读
+                if let Some(span) = self.first_frame.take() {
+                    span.finish("first_frame");
                 }
             }
             EngineEvent::ChapterFailed {

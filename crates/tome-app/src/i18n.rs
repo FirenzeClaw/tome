@@ -102,6 +102,10 @@ pub mod key {
     pub const IMPORT_LOCAL_HINT: &str = "import.local.hint";
     /// 选择文件按钮
     pub const IMPORT_LOCAL_CHOOSE: &str = "import.local.choose";
+    /// 文件选择对话框的"电子书"过滤器名
+    pub const IMPORT_LOCAL_FILTER_BOOKS: &str = "import.local.filter_books";
+    /// 文件选择对话框的"全部文件"过滤器名
+    pub const IMPORT_LOCAL_FILTER_ALL: &str = "import.local.filter_all";
     /// 导入中
     pub const IMPORT_LOCAL_BUSY: &str = "import.local.busy";
     /// 书源导入对话框标题
@@ -165,6 +169,8 @@ const TABLE: &[(&str, &str)] = &[
         "支持 TXT / EPUB / MOBI。也可以直接把文件拖进窗口。",
     ),
     (key::IMPORT_LOCAL_CHOOSE, "选择文件…"),
+    (key::IMPORT_LOCAL_FILTER_BOOKS, "电子书"),
+    (key::IMPORT_LOCAL_FILTER_ALL, "全部文件"),
     (key::IMPORT_LOCAL_BUSY, "正在导入…"),
     (key::IMPORT_SOURCE_TITLE, "导入书源"),
     (key::IMPORT_SOURCE_HINT, "（书源导入在后续切片落地）"),

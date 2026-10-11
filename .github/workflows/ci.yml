@@ -423,7 +423,7 @@ jobs:
           set -e
           echo "$output"
           if [ "$code" -ne 0 ]; then
-            echo "::error::后端探针失败（退出码 $code）——本平台矩阵配置有误（如 lavapipe 未装）"
+            echo "::error::后端探针失败（退出码 ${code}）——本平台矩阵配置有误（如 lavapipe 未装）"
             exit 1
           fi
           # 日志里必须能看到后端名（T049 验收子项）
@@ -447,7 +447,10 @@ jobs:
           skipped=$(grep -c 'SKIPPED' snapshot.log || true)
           # 从日志里剔除那条负例的输出（它的 SKIPPED 由设计产生）
           incidental=$(grep 'SKIPPED' snapshot.log | grep -vc 'noop not requested' || true)
-          echo "SKIPPED 行总数：$skipped；其中非负例：$incidental"
+          # 注意必须用大括号形式 ${skipped}：macos runner 的 bash 3.2 会把
+          # 紧随其后的全角分号「；」并入变量名（实测报 `skipped；: unbound variable`），
+          # linux 的 bash 5.x 不会——跨平台脚本里变量后接非 ASCII 字符一律加大括号。
+          echo "SKIPPED 行总数：${skipped}；其中非负例：${incidental}"
           if [ "$incidental" -gt 0 ]; then
             grep 'SKIPPED' snapshot.log | grep -v 'noop not requested' || true
             echo "::error::快照出现非负例的 SKIPPED——后端未生效（快照未实际比对，FR-053 的诚实跳过不得在 CI 上出现）"
@@ -570,7 +573,7 @@ jobs:
             echo "::error::verify-layout 在 headless 下报了能力错误——它是纯计算，SC-014 要求可用"
             exit 1
           fi
-          echo "verify-layout 在 headless 下可用（退出码 $code）"
+          echo "verify-layout 在 headless 下可用（退出码 ${code}）"
 
   # ---------------------------------------------------------------------------
   # 三平台构建 + 测试 + 体积基线

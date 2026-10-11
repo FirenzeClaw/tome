@@ -146,7 +146,7 @@ jobs:
 
           echo "--- 确认本 runner 无图形环境 ---"
           if [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
-            echo "本 runner 居然有显示服务（DISPLAY=$DISPLAY）——该断言的前提不成立"
+            echo "本 runner 居然有显示服务（DISPLAY=${DISPLAY}）——该断言的前提不成立"
             exit 1
           fi
           echo "DISPLAY 与 WAYLAND_DISPLAY 均未设置（真实无头环境）"

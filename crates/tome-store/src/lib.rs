@@ -28,9 +28,11 @@
 //! | [`pack`] | 章节缓存容器（崩溃安全） | T060 |
 //! | [`image_cache`] | 图片缓存（可独立清理） | T061 |
 //! | [`config`] | 配置 TOML 加载与原子写 | T062 |
+//! | [`book_repository`] | `BookRepository` 接缝的生产实现 | 003-T010 |
 //!
-//! \[WIP] 本 crate 的 T053-T062 已落地；`BookRepository` 接缝的完整实现
-//! （备份导入导出、书内搜索）属后续切片 T087-T091。
+//! \[WIP] 本 crate 的 T053-T062 与 T087-T091（备份导入导出、书内搜索、完整删除）
+//! 已落地；`BookRepository` 接缝的生产实现见 [`book_repository`]。S3 应用外壳
+//! 对它的接线尚未完成，故 crate 整体仍标 \[WIP]。
 
 // ## 关于 unsafe
 //
@@ -46,6 +48,7 @@
 
 pub mod backup;
 pub mod backup_android;
+pub mod book_repository;
 pub mod config;
 pub mod dao;
 pub mod datadir;
@@ -59,6 +62,7 @@ pub mod pack;
 pub mod schema;
 pub mod source_store;
 
+pub use book_repository::SqliteBookRepository;
 pub use datadir::DataDir;
 pub use db::Db;
 pub use error::StoreError;

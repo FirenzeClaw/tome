@@ -4884,6 +4884,7 @@ dependencies = [
  "pollster 0.4.0",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
  "tome-cli",
  "tome-core",

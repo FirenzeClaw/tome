@@ -64,6 +64,8 @@ thiserror = "2.0.21"
 # 见 `crates/tome-cli/src/png.rs` 的模块文档（它刻意不引 png crate）。
 [dev-dependencies]
 tome-cli = { workspace = true }
+# 测试要构造临时文件/目录（字体注册的"存在/缺失"分支、spike 产物落盘）
+tempfile = "3"
 
 
 [features]

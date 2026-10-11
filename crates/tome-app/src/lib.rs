@@ -17,6 +17,7 @@
 #![deny(unsafe_code)]
 
 pub mod engine;
+pub mod theme_bridge;
 
 #[cfg(feature = "reader-render")]
 pub mod render;

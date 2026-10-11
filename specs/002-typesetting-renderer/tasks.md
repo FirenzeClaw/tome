@@ -245,19 +245,19 @@
 
 **Independent Test**: contracts/cli.md 全部子命令 golden 测试过；CI 三平台绿（含快照）；perf_baseline 分档达标。
 
-- [ ] T048 [US5] CLI 五子命令薄壳于 `crates/tome-cli/src/reader_commands.rs`（layout / layout-anchor / render / fonts / verify-layout；contracts/cli.md 全选项接线 + `flags.rs` 注册与帮助文本；逻辑不在 CLI 重复实现）
+- [x] T048 [US5] CLI 五子命令薄壳于 `crates/tome-cli/src/reader_commands.rs`（layout / layout-anchor / render / fonts / verify-layout；contracts/cli.md 全选项接线 + `flags.rs` 注册与帮助文本；逻辑不在 CLI 重复实现）
   - [ ] 契约 §4：每子命令 golden 测试（输出 JSON 与期望逐字段比对）
   - [ ] `layout` 确定性断言：同参数两次运行输出逐字节相同
   - [ ] 渲染子命令后端不可用时退出码 3 + 结构化能力错误（不伪装成功）
-- [ ] T049 [P] [US5] CI 三平台矩阵 + 快照后端于 `.github/workflows/ci.yml` 扩展（ubuntu = lavapipe（mesa-vulkan-drivers + VK_DRIVER_FILES）；windows = lavapipe（mesa-dist-win；备选 WARP NuGet 钉版）；macos = Metal（禁 GL）；probe 步骤先行打印后端名；R5-4 Windows-gnu + wgpu 构建验证）
+- [x] T049 [P] [US5] CI 三平台矩阵 + 快照后端于 `.github/workflows/ci.yml` 扩展（ubuntu = lavapipe（mesa-vulkan-drivers + VK_DRIVER_FILES）；windows = lavapipe（mesa-dist-win；备选 WARP NuGet 钉版）；macos = Metal（禁 GL）；probe 步骤先行打印后端名；R5-4 Windows-gnu + wgpu 构建验证）
   - [ ] 三平台快照测试实际运行（非跳过）；probe 日志可见后端名
   - [ ] feature 组合写明：默认构建（render on）跑快照；另设一个 headless job 以 `--no-default-features` 构建并断言 feature off 时 `render` 子命令返回退出码 3
   - [ ] SC-015：同字体同参数分页结构与滚动映射三平台一致断言
-- [ ] T050 [US5] 性能基线于 `crates/tome-reader/tests/perf_baseline.rs`（release 模式；SC-007 翻页目标 16ms/红线 33ms；SC-008 首屏 400/800；SC-009 重排 150/300；SC-010 内存 ≤ 章节字节 ×8 且 20 万字不失败；口径注释完整：预热稳态中位数、不含抓取/动效）
+- [x] T050 [US5] 性能基线于 `crates/tome-reader/tests/perf_baseline.rs`（release 模式；SC-007 翻页目标 16ms/红线 33ms；SC-008 首屏 400/800；SC-009 重排 150/300；SC-010 内存 ≤ 章节字节 ×8 且 20 万字不失败；口径注释完整：预热稳态中位数、不含抓取/动效）
   - [ ] 分档判据输出（目标/红线分列）；超红线测试失败
-- [ ] T051 体积记录（SC-017：本层净增量（cosmic-text 栈 + 字体子集 + wgpu 栈）测量写入 `specs/002-typesetting-renderer/size-report.md`；快照基线资产确认 dev-only 不进发布包）
+- [x] T051 体积记录（SC-017：本层净增量（cosmic-text 栈 + 字体子集 + wgpu 栈）测量写入 `specs/002-typesetting-renderer/size-report.md`；快照基线资产确认 dev-only 不进发布包）
   - [ ] 报告含与 001 基线的对比；快照资产排除出发布物的构建验证（`cargo package -p tome-reader --list` 断言不含 `tests/snapshots/`，且 `assets/fonts/` 仅含 `.otf`/`OFL.txt`/`FONTS.sha256`）
-- [ ] T052 干净室轴 + 宪章复检于 `specs/002-typesetting-renderer/checklists/`（新建 `constitution.md` 与 `cleanroom.md`；FR-057/058 扫描：错误分类全覆盖、无面向用户自然语言硬编码）
+- [x] T052 干净室轴 + 宪章复检于 `specs/002-typesetting-renderer/checklists/`（新建 `constitution.md` 与 `cleanroom.md`；FR-057/058 扫描：错误分类全覆盖、无面向用户自然语言硬编码）
   - [ ] 两份复检文档落盘并 `git add` 随本任务 commit；扫描零命中
 
 > **⛔ 检查点：S2-6 之后（S2 完成门）**

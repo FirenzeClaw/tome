@@ -29,7 +29,7 @@
 | `updated_at` | i64 | 最后变动时刻 |
 | `reading_params` | `ReadingParams` | 该书最近的阅读参数快照（FR-007b 的「跟随该书最近设置」载体） |
 
-**ReadingParams**（值类型）：`font_size_px: f32` / `line_height: f32` / `mode: ReadingMode`（`Paginated | Scroll`）/ `page_layout: Single | Spread` / `theme: ThemeChoice`（`Day | Night | FollowSystem`）。
+**ReadingParams**（值类型）：`font_size_px: f32` / `line_height: f32` / `mode: ReadingMode`（`Paginated | Scroll`）/ `page_layout: PageLayout`（`Auto | Single | Spread`——Auto 按宽度判据自动决定，MASTER §5.2 允许用户手动覆盖；P0 实施时由两态修正为三态，T006 偏离记录） / `theme: ThemeChoice`（`Day | Night | FollowSystem`）。
 **状态流转**：`书首次打开 → 取全局默认`；`阅读中调整 → 更新本书快照（节流落盘）`；`全局默认修改 → 不回写已有快照的书`（FR-007b）。
 **持久化**：经 tome-store（TraceDao/MiscDao 面），节流窗口值在任务阶段定（预期秒级；spec 假设节）。
 

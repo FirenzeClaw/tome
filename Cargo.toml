@@ -41,12 +41,42 @@ tome-app = { path = "crates/tome-app" }
 
 [profile.release]
 # 体积纪律（宪法「附加约束 · 体积纪律」）：<20MB 是目标基线，故 release 按体积最优配置。
-# fat LTO + codegen-units=1 以编译时长换体积与运行速度；strip 去掉符号表；
-# panic=abort 去掉 unwind 表（代价：无法 catch_unwind，见下方说明）。
+# fat LTO + codegen-units=1 以编译时长换体积与运行速度；strip 去掉符号表。
 lto = "fat"
 codegen-units = 1
 strip = true
-panic = "abort"
+
+# `panic = "unwind"`（S3 T003 由 `"abort"` 改；决策 R6，用户 2026-10-11 批准）
+#
+# ## 为什么改
+#
+# 001 选 `abort` 时尚无 GUI 进程——CLI 的失败语义是"报错退出"，去掉 unwind
+# 表纯赚体积。S3 引入了**长驻 GUI 进程**：003 spec 的边缘情况明文要求
+#
+# > 排版/解析在单章上的失败 MUST 被隔离在该章……引擎 panic 经外壳兜底捕获
+# > 并按错误分类呈现
+#
+# 而 `panic = "abort"` 下 panic 直接终止进程，`catch_unwind`（tome-app 引擎
+# 线程的兜底边界，`crates/tome-app/src/engine/thread.rs`）在 release 里
+# **不可能成立**——不是"没写对"，是该配置下这条路径不存在。故引擎线程的
+# 兜底要求与 abort 直接冲突，取 unwind。
+#
+# 代价：unwind 表使二进制变大（实测见下），但体积基线已由用户裁决允许跨越
+# （003 spec 假设节 / `specs/003-app-shell/size-report.md` 滚动记账）。
+#
+# ## 记账（本机实测，2026-10-11，x86_64-pc-windows-gnu）
+#
+# 同一份 `tome-cli` 源码、只切换本行（两次 release 全量构建）：
+#
+# | 配置 | `tome-cli.exe` 字节 | MiB |
+# |---|---|---|
+# | `abort`（改前） | 22,138,880 | 21.11 |
+# | `unwind`（改后） | 23,513,088 | 22.42 |
+# | **unwind 表代价** | **+1,374,208** | **+1.31** |
+#
+# T035 在 S3 收口时按同一口径复测，连同 eframe/winit/egui_extras 增量一并
+# 入账 `specs/003-app-shell/size-report.md`。
+panic = "unwind"
 
 [workspace.lints.rust]
 # 生产级护栏：unsafe 代码必须显式标注理由（配合各文件的 SAFETY 注释约定）

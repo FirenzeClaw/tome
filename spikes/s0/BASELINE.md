@@ -17,7 +17,7 @@
 |---|---|
 | OS | Windows（10+） |
 | 工具链 | `cargo 1.99.0` / `rustc 1.99.0`（stable-x86_64-pc-windows-gnu） |
-| 构建 profile | 继承根 `Cargo.toml` 的 `[profile.release]`：`lto="fat"`、`codegen-units=1`、`strip=true`、`panic="abort"` |
+| 构建 profile | 继承根 `Cargo.toml` 的 `[profile.release]`：`lto="fat"`、`codegen-units=1`、`strip=true`、`panic="abort"`（**S3 T003 起根 profile 改为 `"unwind"`**；本行是 S0 spike 实测当时的值，不改写） |
 | 便携 JDK（T008 用） | Temurin **21.0.12.1+1**，解到 `D:\dev\toolchain\jdk\jdk-21.0.12.1+1`（免安装、不进 C 盘、不改系统环境变量） |
 | Jsoup（T008 用） | **1.23.2**（版本对齐上游 `gradle/libs.versions.toml` 的声明；从 `maven.aliyun.com` 取得） |
 

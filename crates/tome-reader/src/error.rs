@@ -14,23 +14,28 @@
 //! 2. **能力错误必须结构化**（FR-058 后半）："本层不支持的能力"抛携带能力标识的
 //!    [`ReaderError::UnsupportedCapability`]，而不是一个笼统的失败。上层的
 //!    `try/catch` 降级逻辑（如无渲染后端时改走结构验证）依赖这个标识。
-//! 3. **不得以 `catch_unwind` 为错误处理手段**：release profile 是
-//!    `panic = "abort"`（根 `Cargo.toml` / 001 §Context），`panic!` 直接终止
-//!    进程，捕获无从谈起。故本层把"可能失败"的每一步都表达为 `Result`：
-//!    详见下方 [`ReaderError`] 各变体的"来源"列——**没有一条依赖 panic 传播**。
+//! 3. **不得以 `catch_unwind` 为错误处理手段**：本层把"可能失败"的每一步都
+//!    表达为 `Result`——详见下方 [`ReaderError`] 各变体的"来源"列，
+//!    **没有一条依赖 panic 传播**。
 //!
-//! ## `panic = "abort"` 下的错误路径设计（约束 3 的展开）
+//! ## 为什么"不靠 panic"是结构约束而非 profile 附带效果
 //!
-//! 在 unwind 可用的构建里，一个常见偷懒是"让远处的一层先 panic，近处
-//! `catch_unwind` 兜住"。本层**结构上不给这条路**：
+//! 001 时代 release profile 是 `panic = "abort"`，那时"不靠 panic"是**被迫**的
+//! （abort 下捕获无从谈起）。S3 T003 起 workspace 改为 `panic = "unwind"`
+//! （GUI 外壳的引擎线程需要 `catch_unwind` 兜底，见根 `Cargo.toml` 的注释）——
+//! 于是这条约束从"物理上做不到"变成了"**纪律上不做**"，反而更需要写明：
 //!
+//! - unwind 可用之后，"让远处一层先 panic、近处 `catch_unwind` 兜住"重新
+//!   成为一条诱人的捷径。本层**结构上不给这条路**：panic 是缺陷信号，
+//!   不是流程控制；外壳那条 `catch_unwind` 是**最后一道网**，
+//!   不该被当作常规错误路径来设计。
 //! - 第三方库（wgpu / cosmic-text）在资源缺席时**返回 `Result` 或 `Option`**，
 //!   本层就地分类；它们的 panic 属库缺陷，不被当作流程控制。
 //! - 断言式校验（几何参数为负、字号越界）一律走 [`ReaderError::InvalidGeometry`]
 //!   等显式错误，不用 `assert!`——`debug_assert!` 只在 debug 生效，
 //!   release 下静默通过，会造成"测试绿、发布崩"的分裂。
 //! - 因此本 crate 的公共 API **没有**依赖 panic 展开的契约；`abort` 与 `unwind`
-//!   两种构建的错误行为一致。
+//!   两种构建的错误行为一致（这也让"换成 unwind 不改变本层语义"可被断言）。
 //!
 //! ## 与上层文案的衔接
 //!

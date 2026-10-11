@@ -32,7 +32,7 @@ S2 是四条子项目线的第二条（S1 引擎内核已完成 P1-P7）。核�
 
 **Performance Goals**: 翻页 ≤16ms（红线 33）· 首屏 ≤400ms（红线 800）· 重排 ≤150ms（红线 300）· 单章排版内存 ≤ 章节字节 ×8（SC-007~010，分档口径见 spec）
 
-**Constraints**: <20MB 体积目标基线（字体子集 3–5MB + cosmic-text 栈净增量须 spike 实测）· 零遥测零非用户触发网络（字体获取不例外）· `panic = "abort"`（release，不得依赖 catch_unwind）· hinting 关闭（挤压语义与三平台一致性前提，R1/R4）
+**Constraints**: <20MB 体积目标基线（字体子集 3–5MB + cosmic-text 栈净增量须 spike 实测）· 零遥测零非用户触发网络（字体获取不例外）· 不依赖 `catch_unwind` 兜错（定稿时为 `panic = "abort"`；2026-10-11 S3 T003 起 release 改为 `"unwind"` 供 GUI 外壳兜底引擎 panic，本层"不靠 panic 传播做错误处理"的约束不变且更需遵守）· hinting 关闭（挤压语义与三平台一致性前提，R1/R4）
 
 **Scale/Scope**: 58 FR / 20 SC / 7 用户故事；新 crate `tome-reader` + tome-core 增补（Theme 纯值）+ tome-cli 五子命令；预估 6 切片 ~40 任务
 

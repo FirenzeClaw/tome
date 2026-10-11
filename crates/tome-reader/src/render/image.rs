@@ -277,7 +277,7 @@ impl ImageLayout {
     ///
     /// `ImageRef.char_offset` 来自书源/缓存，是**外部输入**：负值、超界都
     /// 可能。故此处钳到 `[0, chapter.char_len]`——越界不报错也不 panic
-    /// （`panic = "abort"` 下 panic 会终止进程），而是落到最近的合法位置。
+    /// （AGENTS.md 安全红线），而是落到最近的合法位置。
     ///
     /// ## 为什么按字符位置排序
     ///

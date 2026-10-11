@@ -181,7 +181,8 @@ fn rewrite_generic_serif_to_embedded(
 ///
 /// 加载失败（内嵌字体不可用）时返回 `None`——那是**不应发生**的状态，返回值
 /// 让调用方能走 `fontUnavailable` 能力错误而不是 panic
-/// （`panic = "abort"` 下 panic 会终止进程）。
+/// （AGENTS.md 安全红线：生产路径不得 panic；S3 起 release 是 `panic = "unwind"`，
+/// 外壳的引擎线程会兜住 panic——那正是本层不该依赖它的理由）。
 #[must_use]
 pub fn shared_font_system() -> Option<&'static std::sync::Mutex<SharedFontStack>> {
     static SHARED: OnceLock<Option<std::sync::Mutex<SharedFontStack>>> = OnceLock::new();

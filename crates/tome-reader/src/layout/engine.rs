@@ -135,9 +135,10 @@ impl LayoutEngine {
     /// ## 为什么返回 `Result` 而不是 `Self`
     ///
     /// 内嵌字节无法解析是**不应发生**的状态（字节是编译期 `include_bytes!`
-    /// 进来的合法 OpenType）。但把它做成 panic 在 `panic = "abort"` 下会终止
-    /// 进程——那是渲染面/排版面共用的可恢复错误面（FR-057）。故返回
-    /// `Result`，调用方映射为 `fontUnavailable` 能力错误。
+    /// 进来的合法 OpenType）。但把它做成 panic 会终止进程（S3 起 release 是
+    /// `panic = "unwind"`，外壳会兜住它——那正是不该依赖它的理由：panic 是
+    /// 缺陷信号，不该当流程控制用）。故返回 `Result`，调用方映射为
+    /// `fontUnavailable` 能力错误。
     pub fn new() -> Result<Self, crate::font_setup::FontSetupError> {
         let (font_system, _embedded_id) =
             crate::font_setup::build_embedded_first_font_system(std::iter::empty())?;
@@ -601,7 +602,7 @@ impl LayoutEngine {
 impl Default for LayoutEngine {
     /// 默认构造走 [`Self::new`]，失败时**降级**为只有系统字体的栈。
     ///
-    /// `Default` 的签名不允许失败，而 `panic = "abort"` 下 panic 会终止进程
+    /// `Default` 的签名不允许失败，而 panic 会终止进程
     /// （AGENTS.md 安全红线：生产路径不得 panic）。故失败时走
     /// [`Self::with_system_fonts_only`]：排版仍然可运行，代价是度量不再由
     /// 内嵌字体决定。生产路径**不应**依赖 `Default`——它只为测试与诊断入口

@@ -39,6 +39,13 @@
 | `contracts/seams.md` §2（**本轮增补**，裁决 OQ#13→A） | `ChapterContent` 增 `images: Vec<ImageRef>`（含字符位置 / 缓存键 / alt 文本）——图片抓取与缓存仍在 seam 下游，但**清单与位置随正文一起交给上层** | S2 据此做图文混排（FR-036） |
 | `Cargo.toml` | `[profile.release] panic = "abort"`——**无法 `catch_unwind`** | 排版/渲染管线中不得依赖"捕获 panic 后继续"作为错误处理手段 |
 
+> **后续变动（2026-10-11，S3 T003）**：`[profile.release] panic` 已由 `"abort"`
+> 改为 **`"unwind"`**（S3 spec 的边缘情况要求外壳兜底引擎 panic；abort 下
+> `catch_unwind` 在 release 不可能）。本行记录的是 S2 定稿时的**当时事实**，
+> 不改写；那条约束的**语义**不变且更需要遵守——unwind 可用之后"靠 panic 传播
+> 当错误处理"重新变得可能，本层仍然结构上不给这条路（见
+> `crates/tome-reader/src/error.rs` 的模块文档）。
+
 **原契约缺口已闭合（裁决 OQ#13→A）**：草案曾指出 `ChapterContent` 不携带图片、S2 无从取得图片句柄，故图文混排不可实现。该缺口已由 PM 增补 `contracts/seams.md` §2 闭合。
 
 > **待办提示（非本规格需求）**：定稿时核对，本 worktree 的 `feature/s2-spec`（基于 `8362cff`）与其可见的 `main`/`feature/p7-local-books` 中，`contracts/seams.md` 尚未出现 `ImageRef`。S2 规格作者按边界纪律不得改动 001 文件，故此处按裁决结果记录契约内容。**该增补需由 PM 在 001 侧落盘**，否则 FR-036 在实现阶段缺前置。

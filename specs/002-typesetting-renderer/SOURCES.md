@@ -42,7 +42,7 @@
 | 阅读记录的两个量（秒数/字符数）由阅读层产生、数据层不依赖界面 | **[共识]** 001/spec §FR-026b；**[代码]** `crates/tome-core/src/model/trace.rs` 的 `ReadRecord`、`crates/tome-store/src/dao/trace.rs::add_read_record` |
 | **`Theme` 纯值类型定义在 `tome-core`，昼/夜实例由组合根注入** | **[裁决]** OQ#11→D（PM，2026-10-10）。理由：`tome-core` 已承载 `Book`/`Chapter`/`ErrorKind` 等纯值对象，"零图形依赖"不排斥无 wgpu 类型的值类型；放 `tome-reader` 会迫使 `tome-app` 依赖 S2（违反 AGENTS §架构铁律） |
 | **`ChapterContent.images: Vec<ImageRef>`（含字符位置/缓存键/alt）** | **[裁决]** OQ#13→A（PM，2026-10-10）；落点 `001/contracts/seams.md` §2。**原始缺口**：草案查明 `ChapterContent` 无图片字段而图片抓取/缓存在 seam 下游（**[代码]** `crates/tome-source/src/image.rs::chapter_images` 需调用方传入章节 HTML）→ S2 无从取得句柄，FR-049 不可实现 |
-| `panic = "abort"` ⇒ 不能靠 `catch_unwind` 兜错 | **[代码]** 根 `Cargo.toml` 的 `[profile.release]` |
+| `panic = "abort"` ⇒ 不能靠 `catch_unwind` 兜错 | **[代码]** 根 `Cargo.toml` 的 `[profile.release]`（**2026-10-11 S3 T003 起为 `"unwind"`**；本行是 S2 定稿时的当时事实，见 002 spec.md 同处的后续变动注） |
 | 书源脚本拿不到排版参数（宿主未提供 `appConfig`/`readConfig`） | **[代码]** `crates/tome-js/src/api/state.rs` 注册的全部宿主函数（`cachePut/cacheGet/readFile/writeFile/getCookie/setCookie/importScript` + 上下文对象），无配置类入口 |
 
 ---

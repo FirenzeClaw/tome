@@ -309,7 +309,7 @@ impl FontRegistry {
 ///
 /// 加载失败（内嵌字体不可用）时返回 `None`——那是**不应发生**的状态
 /// （字节是编译期嵌进去的），但返回值让调用方能走 `FontUnavailable`
-/// 能力错误而不是 panic（`panic = "abort"` 下 panic 会终止进程）。
+/// 能力错误而不是 panic（AGENTS.md 安全红线：生产路径不得 panic）。
 #[must_use]
 pub fn shared_registry() -> Option<&'static std::sync::Mutex<FontRegistry>> {
     static REGISTRY: OnceLock<Option<std::sync::Mutex<FontRegistry>>> = OnceLock::new();

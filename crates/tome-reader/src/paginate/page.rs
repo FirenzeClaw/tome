@@ -477,8 +477,7 @@ impl Paginator {
     ///
     /// 内嵌字节不可解析意味着构建产物被破坏。此时走
     /// [`LayoutEngine::with_system_fonts_only`] 让排版**仍然可运行**（度量
-    /// 不再由内嵌字体决定），而不是 panic 终止进程——`panic = "abort"` 下
-    /// panic 即进程退出（AGENTS.md 安全红线）。调用方若在意 FR-050 的
+    /// 不再由内嵌字体决定），而不是 panic 终止进程（AGENTS.md 安全红线）。调用方若在意 FR-050 的
     /// 一致性保证，应当用 [`LayoutEngine::new`] 的 `Result` 自行判定；
     /// 本类型是"排版必须给出结果"的那条路径。
     #[must_use]

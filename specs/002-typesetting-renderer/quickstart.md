@@ -194,25 +194,36 @@ target/debug/tome-cli layout --text <file>                    # 0
 反过来，**短路不扩大**：拼错的子命令仍是用法错误（退出码 2）——2 与 3 是不同信号
 （你写错了 / 本产品没有这项能力）。
 
-**另一条不变量：能力错误不依赖装配成功。** 短路发生在**任何 IO 之前**，故退出码
-只由"渲染面在不在"决定，与数据目录能不能写无关。可确定性地验证（不靠运气）：
+**另一条不变量：能力错误不经装配。** 该命令在本次构建中不存在，判定在**编译期**
+成立，故报告它不该依赖任何运行期条件——与数据目录能不能写无关。验证方式必须堵
+**默认数据目录**（而不是 `--data-dir`，见下方"为什么不能那样验"）：
 
 ```bash
-# --data-dir 指向一个已存在的普通文件 → 装配必然失败
+# 把三平台各自的默认数据目录落点堵死（指向一个已存在的普通文件）
 : > /tmp/not-a-dir
-target/debug/tome-cli --data-dir /tmp/not-a-dir render   # 仍是 3 + 能力标识
-target/debug/tome-cli --data-dir /tmp/not-a-dir fonts    # 仍是 3 + 能力标识
-target/debug/tome-cli --data-dir /tmp/not-a-dir layout   # 1 + error.storage: <原因>；<指引>
+export APPDATA=/tmp/not-a-dir HOME=/tmp/not-a-dir XDG_DATA_HOME=/tmp/not-a-dir
+
+target/debug/tome-cli render    # 3 + [capability: offscreenRendering]（不经装配）
+target/debug/tome-cli fonts     # 3 + [capability: offscreenRendering]（不经装配）
+target/debug/tome-cli layout    # 1 + error.storage: <原因>；<指引>（前提自检：真的装配了）
 ```
 
-第三条同时演示**装配失败的诊断细节**：`ClassifiedError` 的 Display 是
-`error.storage: <原因>；<指引>`——标识前缀不变（仍在），细节在后（此前被
-`.kind()` 丢掉，用户只看到裸 `error.storage`，无从定位）。
+第三条是**前提自检**：它必须失败，否则说明阻断没生效、前两条断言不可信。
+
+> **为什么不能用 `--data-dir <坏路径>` 来验**（首版就这么验的，被骗过去了）：
+> 假短路的实现会**丢掉用户的全局选项**去伪造命令，装配转而打**默认**数据目录
+> ——本机/CI 上那个目录可用，于是照样退 3、断言通过，而 IO 其实照常发生。
+> 用一个被丢弃的选项做断言，等于没断言。堵默认落点则无法绕开。
+> CI 的 `headless` job 用同一方式断言（含前提自检）。
+
+**装配失败的诊断细节**：`ClassifiedError` 的 Display 是
+`error.storage: <原因>；<指引>`——标识前缀不变（便于日志检索），细节在后
+（此前被 `.kind()` 丢掉，用户只看到裸 `error.storage`，无从定位）。
 
 回归测试：`cargo test -p tome-cli --no-default-features --test render_headless_capability`
-（6 用例；矩阵覆盖「无参 / 缺必需项 / 非法取值 / 未知选项 / 合法」五种参数形态，
-外加「装配必然失败时仍退 3」与「装配失败带诊断细节」两条）。CI 的 `headless` job
-对真实二进制断言同一矩阵。
+（8 用例；矩阵覆盖「无参 / 缺必需项 / 非法取值 / 未知选项 / 合法」五种参数形态，
+外加「默认数据目录被阻断时仍退 3」「短路判据不依赖被丢弃的 `--data-dir`」
+「`dispatch` 的能力不可用分支自己不装配」「装配失败带诊断细节」）。
 
 ---
 

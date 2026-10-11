@@ -289,6 +289,13 @@
     - C2 诊断可见性：`AppRoot::assemble`/`assemble_with` 由 `Result<_, ErrorKind>` 改为 `Result<_, ClassifiedError>`，`StoreError::to_classified()` 保留细节；`main.rs` 打印 `error.storage: <原因>；<指引>`（标识前缀不变，`error_contract.rs` 断言语义不受影响——已实测 9/9 通过）。类型系统现**结构性阻止**再次丢细节（旧 `.kind().clone()` 已无法编译）。
     - 稳定性证据：修复后 `render_headless_capability` **连跑 20 轮全绿**；`layout_cli`/`render_cli`/`verify_layout_cli`/`theme_injection_cli` 全绿（28/12/12/2）。
     - 另记录不处理（PM 已立项）：`scroll_memory.rs:296` 既有 flaky、`chapter-by-bookshelf` 标识未登记入 `contracts/cli.md`。
+  - **PM 三次打回：假短路（2026-10-11）**：
+    - 症状：CI headless job（ubuntu）上 `render_在_headless_构建下无论参数如何都退_3` 与 `前置全局选项不影响_headless_短路` 双双失败，stderr 为 `error.storage: error.storage.sqlite reason=database is locked`。
+    - 根因：`parse` 的"短路"伪造 `ParseOutcome::Run { options: GlobalOptions::default() }`，**丢掉用户的全局选项**；`main` 对 `Run` 无条件 `AppRoot::assemble`——装配照常发生且打**默认**数据目录，CI 上并行测试进程撞进同一个默认库 → SQLite 锁 → 退 1。故 flags.rs 里"提到任何 IO 之前"的注释是**假话**，PM 两次的"决定性验证"（`--data-dir` 指向坏路径仍退 3）也被它骗过：选项被丢弃，装配打的是可用的默认目录。
+    - 修复：新增 `ParseOutcome::CapabilityUnavailable { capability, command }`（`flags.rs:466` 变体定义，`flags.rs:565` 产出）；`main.rs:59` 的 `dispatch` 对该变体**直接** stderr 能力错误 + 退 3，不经 `execute`、不建组合根。不再有 `GlobalOptions::default()` 伪造物。
+    - 防再造测试（`render_headless_capability.rs`，共 8 用例）：① `渲染面命令的能力错误不依赖装配成功`——堵 `APPDATA`/`HOME`/`XDG_DATA_HOME`（默认数据目录落点）而非 `--data-dir`，并先自检 `layout` 确实失败；② `短路判据不依赖被丢弃的_data_dir_选项`——同时传可用 `--data-dir`，覆盖"选项被丢弃"与"选项被使用"两种错误实现；③ `dispatch_的能力不可用分支自己不装配`——源码结构断言（剥注释后扫 `execute`/`assemble`）。**实测：还原假短路后 ②③ 变红，而旧的两条断言仍绿**——正是当初逃逸的原因。
+    - CI：`ci.yml` 的同一段断言同步改为堵默认数据目录 + `layout` 前提自检。**实测：还原假短路后该段能以 exit 1 + `error.storage` 正确捕获。**
+    - 教训（已记入测试与 CI 注释）：**验收要验机理不验结果**——首版验证用了一个会被丢弃的选项做断言，等于没断言。
 
 ---
 

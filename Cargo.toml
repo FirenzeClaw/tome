@@ -32,7 +32,18 @@ tome-rule = { path = "crates/tome-rule" }
 tome-source = { path = "crates/tome-source" }
 tome-local = { path = "crates/tome-local" }
 tome-reader = { path = "crates/tome-reader", default-features = false }
-tome-cli = { path = "crates/tome-cli" }
+# `default-features = false`：tome-cli 的 `default = ["reader-render"]` 会经
+# 转发打开 `tome-reader/render`（连 wgpu 一起）。**任何** workspace 表引用它
+# 的地方都会连带拉进图形栈——2026-10-11 S3 T005 实测：tome-app 为复用 CLI 的
+# PNG 编码器加了一条 dev-dependency，于是 `cargo test --workspace
+# --no-default-features`（本应是"编译期无图形栈"的门）悄悄把 wgpu 装回了
+# 依赖树，而那门**照样全绿**（测试数从 606 涨回 750，看起来只是"多跑了些
+# 测试"）。
+#
+# 故此处关掉默认 feature，需要渲染面的消费者显式转发（tome-cli 自己作为
+# primary package 构建时仍用自己的 default——`cargo build -p tome-cli` 不受
+# 本行影响）。
+tome-cli = { path = "crates/tome-cli", default-features = false }
 # S3 应用外壳（第二个组合根）。注意它依赖的 `tome-reader` 同样经上面那条
 # `default-features = false` 生效——`render` 面须由 tome-app 自己的
 # `reader-render` feature 显式转发开启（成员使用点写 `default-features`

@@ -379,6 +379,71 @@ fn tome_reader_只依赖_core() {
     );
 }
 
+/// 会经 `default` 拉进图形栈的 workspace 表条目必须 `default-features = false`。
+///
+/// # 这条守的是什么（S3 T005 实测抓到的静默失效）
+///
+/// `tome-reader` 的 `default = ["render"]` 与 `tome-cli` 的
+/// `default = ["reader-render"]` 都会（直接或转发）打开 `tome-reader/render`
+/// ——连 wgpu 一起。而 **workspace 表里的引用方**若用默认 feature 引用它们，
+/// 图形栈就会被拉进任何依赖它的构建。
+///
+/// 2026-10-11 S3 T005 踩到的具体形态：`tome-app` 为复用 CLI 的 PNG 编码器
+/// 加了一条 dev-dependency（`tome-cli = { workspace = true }`），于是
+/// `cargo test --workspace --no-default-features`——本应是"渲染面在编译期
+/// 不存在"的那道门——**悄悄把 render 面装了回去**。
+///
+/// 它的可怕之处是**全绿**：测试总数从 3049 涨回 3197，看起来只是"多跑了些
+/// 测试"，没有任何东西变红。若不是逐项对数，这道门会一直以为自己还在守。
+///
+/// 故此处直接断言**机制**（表里必须写着 `default-features = false`），
+/// 而不是断言某个可观测后果——后果可能被别处的 feature 并集掩盖。
+#[test]
+fn graphics_pulling_workspace_entries_disable_default_features() {
+    let manifest = repo_root().join("Cargo.toml");
+    let text = std::fs::read_to_string(&manifest)
+        .unwrap_or_else(|error| panic!("应能读 {}：{error}", manifest.display()));
+
+    // 会经 default 打开 tome-reader/render 的 crate
+    let graphics_pulling = ["tome-reader", "tome-cli"];
+
+    let mut in_workspace_deps = false;
+    let mut checked: Vec<String> = Vec::new();
+    let mut violations: Vec<String> = Vec::new();
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_workspace_deps = trimmed == "[workspace.dependencies]";
+            continue;
+        }
+        if !in_workspace_deps || trimmed.starts_with('#') || trimmed.is_empty() {
+            continue;
+        }
+        let Some((key, value)) = trimmed.split_once('=') else {
+            continue;
+        };
+        let name = key.trim();
+        if !graphics_pulling.contains(&name) {
+            continue;
+        }
+        checked.push(name.to_owned());
+        if !value.contains("default-features = false") {
+            violations.push(format!("{name} = {value}"));
+        }
+    }
+
+    assert_eq!(
+        checked.len(),
+        graphics_pulling.len(),
+        "应在 workspace 表里找到 {graphics_pulling:?} 两条（实测 {checked:?}）——         若某条被移走，本断言会红，提示这里该同步更新"
+    );
+    assert!(
+        violations.is_empty(),
+        "下列 workspace 表条目会经 default 把图形栈拉进依赖树（S3 T005 实测的         静默失效形态：headless 门照样全绿但 render 面已装回）：{violations:?}"
+    );
+}
+
 /// 依赖 `tome-reader` 的 crate **必须**登记为组合根（S3 T002）。
 ///
 /// # 这条补的是什么漏洞

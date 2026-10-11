@@ -39,8 +39,14 @@ use std::process::Command;
 
 /// 跑一次 CLI，返回 `(退出码, stdout, stderr)`。
 fn run_cli(args: &[&str]) -> (i32, String, String) {
+    // 独立 `--data-dir`：不传时并行的 tome-cli 子进程共享默认可移植
+    // 数据目录（exe 同级 data/），CI 时序下并发打开同一 SQLite 库会报
+    // `error.storage`（与 layout_cli.rs / render_cli.rs 同一约定）。
+    let data_dir = tempfile::tempdir().expect("临时数据目录");
     let binary = env!("CARGO_BIN_EXE_tome-cli");
     let output = Command::new(binary)
+        .arg("--data-dir")
+        .arg(data_dir.path())
         .args(args)
         .output()
         .expect("应能启动 tome-cli");
@@ -361,21 +367,19 @@ fn human_format_is_a_summary() {
 /// "完全离线"对需要发请求的命令无意义），而 `verify-layout` 压根不该走网络
 /// 路径。用更直接的两条：
 ///
-/// 1. **指定一个孤立的数据目录**仍能跑通（不依赖任何网络配置/缓存）
+/// 1. **孤立的数据目录**仍能跑通（不依赖任何网络配置/缓存）——`run_cli`
+///    已内置每次调用一个独立临时 `--data-dir`，天然满足
 /// 2. **源码层面不引用网络**（`reader_commands.rs` 的 verify-layout 路径
 ///    不出现 `NetHost` / `reqwest` —— 结构性证据，比运行时观测更稳）
 #[test]
 fn does_not_touch_the_network() {
     let dir = tempfile::tempdir().expect("临时目录");
     let corpus = write_passing_corpus(dir.path());
-    let isolated_data = dir.path().join("data");
 
     let (code, _, stderr) = run_cli(&[
         "verify-layout",
         "--corpus",
         corpus.to_str().unwrap(),
-        "--data-dir",
-        isolated_data.to_str().unwrap(),
         "--format",
         "json",
     ]);

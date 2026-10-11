@@ -27,6 +27,18 @@
 //! stderr 上的能力标识）。那是 CI headless job 直接断言的东西，也是脚本
 //! 消费的东西——只测库内 `parse()` 会漏掉 `main` 的退出码映射那一层。
 //!
+//! # 两条裁决，各自都有"当初怎么逃掉的"记录
+//!
+//! 1. **能力缺失压过用法错误**：参数校验散在选项循环、子命令分支、循环兜底
+//!    三处，任一处先触发就把退出码变成 2。故用参数形态**矩阵**锁住
+//!    （当初只断言了无参形态，而它在三种形态里只覆盖了一种）。
+//! 2. **能力错误不经装配**：首版短路伪造 `Run` 并丢弃用户的全局选项，
+//!    装配照常发生。当初的验证用 `--data-dir` 构造"坏数据目录"——那个选项
+//!    被丢弃，装配实际打的是默认目录（本机可用），于是看起来全对。
+//!    **用一个被丢弃的选项做断言，测了个寂寞。** 故现在的断言改成阻断
+//!    **默认**数据目录（`APPDATA`/`HOME`/`XDG_DATA_HOME`），并在注释里
+//!    写明这次验的是机理而非结果。
+//!
 //! # 门控：整个文件在 `reader-render` **开**时为空
 //!
 //! feature 开启时这两条命令**存在**，正确行为是用法错误退 2（由
@@ -62,6 +74,49 @@ fn run_cli_with_data_dir(args: &[&str], data_dir: &std::path::Path) -> (i32, Str
         .arg("--data-dir")
         .arg(data_dir)
         .args(args)
+        .output()
+        .expect("应能启动 tome-cli");
+    (
+        output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+/// 在**系统数据目录被阻断**的环境下跑一次，返回 `(退出码, stdout, stderr)`。
+///
+/// # 为什么阻断"系统数据目录"而不是"`--data-dir`"
+///
+/// 首版短路的破绽正在这里：它伪造 `Run { options: GlobalOptions::default() }`，
+/// **把用户给的 `--data-dir` 丢掉了**，于是装配打的是**默认（系统）数据目录**。
+/// 本机上那个目录可用，测试就通过了——用一个被丢弃的选项做断言，测了个寂寞。
+///
+/// 故本函数不用 `--data-dir`，而是把"默认数据目录"这个落点本身堵死：把
+/// 平台对应的环境变量指向一个**已存在的普通文件**，`create_dir_all` 必失败。
+/// 于是只要进程真的去装配，就必然报 `error.storage`——把"不经装配"从注释
+/// 承诺变成可证伪的断言。
+///
+/// 三个变量分别对应三平台（见 `tome_store::datadir::system_data_dir`）：
+///
+/// | 变量 | 平台 | 默认落点 |
+/// |---|---|---|
+/// | `APPDATA` | Windows | `%APPDATA%\tome` |
+/// | `HOME` | macOS | `$HOME/Library/Application Support/tome` |
+/// | `XDG_DATA_HOME`（优先）/ `HOME` | Linux | `$XDG_DATA_HOME/tome` 或 `~/.local/share/tome` |
+///
+/// 三个都设成阻断路径，故三平台都成立。
+fn run_cli_with_blocked_system_data_dir(args: &[&str]) -> (i32, String, String) {
+    let binary = env!("CARGO_BIN_EXE_tome-cli");
+    let dir = tempfile::tempdir().expect("临时目录");
+    // 一个**普通文件**——任何 `create_dir_all` 到它下面的尝试都必失败。
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, b"not a directory").expect("应能写");
+
+    let output = Command::new(binary)
+        .args(args)
+        .env("APPDATA", &blocker)
+        .env("HOME", &blocker)
+        .env("XDG_DATA_HOME", &blocker)
         .output()
         .expect("应能启动 tome-cli");
     (
@@ -219,16 +274,12 @@ fn 无关命令的用法错误不受短路影响() {
 /// 证明"坏数据目录"这个前提真的生效了，测试没有空跑。
 #[test]
 fn 渲染面命令的能力错误不依赖装配成功() {
-    let dir = tempfile::tempdir().expect("临时目录");
-    // 数据目录位置放一个**文件**——装配时 create_dir_all 必失败。
-    let blocker = dir.path().join("blocker");
-    std::fs::write(&blocker, b"not a directory").expect("应能写");
-
-    // 前提自检：坏数据目录下 `layout` 确实装配失败（否则本测试没测到东西）。
-    let (layout_code, _stdout, layout_stderr) = run_cli_with_data_dir(&["layout"], &blocker);
+    // 前提自检：**系统数据目录被阻断**时 `layout`（真的要走装配）确实失败。
+    // 这一步让"阻断生效"这件事本身可证伪——否则下面可能只是测了个没生效的环境。
+    let (layout_code, _stdout, layout_stderr) = run_cli_with_blocked_system_data_dir(&["layout"]);
     assert_eq!(
         layout_code, 1,
-        "坏数据目录下 layout 应装配失败退 1（本测试的前提）；stderr：{layout_stderr}"
+        "系统数据目录被阻断时 layout 应装配失败退 1（本测试的前提）；stderr：{layout_stderr}"
     );
     assert!(
         layout_stderr.contains("error.storage"),
@@ -238,7 +289,7 @@ fn 渲染面命令的能力错误不依赖装配成功() {
     // 正题：渲染面两命令在**装配必然失败**的前提下仍退 3 + 能力标识，
     // 即它们的错误路径根本不经过装配。
     for subcommand in ["render", "fonts"] {
-        let (code, _stdout, stderr) = run_cli_with_data_dir(&[subcommand], &blocker);
+        let (code, _stdout, stderr) = run_cli_with_blocked_system_data_dir(&[subcommand]);
         assert_eq!(
             code, 3,
             "{subcommand} 的能力错误不该依赖装配是否成功（应退 3）；stderr：{stderr}"
@@ -252,6 +303,129 @@ fn 渲染面命令的能力错误不依赖装配成功() {
             "{subcommand} 不该报存储错误——那说明它走了装配路径；stderr：{stderr}"
         );
     }
+}
+
+/// 防再造：短路的判据必须是**默认数据目录**，而不是用户给的 `--data-dir`。
+///
+/// # 这条防的是首版短路的原始破绽（PM 二次打回）
+///
+/// 首版短路返回 `Run { options: GlobalOptions::default() }`，**丢掉用户的全局
+/// 选项**，装配于是打默认数据目录。当时的"决定性验证"用 `--data-dir` 指向
+/// 坏路径——那个选项被丢掉了，装配仍打默认目录（本机可用），于是退 3，
+/// 看起来全对。**用一个被丢弃的选项做断言，测了个寂寞。**
+///
+/// 本测试反过来：**不传** `--data-dir`，改把默认数据目录的落点堵死。
+/// 若实现回退成"伪造 Run + 丢弃选项"，装配必然撞上阻断路径而报
+/// `error.storage` → 本测试变红。
+///
+/// # 为什么带一个会被丢弃的 `--data-dir` 一起跑
+///
+/// 同时传 `--data-dir <可用临时目录>`：即便实现把选项捡回来用了，阻断的
+/// 是**默认**目录——但只要它真的不经装配，两者都不该被碰。这条同时覆盖
+/// "选项被丢弃"与"选项被使用"两种实现的错误形态。
+#[test]
+fn 短路判据不依赖被丢弃的_data_dir_选项() {
+    // 对照：先确认这个临时目录本身是**可用**的——否则下面的断言可能只是
+    // 因为目录坏，而不是因为"没装配"。
+    let usable = tempfile::tempdir().expect("临时数据目录");
+    let (ok_code, _stdout, _stderr) = run_cli_with_data_dir(&["layout", "--text"], usable.path());
+    assert_ne!(
+        ok_code, 3,
+        "对照：可用数据目录下 layout 不该退 3（否则本测试的前提不成立）"
+    );
+
+    // 正题：默认数据目录被阻断 + 同时给一个可用的 `--data-dir`。
+    let binary = env!("CARGO_BIN_EXE_tome-cli");
+    let dir = tempfile::tempdir().expect("临时目录");
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, b"not a directory").expect("应能写");
+
+    for subcommand in ["render", "fonts"] {
+        let output = Command::new(binary)
+            .arg("--data-dir")
+            .arg(usable.path())
+            .arg(subcommand)
+            .env("APPDATA", &blocker)
+            .env("HOME", &blocker)
+            .env("XDG_DATA_HOME", &blocker)
+            .output()
+            .expect("应能启动 tome-cli");
+        let code = output.status.code().unwrap_or(-1);
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        assert_eq!(
+            code, 3,
+            "{subcommand} 应退 3（不经装配，两个数据目录都不该被碰）；stderr：{stderr}"
+        );
+        assert!(
+            !stderr.contains("error.storage"),
+            "{subcommand} 报了存储错误 → 说明它装配了（默认目录被阻断或 --data-dir 被用上）；\
+             stderr：{stderr}"
+        );
+    }
+}
+
+/// 防再造（结构断言）：处理能力不可用的分支**自己**不装配、不调 `execute`。
+///
+/// # 为什么还要一条源码结构断言
+///
+/// 上面两条是行为断言，已足以覆盖三平台的真实形态。本条是**廉价的哨兵**：
+/// 行为测试要跑起子进程才能发现"又走了装配"，本断言在源码层面直接盯住
+/// 那个分支体——不需要任何平台条件，跑得也快。
+///
+/// # 为什么断言的是"分支体内不含装配"而不是"分支排在前面"
+///
+/// `Run` 与 `CapabilityUnavailable` 是**互斥的枚举变体**，match 的分支顺序
+/// 不可能造成误分派——断言顺序是在断言一件不存在的事（初版这么写，实测
+/// 直接失败）。真正要守的性质是：**处理能力不可用的那段代码里没有装配**。
+/// 故这里切出该变体名到下一个分支之间的源码，扫它有没有 `assemble`/`execute`。
+///
+/// 取舍：源码断言脆（改写法就可能失效），故它**不是**主要防线——主要防线
+/// 是上面的行为断言（阻断默认数据目录的那两条）。这里只当"更快、更直白的
+/// 第二道"。
+#[test]
+fn dispatch_的能力不可用分支自己不装配() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs"),
+    )
+    .expect("应能读 main.rs");
+
+    let arm_start = source
+        .find("ParseOutcome::CapabilityUnavailable")
+        .expect("main.rs 应显式处理 CapabilityUnavailable 分支");
+
+    // 切到**本分支的结尾**（`}` 收尾后紧跟 match 的闭合）。
+    // 不能切到"下一个 `ParseOutcome::`"——本变体是最后一个分支，那样会一路
+    // 吞到文件末尾，把后面的 `execute` 函数也算进来（初版踩到，实测误报）。
+    //
+    // 判据：从分支起点起，找第一个"顶格（缩进 0）的 `}`"——那是 match 语句
+    // 本身的闭合，即 dispatch 函数体的结束边界。
+    let arm_end = source[arm_start..]
+        .find("\n}")
+        .map(|offset| arm_start + offset + 1)
+        .unwrap_or(source.len());
+    let arm_body = &source[arm_start..arm_end];
+
+    // 先剥注释再扫：本分支的**注释里**本来就在讲"为什么不走 execute"，
+    // 直接扫原文会把说明文字当成代码（初版踩到，实测立刻误报）。
+    // 只扫代码行，注释行整行丢弃。
+    let code_only: String = arm_body
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        !code_only.contains("execute("),
+        "能力不可用分支不该调 execute（那会装配组合根）；代码：\n{code_only}"
+    );
+    assert!(
+        !code_only.contains("assemble"),
+        "能力不可用分支不该装配组合根；代码：\n{code_only}"
+    );
+    assert!(
+        code_only.contains('3'),
+        "该分支应以退出码 3 结束（不支持能力）；代码：\n{code_only}"
+    );
 }
 
 /// 装配失败时，stderr 必须带上**诊断细节**（T056 C2 的可观测面）。

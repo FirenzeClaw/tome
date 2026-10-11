@@ -441,6 +441,34 @@ pub enum ParseOutcome {
     Usage(String),
     /// 请求帮助（退出码 0）
     Help(String),
+    /// 该命令在**本次构建中不存在**（能力在编译期缺席，退出码 3）。
+    ///
+    /// # 为什么它是一个独立的解析结果，而不是伪造一个 `Run`
+    ///
+    /// headless 构建（`--no-default-features`）里渲染面在编译期消失，
+    /// 于是 `render` / `fonts` 这两个命令**根本不存在**——不是一个"会
+    /// 失败的命令"，而是"没有这个命令"。
+    ///
+    /// 首版实现让 `parse` 返回 `Run { command: Command::Render/Fonts,
+    /// options: GlobalOptions::default() }`，指望 `main` 走到 stub 去报能力
+    /// 错误。那是**假短路**，两处都错：
+    ///
+    /// 1. `dispatch` 对 `Run` 无条件调 `execute` → `AppRoot::assemble`，
+    ///    组装根照常装配、IO 照常发生。注释里"提到任何 IO 之前"是假话。
+    /// 2. 为凑出那个 `Command` 只能填 `GlobalOptions::default()`——用户给的
+    ///    `--data-dir` 等全局选项被**悄悄丢掉**，装配跑去打默认数据目录。
+    ///    本机上默认目录可用，于是看起来一切正常；CI 上多个测试进程撞进
+    ///    同一个默认库，才以 `database is locked` 现形。
+    ///
+    /// 独立变体让"命令不存在"成为解析器能表达的**一等结果**：`dispatch`
+    /// 直接报能力错误 + 退 3，不经 `execute`、不建组合根。连 options 都
+    /// 无从谈起——因为这次调用根本没走到需要它的地方。
+    CapabilityUnavailable {
+        /// 不可用能力的标识（如 `offscreenRendering`）
+        capability: String,
+        /// 命令名（用于诊断文案；如 `render`）
+        command: String,
+    },
 }
 
 /// 在 headless 构建里识别**渲染面**命令（`render` / `fonts`），供 `parse` 前置短路。
@@ -472,8 +500,14 @@ pub enum ParseOutcome {
 /// 只把 `render` 纳入短路时，`fonts` 仍走"组合根装配 → 分发 → 能力错误"的旧路。
 /// 那让它的退出码**取决于装配成不成**：装配成功才退 3，装配失败（如数据目录
 /// 写探测撞上杀软瞬时占用）就退 1 并报 `error.storage`。同一命令两种退出码、
-/// 取决于本机 IO 运气——那不是契约。纳入短路后，两者都在**任何 IO 之前**
-/// 返回，退出码只由"渲染面在不在"决定。
+/// 取决于本机 IO 运气——那不是契约。
+///
+/// ## 本函数只负责**识别**，不负责"不经装配"
+///
+/// 识别出子命令之后，返回的是 [`ParseOutcome::CapabilityUnavailable`]——
+/// "不经装配"这条保证由**那个变体 + `main::dispatch` 对它的处理**共同提供，
+/// 不由本函数提供。分开写清楚是因为首版把两件事混为一谈：它返回伪造的
+/// `Run`，于是"识别到了"和"不装配"脱节——识别对了，装配照做。
 ///
 /// 仅用于 `#[cfg(not(feature = "reader-render"))]` 分支，故在默认构建下
 /// 本函数不存在（`dead_code` 不触发）。
@@ -526,18 +560,17 @@ pub fn parse(args: &[String]) -> ParseOutcome {
     // `main` 的执行顺序是"装配组合根 → 分发命令"。只在分发点退 3（而不短路）
     // 会让退出码**取决于装配成不成**——`fonts` 曾正是如此：装配成功退 3，
     // 装配撞上数据目录写探测失败就退 1 并报 `error.storage`。同一命令两种
-    // 退出码、取决于本机 IO 运气，那不是契约。短路把两者都提到**任何 IO
-    // 之前**，退出码只由"渲染面在不在"决定。
+    // 退出码、取决于本机 IO 运气，那不是契约。
+    //
+    // 返回 [`ParseOutcome::CapabilityUnavailable`] 而非伪造 `Run`：后者会让
+    // `dispatch` 照常装配（IO 照常发生），且为凑出 `Command` 必须丢掉用户
+    // 的全局选项——那是**假短路**，注释里这句"早于 bootstrap"也就成了假话。
+    // 详见该变体的文档。
     #[cfg(not(feature = "reader-render"))]
     if let Some(subcommand) = headless_render_face_subcommand(args) {
-        let command = if subcommand == "render" {
-            Command::Render(Box::default())
-        } else {
-            Command::Fonts
-        };
-        return ParseOutcome::Run {
-            options: GlobalOptions::default(),
-            command,
+        return ParseOutcome::CapabilityUnavailable {
+            capability: tome_reader::capability::OFFSCREEN_RENDERING.to_string(),
+            command: subcommand.to_string(),
         };
     }
 

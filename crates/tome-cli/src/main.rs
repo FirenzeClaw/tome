@@ -56,6 +56,31 @@ fn dispatch(args: &[String]) -> i32 {
             2
         }
         ParseOutcome::Run { options, command } => execute(&options, &command),
+        ParseOutcome::CapabilityUnavailable {
+            capability,
+            command,
+        } => {
+            // 该命令在**本次构建中不存在**（能力在编译期缺席）。
+            //
+            // ## 为什么在这里直接返回，而不是走 `execute`
+            //
+            // `execute` 的第一步是装配组合根（读配置、建库、接线）。对一个
+            // 根本不存在的命令做那些事有两个害处：① 无谓的 IO 与启动开销；
+            // ② 一旦装配失败（数据目录不可写、库被锁），报出的会是
+            // `error.storage` 而不是"本命令不存在"——**错误指向了错误的方向**。
+            //
+            // 首版实现正是如此：`parse` 伪造了一个 `Run`，于是这里照常装配，
+            // 退出码取决于本机 IO 运气。渲染面的存在与否是**编译期**事实，
+            // 它的报告不该依赖任何运行期条件。
+            //
+            // 形态与 `Usage`/`Help` 同构：都是"解析阶段就能定论、不需要
+            // 组合根"的结果。
+            eprintln!(
+                "本构建不支持命令 `{command}`：能力 `{capability}` 在编译期缺席。\n\
+                 [capability: {capability}]"
+            );
+            3
+        }
     }
 }
 

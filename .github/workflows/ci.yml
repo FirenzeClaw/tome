@@ -590,30 +590,55 @@ jobs:
           fi
           echo "OK: 未知子命令仍是用法错误 2（短路未扩大）"
 
-          # 能力错误**不依赖装配成功**（T056 C1）。
+          # 能力错误**不经装配**（T056，PM 二次打回后重写本段）。
           #
-          # 首版修复只把 render 纳入短路，fonts 仍走「装配 → 分发 → 能力错误」，
-          # 于是它的退出码取决于装配成不成：装配撞上数据目录写探测失败（Windows
-          # 杀软对新建文件的瞬时占用，实测约 1/30）就退 1 + error.storage。
-          # 这里用「--data-dir 指向一个已存在的普通文件」确定性地制造装配失败
-          # ——不靠运气等杀软来复现。
+          # ## 为什么这里堵的是「默认数据目录」而不是 `--data-dir`
+          #
+          # 首版本段用 `--data-dir` 指向坏路径来构造"装配失败"。那个断言是
+          # **可被欺骗的**：假短路实现会丢掉 `--data-dir`，装配转而打默认
+          # 数据目录（CI 上可用），于是照样退 3、断言通过——而 IO 其实照常
+          # 发生。本文件当时就是这么放过了假短路。
+          #
+          # 故改为把**默认数据目录**的落点堵死：三平台的解析变量
+          # （`APPDATA` / `HOME` / `XDG_DATA_HOME`）一律指向一个**已存在的
+          # 普通文件**，`create_dir_all` 必失败。只要进程真的去装配，就必然
+          # 报 error.storage 而退 1——无法再用"选项被丢弃"绕过去。
+          #
+          # 另加前提自检：`layout`（真的要走装配）在该环境下**必须**失败。
+          # 否则本段可能只是"阻断没生效"而在空跑。
           blocker="$RUNNER_TEMP/not-a-dir"
           : > "$blocker"
+
+          set +e
+          APPDATA="$blocker" HOME="$blocker" XDG_DATA_HOME="$blocker" \
+            "$binary" layout --text "$RUNNER_TEMP/no-such-file.txt" \
+            > "headless-precheck.log" 2>&1
+          precheck_code=$?
+          set -e
+          if [ "$precheck_code" -ne 1 ]; then
+            echo "::error::前提自检失败：默认数据目录被阻断时 layout 应退 1，实测 $precheck_code"
+            echo "::error::阻断未生效，本段断言不可信"
+            cat "headless-precheck.log"
+            exit 1
+          fi
+          echo "前提自检 OK：阻断生效（layout 如预期装配失败退 1）"
+
           for sub in render fonts; do
             set +e
-            "$binary" --data-dir "$blocker" "$sub" 2>&1 | tee "headless-blocked.log"
+            APPDATA="$blocker" HOME="$blocker" XDG_DATA_HOME="$blocker" \
+              "$binary" "$sub" 2>&1 | tee "headless-blocked.log"
             code=${PIPESTATUS[0]}
             set -e
             if [ "$code" -ne 3 ]; then
               echo "::error::\`$sub\` 的能力错误不该依赖装配是否成功（应退 3），实测 $code"
-              echo "::error::若报 error.storage 则说明它走了装配路径——短路漏了它"
+              echo "::error::若报 error.storage 则说明它走了装配路径——短路是假的"
               exit 1
             fi
             grep -q 'offscreenRendering' "headless-blocked.log" || {
-              echo "::error::\`$sub\` 在装配失败时仍应携带 offscreenRendering 标识"
+              echo "::error::\`$sub\` 在装配必然失败时仍应携带 offscreenRendering 标识"
               exit 1
             }
-            echo "OK: \`$sub\` 在装配必然失败时仍退 3 + 能力标识（短路早于任何 IO）"
+            echo "OK: \`$sub\` 在默认数据目录被阻断时仍退 3 + 能力标识（不经装配）"
           done
 
       # SC-014：纯计算子命令在无图形环境下**照常可用**

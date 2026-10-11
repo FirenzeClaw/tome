@@ -39,6 +39,15 @@ fn run_cli(args: &[&str], data_dir: &Path) -> (i32, String, String) {
         }
         ParseOutcome::Usage(text) => (2, String::new(), text),
         ParseOutcome::Help(text) => (0, text, String::new()),
+        // 与 `main::dispatch` 同形态：命令在本次构建中不存在 → 退 3，**不经装配**。
+        ParseOutcome::CapabilityUnavailable {
+            capability,
+            command,
+        } => (
+            3,
+            String::new(),
+            format!("本构建不支持命令 `{command}`：能力 `{capability}` 在编译期缺席。"),
+        ),
     }
 }
 

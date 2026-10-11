@@ -216,7 +216,7 @@ impl FontRegistry {
             .into_iter()
             .next()
             .ok_or(FontLoadError::EmbeddedFontUnusable(
-                "load_font_source 未返回字体 ID",
+                "load_font_source returned no font id",
             ))?;
 
         Ok(Self {
@@ -355,7 +355,7 @@ pub enum FontLoadError {
     /// 这**不应发生**（字节是编译期 `include_bytes!` 进来的合法 OpenType），
     /// 故它是"构建产物被破坏"的信号——对外映射为 `fontUnavailable`
     /// 能力错误（FR-057：字体不可用要明确报告而非静默失败）。
-    #[error("内嵌字体子集不可用（{0}）")]
+    #[error("embedded font subset unavailable: {0}")]
     EmbeddedFontUnusable(&'static str),
 }
 

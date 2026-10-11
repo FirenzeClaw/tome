@@ -170,7 +170,7 @@ impl OffscreenRenderer {
             return Err(PipelineError::InvalidExtent {
                 width,
                 height,
-                detail: "宽高必须为正",
+                detail: "width/height must be positive",
             });
         }
         Ok(Self { width, height })
@@ -329,7 +329,7 @@ impl OffscreenRenderer {
             timeout: None,
         }) {
             return Err(PipelineError::Readback {
-                detail: format!("device.poll 失败：{error}"),
+                detail: format!("device.poll failed: {error}"),
             });
         }
 
@@ -337,12 +337,12 @@ impl OffscreenRenderer {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
                 return Err(PipelineError::Readback {
-                    detail: format!("map_async 失败：{error}"),
+                    detail: format!("map_async failed: {error}"),
                 });
             }
             Err(error) => {
                 return Err(PipelineError::Readback {
-                    detail: format!("map_async 回执未到达：{error}"),
+                    detail: format!("map_async callback not delivered: {error}"),
                 });
             }
         }
@@ -350,7 +350,7 @@ impl OffscreenRenderer {
         let mapped = slice
             .get_mapped_range()
             .map_err(|error| PipelineError::Readback {
-                detail: format!("get_mapped_range 失败：{error}"),
+                detail: format!("get_mapped_range failed: {error}"),
             })?;
         let (tight, _padding) =
             strip_row_padding(&mapped, self.width, bytes_per_pixel, bytes_per_row);
@@ -421,7 +421,7 @@ fn draw_glyphs(
     if packed.instance_count() == 0 {
         // 一个字形都没栅格化出来（字体栈异常）——如实报错而非静默出空白图
         return Err(PipelineError::Readback {
-            detail: "全部字形都取不到位图（字体栈异常）".to_owned(),
+            detail: "no glyph bitmap could be produced (font stack failure)".to_owned(),
         });
     }
 

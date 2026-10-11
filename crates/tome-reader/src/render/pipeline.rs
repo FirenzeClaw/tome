@@ -45,14 +45,25 @@ pub enum PipelineError {
     /// **这是"环境不支持"，不是"程序错了"**——故对外映射为能力错误而非
     /// 内部错误（FR-053："图形后端不可用时 MUST 明确报告不可用并允许测试
     /// 跳过，MUST NOT 伪装通过"）。
-    #[error("无可用图形后端（adapter）：{reason}")]
+    ///
+    /// ## 为什么 `#[error]` 的文案是**英文技术串**而非中文（FR-058 / T052 复审）
+    ///
+    /// FR-058 要求引擎"MUST NOT 硬编码面向用户的自然语言；文案映射留给上层"。
+    /// `#[error(...)]` 的产物实现 `Display`，会被上层拿去展示——故它落在
+    /// FR-058 的管辖内。此处给的是**开发者向的技术描述**（英文，非本地化文案），
+    /// 真正的用户文案由上层按 [`Self::capability`] 返回的能力标识映射。
+    ///
+    /// T052 的干净室/宪章复审发现本模块此前用中文 error 串且**未登记**在
+    /// `MESSAGE_BEARING_SOURCES`，扫描因此从未覆盖它——本表的"守卫形同虚设"
+    /// 失效形态。整改记录见 `specs/002-typesetting-renderer/checklists/cleanroom.md`。
+    #[error("no usable graphics adapter: {reason}")]
     NoAdapter {
-        /// 失败原因（**开发者向诊断**，不是面向用户的本地化文案）
+        /// 失败原因（**开发者向诊断**）
         reason: String,
     },
 
     /// 请求 device/queue 失败（有 adapter 但驱动拒绝）。
-    #[error("请求图形设备失败：{reason}")]
+    #[error("failed to request graphics device: {reason}")]
     DeviceRequest {
         /// 失败原因（**开发者向**）
         reason: String,
@@ -63,7 +74,7 @@ pub enum PipelineError {
     /// spec §Edge Cases："必须在接受前校验并拒绝……不得产生无法渲染的状态"。
     /// 零宽纹理在 wgpu 里是校验错误，但那时报的是 GPU 内部消息；本层在建
     /// 管线之前就拒绝，给出**指向参数**的诊断。
-    #[error("纹理尺寸非法：{width}×{height}（{detail}）")]
+    #[error("invalid texture extent: {width}x{height} ({detail})")]
     InvalidExtent {
         /// 请求宽
         width: u32,
@@ -74,7 +85,7 @@ pub enum PipelineError {
     },
 
     /// GPU 校验/映射失败（读回路径的运行期错误）。
-    #[error("离屏读回失败：{detail}")]
+    #[error("offscreen readback failed: {detail}")]
     Readback {
         /// 失败细节（**开发者向**）
         detail: String,
@@ -148,7 +159,7 @@ impl std::fmt::Display for GraphicsBackend {
             self.kind,
             self.adapter_name,
             if self.is_software {
-                ", 软件光栅"
+                ", software rasterizer"
             } else {
                 ""
             }
@@ -239,7 +250,7 @@ impl RenderPipeline {
             return Err(PipelineError::InvalidExtent {
                 width,
                 height,
-                detail: "宽高必须为正",
+                detail: "width/height must be positive",
             });
         }
 
@@ -264,7 +275,7 @@ impl RenderPipeline {
             return Err(PipelineError::InvalidExtent {
                 width,
                 height,
-                detail: "超出本机 max_texture_dimension_2d",
+                detail: "exceeds device max_texture_dimension_2d",
             });
         }
 
@@ -340,7 +351,9 @@ fn poll_once<F: std::future::Future>(future: F) -> Result<F::Output, String> {
     let mut context = Context::from_waker(waker);
     match future.as_mut().poll(&mut context) {
         Poll::Ready(output) => Ok(output),
-        Poll::Pending => Err("异步请求未在一次 poll 内就绪（该后端需要事件循环驱动）".to_owned()),
+        Poll::Pending => {
+            Err("async request not ready within one poll (backend needs event loop)".to_owned())
+        }
     }
 }
 
@@ -452,6 +465,6 @@ mod tests {
         };
         let rendered = software.to_string();
         assert!(rendered.contains("llvmpipe"));
-        assert!(rendered.contains("软件光栅"));
+        assert!(rendered.contains("software rasterizer"));
     }
 }

@@ -22,6 +22,22 @@ use std::path::{Path, PathBuf};
 
 /// 允许出现 CJK 字面量的例外（每条须注明理由）。
 ///
+/// ## 为什么允许"字体族名"与"覆盖度描述"
+///
+/// T052 的兜底复审把三个渲染模块补入 [`MESSAGE_BEARING_SOURCES`] 后，扫描
+/// 报出 18 处 CJK 字面量。其中 15 处是**真违规**（中文 `#[error]` 串与
+/// `format!` 诊断），已改为英文技术串（文案映射归上层，FR-058）。
+///
+/// 剩下 3 处是**非消息**，按本表准则不应受 FR-058 约束：
+///
+/// | 位置 | 内容 | 为什么不是消息 |
+/// |---|---|---|
+/// | `fonts.rs` `fallback_chain_for` | `"宋体"`, `"微软雅黑"` | **系统字体族名**——是数据（fontdb 据此查找），不是给人读的文案 |
+/// | `fonts.rs` `subset_coverage` | `"GB2312 6763 字 + …"` | **报告字段的数据值**（`tome fonts` 的技术描述），非错误消息 |
+/// | `pipeline.rs` `GraphicsBackend::Display` | （已改为英文 `", software rasterizer"`） | 原为诊断后缀，为一致性一并英文化 |
+///
+/// 白名单（键为行内片段，值为理由）。
+///
 /// ## 为什么允许"诊断细节"
 ///
 /// [`ReaderError`] 的 `detail` 字段是**开发者向**的（文档里写明"不是面向用户
@@ -72,9 +88,28 @@ use std::path::{Path, PathBuf};
 /// 本表是**白名单式的收窄**，其正确性依赖上面的维护规则被遵守。
 /// S2-6 的 T052（宪章复检）会对全部模块做一轮**全量审查**兜底——
 /// 届时若发现某模块漏登记，应补入本表而非放宽扫描。
-const MESSAGE_BEARING_SOURCES: &[&str] = &["src/error.rs", "src/corpus.rs"];
+const MESSAGE_BEARING_SOURCES: &[&str] = &[
+    "src/error.rs",
+    "src/corpus.rs",
+    // T052 兜底复审补入：以下三个渲染模块产出 `#[error(...)]` / `format!` 的
+    // 中文诊断串，属本表准则 1 与 2（实现 `Display`、字面量进错误消息）。
+    // 此前**漏登记**——扫描因此从未覆盖它们（本表文档警告的"守卫形同虚设"
+    // 失效形态）。补入后扫描立即报出违规，见 T052 的 cleanroom.md 记录。
+    "src/render/pipeline.rs",
+    "src/render/offscreen.rs",
+    "src/render/fonts.rs",
+];
 
-const ALLOWED_NON_MESSAGE_LITERALS: &[(&str, &str)] = &[];
+const ALLOWED_NON_MESSAGE_LITERALS: &[(&str, &str)] = &[
+    (
+        r#"Platform::Windows => vec!["宋体", "SimSun", "微软雅黑", "Microsoft YaHei"]"#,
+        "系统字体族名——fontdb 据此查找字体，是数据而非面向人的文案",
+    ),
+    (
+        r#"subset_coverage: "GB2312 6763 字 + 常用标点 + 基本西文""#,
+        "字体覆盖度的技术描述（报告字段值），非错误消息",
+    ),
+];
 
 /// 递归收集 `src/` 下的全部 `.rs` 文件。
 fn rust_sources(root: &Path, out: &mut Vec<PathBuf>) {
@@ -432,4 +467,95 @@ fn capability_identifiers_follow_source_ecosystem_style() {
     // 001 既有的能力标识同属该风格——本层新增的不得偏离。
     assert_eq!(capability::OFFSCREEN_RENDERING, "offscreenRendering");
     assert_eq!(capability::FONT_UNAVAILABLE, "fontUnavailable");
+}
+
+// ===========================================================================
+// 表完整性（T052 的整改：把文档约定变成机器检查）
+// ===========================================================================
+
+/// **任何产出错误消息的模块都必须在 `MESSAGE_BEARING_SOURCES` 里**。
+///
+/// ## 这条为什么必须存在（它是 T052 抓出的真实缺陷的防线）
+///
+/// `MESSAGE_BEARING_SOURCES` 是**白名单式的收窄**：扫描只覆盖表内文件。
+/// 它的正确性原本只依赖"新增错误模块时记得更新本表"这条**文档约定**——
+/// 而 T052 的兜底复审证明该约定不足以守住它：三个渲染模块
+/// （`pipeline.rs` / `offscreen.rs` / `fonts.rs`）产出中文 `#[error]` 串
+/// 却从未被登记，**扫描因此从未覆盖它们**（18 处违规静默存在）。
+///
+/// 这正是本表文档自己警告过的形态："漏登记的后果：该模块的错误消息不会被
+/// 本扫描覆盖，FR-058 在此处失守而无人察觉"。
+///
+/// ## 判据
+///
+/// 扫描**全部** `src/**/*.rs`，找出含 `#[error(` 属性的文件，断言它们都在
+/// `MESSAGE_BEARING_SOURCES` 里。`#[error(...)]` 是 `thiserror` 的错误消息
+/// 属性——它是"该模块产出错误消息"的**机器可判别**信号，比"记得更新表"可靠。
+///
+/// 排除 `#[cfg(test)]` 区间（测试的错误消息不进产物，与本扫描的其余部分一致）。
+#[test]
+fn every_module_with_error_messages_is_registered() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let src_root = manifest_dir.join("src");
+    let mut sources = Vec::new();
+    rust_sources(&src_root, &mut sources);
+
+    let mut unregistered = Vec::new();
+    for path in &sources {
+        let content = fs::read_to_string(path).unwrap_or_default();
+        let test_regions = compute_test_regions(&content);
+
+        // 该文件在**生产代码**里是否出现 `#[error(` 属性
+        let has_error_attr = content.lines().enumerate().any(|(index, line)| {
+            let in_test = test_regions.get(index).copied().unwrap_or(false);
+            !in_test && !line.trim_start().starts_with("//") && line.contains("#[error(")
+        });
+        if !has_error_attr {
+            continue;
+        }
+
+        let relative = path
+            .strip_prefix(&manifest_dir)
+            .unwrap_or(path)
+            .display()
+            .to_string()
+            .replace('\\', "/");
+        if !MESSAGE_BEARING_SOURCES
+            .iter()
+            .any(|scoped| relative.ends_with(scoped))
+        {
+            unregistered.push(relative);
+        }
+    }
+
+    assert!(
+        unregistered.is_empty(),
+        "以下模块在生产代码里产出 `#[error]` 消息，却**未登记**在 MESSAGE_BEARING_SOURCES：\n{}\n\
+         未登记 ⇒ 本扫描不覆盖它们 ⇒ FR-058 在此处失守而无人察觉（T052 抓出的真实缺陷形态）。\n\
+         处置：把它们补进 MESSAGE_BEARING_SOURCES。",
+        unregistered
+            .iter()
+            .map(|path| format!("  {path}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+
+    // 前提校验：本扫描必须**真的**找到了 `#[error]`（否则上面的空集是假绿）
+    let total_with_errors = sources
+        .iter()
+        .filter(|path| {
+            let content = fs::read_to_string(path).unwrap_or_default();
+            let regions = compute_test_regions(&content);
+            content.lines().enumerate().any(|(index, line)| {
+                !regions.get(index).copied().unwrap_or(false)
+                    && !line.trim_start().starts_with("//")
+                    && line.contains("#[error(")
+            })
+        })
+        .count();
+    assert!(
+        total_with_errors > 0,
+        "应至少有一个模块产出 `#[error]`（否则本判据没有分辨力）——\
+         若 `#[error]` 形态变了，本扫描需同步更新"
+    );
 }
